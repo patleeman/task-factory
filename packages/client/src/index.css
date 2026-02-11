@@ -39,6 +39,7 @@
   --phase-ready: var(--feature-blue);
   --phase-executing: var(--safety-orange);
   --phase-complete: var(--slate-500);
+  --phase-archived: var(--slate-300);
   
   /* Spacing */
   --header-height: 56px;
@@ -130,12 +131,17 @@ body {
   @apply bg-slate-200 text-slate-600;
 }
 
+.phase-badge-archived {
+  @apply bg-slate-100 text-slate-400;
+}
+
 /* Phase Dots */
 .phase-dot-backlog { background: var(--phase-backlog); }
 .phase-dot-planning { background: var(--phase-planning); }
 .phase-dot-ready { background: var(--phase-ready); }
 .phase-dot-executing { background: var(--phase-executing); }
 .phase-dot-complete { background: var(--phase-complete); }
+.phase-dot-archived { background: var(--phase-archived); }
 
 /* Priority Indicators */
 .priority-critical {
@@ -198,67 +204,60 @@ body {
   @apply sticky top-0 z-10 px-4 py-2 bg-slate-50 border-y border-slate-200;
 }
 
-/* Chat Bubbles */
-.chat-bubble {
-  @apply max-w-[85%] px-3.5 py-2.5 rounded-2xl;
+/* Active task separator — bottom-most task = currently being worked on */
+.task-separator--active {
+  @apply bg-orange-50 border-l-4 border-l-safety-orange;
 }
 
-.chat-bubble-user {
-  @apply bg-blue-500 text-white rounded-br-sm;
+/* Chat prose — markdown rendering in chat messages */
+.chat-prose {
+  @apply text-[14px] leading-relaxed;
 }
 
-.chat-bubble-agent {
-  @apply bg-slate-100 text-slate-800 rounded-bl-sm;
+.chat-prose p {
+  @apply mb-2 last:mb-0;
 }
 
-/* Markdown inside agent chat bubbles */
-.chat-markdown p {
-  @apply mb-1.5 last:mb-0;
+.chat-prose pre {
+  @apply bg-slate-100 rounded-lg p-3 my-2 overflow-x-auto text-xs font-mono text-slate-700 border border-slate-200;
 }
 
-.chat-markdown pre {
-  @apply bg-slate-200/60 rounded-lg p-2.5 my-2 overflow-x-auto text-xs;
+.chat-prose code {
+  @apply bg-slate-100 rounded px-1.5 py-0.5 text-xs font-mono text-slate-700;
 }
 
-.chat-markdown code {
-  @apply bg-slate-200/60 rounded px-1 py-0.5 text-xs font-mono;
-}
-
-.chat-markdown pre code {
+.chat-prose pre code {
   @apply bg-transparent p-0;
 }
 
-.chat-markdown ul, .chat-markdown ol {
-  @apply pl-4 mb-1.5 space-y-0.5;
+.chat-prose ul, .chat-prose ol {
+  @apply pl-5 mb-2 space-y-0.5;
 }
 
-.chat-markdown ul {
-  @apply list-disc;
+.chat-prose ul { @apply list-disc; }
+.chat-prose ol { @apply list-decimal; }
+
+.chat-prose a {
+  @apply text-blue-600 underline hover:text-blue-700;
 }
 
-.chat-markdown ol {
-  @apply list-decimal;
+.chat-prose h1, .chat-prose h2, .chat-prose h3 {
+  @apply font-semibold mb-2 text-slate-800;
 }
 
-.chat-markdown a {
-  @apply text-blue-600 underline;
+.chat-prose h1 { @apply text-lg; }
+.chat-prose h2 { @apply text-base; }
+
+.chat-prose blockquote {
+  @apply border-l-2 border-slate-300 pl-3 italic text-slate-500 my-2;
 }
 
-.chat-markdown h1, .chat-markdown h2, .chat-markdown h3 {
-  @apply font-semibold mb-1;
+.chat-prose strong {
+  @apply font-semibold text-slate-800;
 }
 
-.chat-markdown blockquote {
-  @apply border-l-2 border-slate-300 pl-3 italic text-slate-600 my-1.5;
-}
-
-/* Legacy compat */
-.chat-message-user {
-  @apply ml-auto bg-blue-500 text-white rounded-2xl rounded-tr-sm;
-}
-
-.chat-message-agent {
-  @apply mr-auto bg-slate-100 text-slate-800 rounded-2xl rounded-tl-sm;
+.chat-prose hr {
+  @apply border-slate-200 my-3;
 }
 
 /* Quality Gates */
@@ -381,6 +380,35 @@ body {
 .editor-fill .cm-editor .cm-scroller {
   flex: 1;
   min-height: 0;
+}
+
+/* Pipeline Bar */
+.pipeline-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--slate-300) transparent;
+}
+
+.pipeline-scroll::-webkit-scrollbar {
+  height: 4px;
+}
+
+.pipeline-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.pipeline-scroll::-webkit-scrollbar-thumb {
+  background: var(--slate-300);
+  border-radius: 2px;
+}
+
+/* Pipeline executing card glow */
+@keyframes pipeline-glow {
+  0%, 100% { box-shadow: 0 0 8px rgba(255, 107, 53, 0.2); }
+  50% { box-shadow: 0 0 16px rgba(255, 107, 53, 0.4); }
+}
+
+.pipeline-card-executing {
+  animation: pipeline-glow 2s ease-in-out infinite;
 }
 
 /* Loading States */

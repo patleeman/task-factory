@@ -12,7 +12,8 @@ export type Phase =
   | 'planning'
   | 'ready'
   | 'executing'
-  | 'complete';
+  | 'complete'
+  | 'archived';
 
 export const PHASES: Phase[] = [
   'backlog',
@@ -20,6 +21,7 @@ export const PHASES: Phase[] = [
   'ready',
   'executing',
   'complete',
+  'archived',
 ];
 
 export const PHASE_DISPLAY_NAMES: Record<Phase, string> = {
@@ -28,6 +30,7 @@ export const PHASE_DISPLAY_NAMES: Record<Phase, string> = {
   ready: 'Ready',
   executing: 'Executing',
   complete: 'Complete',
+  archived: 'Archived',
 };
 
 // WIP limits for each phase (null = unlimited)
@@ -37,29 +40,18 @@ export const DEFAULT_WIP_LIMITS: Record<Phase, number | null> = {
   ready: 5,
   executing: 1,
   complete: null,
+  archived: null,
 };
 
 // =============================================================================
-// Task Types
+// Model Configuration (per-task model selection)
 // =============================================================================
 
-export type TaskType = 'feature' | 'bug' | 'refactor' | 'research' | 'spike';
-
-export const TASK_TYPES: TaskType[] = [
-  'feature',
-  'bug',
-  'refactor',
-  'research',
-  'spike',
-];
-
-export type Priority = 'critical' | 'high' | 'medium' | 'low';
-
-export const PRIORITIES: Priority[] = ['critical', 'high', 'medium', 'low'];
-
-export type Complexity = 'low' | 'medium' | 'high';
-
-export const COMPLEXITIES: Complexity[] = ['low', 'medium', 'high'];
+export interface ModelConfig {
+  provider: string;
+  modelId: string;
+  thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+}
 
 // =============================================================================
 // Task Frontmatter (YAML header in markdown files)
@@ -72,8 +64,6 @@ export interface TaskFrontmatter {
 
   // Status
   phase: Phase;
-  type: TaskType;
-  priority: Priority;
 
   // Timestamps
   created: string; // ISO 8601
@@ -95,19 +85,32 @@ export interface TaskFrontmatter {
   // Planning
   acceptanceCriteria: string[];
   testingInstructions: string[];
-  estimatedEffort?: string; // e.g., "4h", "2d"
-  complexity?: Complexity;
 
   // Execution
   branch?: string;
   commits: string[];
   prUrl?: string;
 
+  // Ordering (position within a column; lower = closer to top)
+  order: number;
+
   // Quality gates
   qualityChecks: QualityChecks;
 
+  // Post-execution skills (run after main agent execution)
+  postExecutionSkills?: string[];
+
+  // Model configuration (per-task model selection)
+  modelConfig?: ModelConfig;
+
   // Plan (generated during planning phase)
   plan?: TaskPlan;
+
+  // Attachments (images, files)
+  attachments: Attachment[];
+
+  // Agent session file (for resuming conversation on re-execution)
+  sessionFile?: string;
 
   // Blocker tracking
   blocked: BlockedState;
@@ -179,7 +182,6 @@ export interface TaskSeparatorEntry {
   id: string;
   taskId: string;
   taskTitle: string;
-  taskType: TaskType;
   phase: Phase;
   timestamp: string; // ISO 8601 - when agent started on this task
   agentId?: string;
@@ -242,6 +244,11 @@ export interface WorkspaceConfig {
     onTestsPass?: boolean;
     onReviewDone?: boolean;
   };
+
+  // Queue processing (auto-pull from ready queue)
+  queueProcessing?: {
+    enabled: boolean;
+  };
 }
 
 // =============================================================================
@@ -302,7 +309,9 @@ export interface MetricSummary {
 export interface CreateTaskRequest {
   title?: string; // Auto-generated if not provided
   content: string; // Task description
-  acceptanceCriteria: string[];
+  acceptanceCriteria?: string[]; // Auto-generated if not provided
+  postExecutionSkills?: string[];
+  modelConfig?: ModelConfig;
 }
 
 export interface UpdateTaskRequest {
@@ -314,11 +323,18 @@ export interface UpdateTaskRequest {
   qualityChecks?: Partial<QualityChecks>;
   plan?: TaskPlan;
   blocked?: Partial<BlockedState>;
+  postExecutionSkills?: string[];
+  modelConfig?: ModelConfig;
 }
 
 export interface MoveTaskRequest {
   toPhase: Phase;
   reason?: string;
+}
+
+export interface ReorderTasksRequest {
+  phase: Phase;
+  taskIds: string[]; // ordered list — index 0 = top of column
 }
 
 export interface ClaimTaskRequest {
@@ -333,6 +349,7 @@ export type ServerEvent =
   | { type: 'task:created'; task: Task }
   | { type: 'task:updated'; task: Task; changes: Partial<Task> }
   | { type: 'task:moved'; task: Task; from: Phase; to: Phase }
+  | { type: 'task:reordered'; phase: Phase; taskIds: string[] }
   | { type: 'task:claimed'; task: Task; agent: Agent }
   | { type: 'activity:entry'; entry: ActivityEntry }
   | { type: 'agent:status'; agent: Agent }
@@ -349,9 +366,10 @@ export type ServerEvent =
   | { type: 'agent:tool_end'; taskId: string; toolCallId: string; toolName: string; isError: boolean; result?: string }
   | { type: 'agent:turn_end'; taskId: string }
   | { type: 'agent:execution_status'; taskId: string; status: AgentExecutionStatus }
-  | { type: 'task:plan_generated'; taskId: string; plan: TaskPlan };
+  | { type: 'task:plan_generated'; taskId: string; plan: TaskPlan }
+  | { type: 'queue:status'; status: QueueStatus };
 
-export type AgentExecutionStatus = 'idle' | 'streaming' | 'tool_use' | 'thinking' | 'completed' | 'error';
+export type AgentExecutionStatus = 'idle' | 'streaming' | 'tool_use' | 'thinking' | 'completed' | 'error' | 'post-hooks';
 
 export type ClientEvent =
   | { type: 'subscribe'; workspaceId: string }
@@ -360,6 +378,31 @@ export type ClientEvent =
   | { type: 'task:claim'; taskId: string; agentId: string }
   | { type: 'activity:send'; taskId: string; content: string; role: 'user' | 'agent' }
   | { type: 'agent:heartbeat'; agentId: string };
+
+// =============================================================================
+// Attachments
+// =============================================================================
+
+export interface Attachment {
+  id: string;
+  filename: string;       // original filename
+  storedName: string;     // on-disk filename (id + extension)
+  mimeType: string;
+  size: number;           // bytes
+  createdAt: string;      // ISO 8601
+}
+
+// =============================================================================
+// Queue Manager
+// =============================================================================
+
+export interface QueueStatus {
+  workspaceId: string;
+  enabled: boolean;
+  currentTaskId: string | null;
+  tasksInReady: number;
+  tasksInExecuting: number;
+}
 
 // =============================================================================
 // Utility Types
@@ -376,13 +419,27 @@ export interface KanbanColumn {
 
 export interface FilterOptions {
   phase?: Phase;
-  type?: TaskType;
-  priority?: Priority;
   assigned?: string;
   search?: string;
 }
 
 export interface SortOptions {
-  field: 'created' | 'updated' | 'priority' | 'title';
+  field: 'created' | 'updated' | 'title';
   direction: 'asc' | 'desc';
+}
+
+// =============================================================================
+// Post-Execution Skills (Agent Skills spec compliant)
+// =============================================================================
+
+export interface PostExecutionSkill {
+  id: string;              // directory name, matches frontmatter `name`
+  name: string;            // from frontmatter
+  description: string;     // from frontmatter
+  type: 'follow-up' | 'loop';
+  maxIterations: number;
+  doneSignal: string;
+  promptTemplate: string;  // SKILL.md body (markdown after frontmatter)
+  path: string;            // absolute path to skill directory
+  metadata: Record<string, string>;
 }

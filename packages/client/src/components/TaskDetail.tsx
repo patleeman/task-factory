@@ -72,7 +72,6 @@ export function TaskDetail({ task, workspaceId, onClose, onMove, onDelete }: Tas
           title: editedTask.frontmatter.title,
           content: editedTask.content,
           acceptanceCriteria: editedTask.frontmatter.acceptanceCriteria,
-          testingInstructions: editedTask.frontmatter.testingInstructions,
         }),
       })
       setIsEditing(false)
@@ -208,76 +207,103 @@ export function TaskDetail({ task, workspaceId, onClose, onMove, onDelete }: Tas
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-6 mb-6">
-                {/* Acceptance Criteria */}
-                <div className="bg-slate-50 rounded-lg p-4">
-                  <h3 className="font-semibold text-sm text-slate-700 mb-3">
-                    Acceptance Criteria
-                  </h3>
-                  {frontmatter.acceptanceCriteria.length > 0 ? (
-                    <ul className="space-y-2">
-                      {frontmatter.acceptanceCriteria.map((criteria, i) => (
-                        <li key={i} className="flex items-start gap-2 text-sm">
-                          <input
-                            type="checkbox"
-                            className="mt-0.5"
-                            readOnly
-                          />
-                          <span className="text-slate-700">{criteria}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="text-sm text-slate-400 italic">
-                      No acceptance criteria defined
-                    </p>
+              {/* Plan */}
+              {frontmatter.plan && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-blue-600 text-sm">📋</span>
+                    <h3 className="font-semibold text-sm text-blue-700">Plan</h3>
+                    <span className="text-[10px] text-blue-400 ml-auto">
+                      Generated {new Date(frontmatter.plan.generatedAt).toLocaleString()}
+                    </span>
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-semibold text-slate-600 mb-1">Goal</h4>
+                    <p className="text-sm text-slate-800">{frontmatter.plan.goal}</p>
+                  </div>
+                  {frontmatter.plan.steps.length > 0 && (
+                    <div>
+                      <h4 className="text-xs font-semibold text-slate-600 mb-1">Steps</h4>
+                      <ol className="space-y-1">
+                        {frontmatter.plan.steps.map((step, i) => (
+                          <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
+                            <span className="text-blue-600 font-semibold shrink-0 min-w-[1.5rem] text-right">{i + 1}.</span>
+                            <div className="prose prose-slate prose-sm max-w-none min-w-0 [&>p]:m-0"><ReactMarkdown>{step}</ReactMarkdown></div>
+                          </li>
+                        ))}
+                      </ol>
+                    </div>
+                  )}
+                  {frontmatter.plan.validation.length > 0 && (
+                    <div>
+                      <h4 className="text-xs font-semibold text-slate-600 mb-1">Validation</h4>
+                      <ul className="space-y-1">
+                        {frontmatter.plan.validation.map((item, i) => (
+                          <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
+                            <span className="text-green-500 shrink-0 mt-0.5">✓</span>
+                            {item}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {frontmatter.plan.cleanup.length > 0 && (
+                    <div>
+                      <h4 className="text-xs font-semibold text-slate-600 mb-1">Cleanup</h4>
+                      <ul className="space-y-1">
+                        {frontmatter.plan.cleanup.map((item, i) => (
+                          <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
+                            <span className="text-slate-400 shrink-0 mt-0.5">🧹</span>
+                            {item}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
                   )}
                 </div>
+              )}
 
-                {/* Testing Instructions */}
-                <div className="bg-slate-50 rounded-lg p-4">
-                  <h3 className="font-semibold text-sm text-slate-700 mb-3">
-                    Testing Instructions
-                  </h3>
-                  {frontmatter.testingInstructions.length > 0 ? (
-                    <ul className="space-y-2">
-                      {frontmatter.testingInstructions.map((instruction, i) => (
-                        <li key={i} className="flex items-start gap-2 text-sm">
-                          <span className="text-slate-400">•</span>
-                          <span className="text-slate-700">{instruction}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="text-sm text-slate-400 italic">
-                      No testing instructions defined
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              {/* Metadata */}
-              <div className="grid grid-cols-4 gap-4 mb-6">
-                <div className="bg-slate-50 rounded-lg p-3">
-                  <span className="text-xs text-slate-500 block">Type</span>
-                  <span className="text-sm font-medium capitalize">{frontmatter.type}</span>
-                </div>
-                <div className="bg-slate-50 rounded-lg p-3">
-                  <span className="text-xs text-slate-500 block">Priority</span>
-                  <span className="text-sm font-medium capitalize">{frontmatter.priority}</span>
-                </div>
-                <div className="bg-slate-50 rounded-lg p-3">
-                  <span className="text-xs text-slate-500 block">Complexity</span>
-                  <span className="text-sm font-medium capitalize">
-                    {frontmatter.complexity || 'Not set'}
+              {/* Planning in progress */}
+              {frontmatter.phase === 'planning' && !frontmatter.plan && (
+                <div className="flex items-center gap-3 py-3 px-4 bg-amber-50 border border-amber-200 rounded-lg mb-6">
+                  <div className="w-4 h-4 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
+                  <span className="text-sm text-amber-700 font-medium">
+                    Planning agent is researching and generating a plan…
                   </span>
                 </div>
-                <div className="bg-slate-50 rounded-lg p-3">
-                  <span className="text-xs text-slate-500 block">Estimated</span>
-                  <span className="text-sm font-medium">
-                    {frontmatter.estimatedEffort || 'Not set'}
-                  </span>
+              )}
+
+              {/* Description */}
+              {task.content && (
+                <div className="prose prose-slate max-w-none mb-6">
+                  <h3 className="font-semibold text-sm text-slate-700 mb-2">Description</h3>
+                  <ReactMarkdown>{task.content}</ReactMarkdown>
                 </div>
+              )}
+
+              {/* Acceptance Criteria */}
+              <div className="bg-slate-50 rounded-lg p-4 mb-6">
+                <h3 className="font-semibold text-sm text-slate-700 mb-3">
+                  Acceptance Criteria
+                </h3>
+                {frontmatter.acceptanceCriteria.length > 0 ? (
+                  <ul className="space-y-2">
+                    {frontmatter.acceptanceCriteria.map((criteria, i) => (
+                      <li key={i} className="flex items-start gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          className="mt-0.5"
+                          readOnly
+                        />
+                        <span className="text-slate-700">{criteria}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-sm text-slate-400 italic">
+                    No acceptance criteria defined
+                  </p>
+                )}
               </div>
 
               {/* Quality Gates */}
@@ -307,14 +333,6 @@ export function TaskDetail({ task, workspaceId, onClose, onMove, onDelete }: Tas
                   })}
                 </div>
               </div>
-
-              {/* Description */}
-              {task.content && (
-                <div className="prose prose-slate max-w-none">
-                  <h3 className="font-semibold text-sm text-slate-700 mb-2">Description</h3>
-                  <ReactMarkdown>{task.content}</ReactMarkdown>
-                </div>
-              )}
             </>
           )}
         </div>

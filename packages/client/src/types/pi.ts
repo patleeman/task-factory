@@ -55,3 +55,15 @@ export interface AgentContext {
   availableSkills: PiSkill[];
   activeExtensions: PiExtension[];
 }
+
+export interface PostExecutionSkill {
+  id: string;
+  name: string;
+  description: string;
+  type: 'follow-up' | 'loop';
+  maxIterations: number;
+  doneSignal: string;
+  promptTemplate: string;
+  path: string;
+  metadata: Record<string, string>;
+}

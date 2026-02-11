@@ -1,31 +1,256 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react'
+import type { ModelConfig } from '@pi-factory/shared'
 import { MarkdownEditor } from './MarkdownEditor'
+import { SkillSelector } from './SkillSelector'
+import { ModelSelector } from './ModelSelector'
+import { useLocalStorageDraft } from '../hooks/useLocalStorageDraft'
+import type { PostExecutionSkill } from '../types/pi'
+
+export interface CreateTaskData {
+  content: string
+  postExecutionSkills?: string[]
+  modelConfig?: ModelConfig
+  pendingFiles?: File[]
+}
 
 interface CreateTaskPaneProps {
   onCancel: () => void
-  onSubmit: (data: { content: string; acceptanceCriteria: string[] }) => void
+  onSubmit: (data: CreateTaskData) => void
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
 export function CreateTaskPane({ onCancel, onSubmit }: CreateTaskPaneProps) {
-  const [content, setContent] = useState('')
-  const [acceptanceCriteria, setAcceptanceCriteria] = useState('')
+  const { initialDraft, restoredFromDraft, updateDraft, clearDraft, dismissRestoredBanner } = useLocalStorageDraft()
+
+  const [content, setContent] = useState(initialDraft.content)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [availableSkills, setAvailableSkills] = useState<PostExecutionSkill[]>([])
+  const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>(initialDraft.selectedSkillIds)
+  const [modelConfig, setModelConfig] = useState<ModelConfig | undefined>(initialDraft.modelConfig as ModelConfig | undefined)
+  const [pendingFiles, setPendingFiles] = useState<File[]>([])
+  const [isDragOver, setIsDragOver] = useState(false)
+  const [isWide, setIsWide] = useState(false)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    fetch('/api/factory/skills')
+      .then(r => r.json())
+      .then(setAvailableSkills)
+      .catch(err => console.error('Failed to load post-execution skills:', err))
+  }, [])
+
+  // Measure container width to decide side-by-side vs stacked layout
+  useLayoutEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setIsWide(entry.contentRect.width >= 800)
+      }
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+
+  // Auto-save draft to localStorage when form fields change
+  useEffect(() => {
+    updateDraft({ content })
+  }, [content, updateDraft])
+
+  useEffect(() => {
+    updateDraft({ selectedSkillIds })
+  }, [selectedSkillIds, updateDraft])
+
+  useEffect(() => {
+    updateDraft({ modelConfig })
+  }, [modelConfig, updateDraft])
+
+  const handleClearForm = useCallback(() => {
+    setContent('')
+    setSelectedSkillIds([])
+    setModelConfig(undefined)
+    setPendingFiles([])
+    clearDraft()
+  }, [clearDraft])
+
+  const addFiles = useCallback((files: FileList | File[]) => {
+    const newFiles = Array.from(files)
+    if (newFiles.length === 0) return
+    setPendingFiles(prev => [...prev, ...newFiles])
+  }, [])
+
+  const removeFile = (index: number) => {
+    setPendingFiles(prev => prev.filter((_, i) => i !== index))
+  }
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragOver(true)
+  }
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragOver(false)
+  }
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragOver(false)
+    if (e.dataTransfer.files.length > 0) {
+      addFiles(e.dataTransfer.files)
+    }
+  }
 
   const handleSubmit = async () => {
     if (!content.trim()) return
     setIsSubmitting(true)
     await onSubmit({
       content,
-      acceptanceCriteria: acceptanceCriteria
-        .split('\n')
-        .map((s) => s.trim())
-        .filter(Boolean),
+      postExecutionSkills: selectedSkillIds.length > 0 ? selectedSkillIds : undefined,
+      modelConfig,
+      pendingFiles: pendingFiles.length > 0 ? pendingFiles : undefined,
     })
+    clearDraft()
     setIsSubmitting(false)
   }
 
+  // Shared sub-components for DRY between layouts
+  const descriptionSection = (
+    <div className="flex flex-col flex-[2] min-h-0">
+      <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2 shrink-0">
+        Task Description
+      </label>
+      <MarkdownEditor
+        value={content}
+        onChange={setContent}
+        placeholder="Describe what needs to be done..."
+        autoFocus
+        fill
+      />
+    </div>
+  )
+
+  const attachmentsSection = (
+    <div className="shrink-0">
+      <div className="flex items-center justify-between mb-2">
+        <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide">
+          Attachments
+          {pendingFiles.length > 0 && (
+            <span className="ml-1.5 text-slate-400 font-normal">({pendingFiles.length})</span>
+          )}
+        </label>
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+        >
+          + Add Files
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept="image/*,.pdf,.txt,.md,.json,.csv,.log"
+          className="hidden"
+          onChange={(e) => {
+            if (e.target.files) addFiles(e.target.files)
+            e.target.value = ''
+          }}
+        />
+      </div>
+
+      {/* Pending files list */}
+      {pendingFiles.length > 0 && (
+        <div className="space-y-1.5 mb-2">
+          {pendingFiles.map((file, i) => {
+            const isImage = file.type.startsWith('image/')
+            return (
+              <div
+                key={`${file.name}-${i}`}
+                className="flex items-center gap-2.5 p-2 rounded-lg border border-slate-200 bg-slate-50"
+              >
+                {isImage ? (
+                  <img
+                    src={URL.createObjectURL(file)}
+                    alt={file.name}
+                    className="w-8 h-8 rounded object-cover shrink-0"
+                  />
+                ) : (
+                  <span className="w-8 h-8 rounded bg-slate-200 flex items-center justify-center text-sm shrink-0">📄</span>
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm text-slate-700 truncate">{file.name}</div>
+                  <div className="text-xs text-slate-400">{formatFileSize(file.size)}</div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => removeFile(i)}
+                  className="w-5 h-5 rounded-full text-slate-400 hover:text-red-500 hover:bg-red-50 flex items-center justify-center text-xs shrink-0 transition-colors"
+                  title="Remove"
+                >
+                  ×
+                </button>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Drop zone */}
+      <div
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+        className={`border-2 border-dashed rounded-lg p-4 text-center transition-colors ${
+          isDragOver
+            ? 'border-blue-400 bg-blue-50'
+            : 'border-slate-200 bg-slate-50 hover:border-slate-300'
+        }`}
+      >
+        <p className="text-sm text-slate-500">
+          {isDragOver ? 'Drop files here' : 'Drag & drop files here'}
+        </p>
+        <p className="text-xs text-slate-400 mt-0.5">Images, PDFs, text files</p>
+      </div>
+    </div>
+  )
+
+  const modelSection = (
+    <div className="shrink-0">
+      <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+        Model
+      </label>
+      <ModelSelector value={modelConfig} onChange={setModelConfig} />
+    </div>
+  )
+
+  const skillsSection = availableSkills.length > 0 ? (
+    <div className="shrink-0">
+      <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+        Post-Execution Skills
+      </label>
+      <p className="text-xs text-slate-400 mb-2">
+        Run automatically after the agent completes its main work.
+      </p>
+      <SkillSelector
+        availableSkills={availableSkills}
+        selectedSkillIds={selectedSkillIds}
+        onChange={setSelectedSkillIds}
+      />
+    </div>
+  ) : null
+
   return (
-    <div className="flex flex-col h-full bg-white">
+    <div ref={containerRef} className="flex flex-col h-full bg-white">
       {/* Header */}
       <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200 bg-slate-50 shrink-0">
         <div className="flex items-center gap-3">
@@ -38,6 +263,15 @@ export function CreateTaskPane({ onCancel, onSubmit }: CreateTaskPaneProps) {
           <h2 className="font-semibold text-sm text-slate-800">New Task</h2>
         </div>
         <div className="flex items-center gap-2">
+          {content.trim() && (
+            <button
+              onClick={handleClearForm}
+              className="text-xs text-slate-400 hover:text-red-500 transition-colors py-1.5 px-2"
+              title="Clear form and discard draft"
+            >
+              Clear
+            </button>
+          )}
           <button
             onClick={onCancel}
             className="btn btn-secondary text-sm py-1.5 px-3"
@@ -54,35 +288,45 @@ export function CreateTaskPane({ onCancel, onSubmit }: CreateTaskPaneProps) {
         </div>
       </div>
 
-      {/* Content — flex column, editors fill available space */}
-      <div className="flex-1 flex flex-col min-h-0 p-5 gap-4">
-        {/* Description — takes 2/3 of space */}
-        <div className="flex flex-col flex-[2] min-h-0">
-          <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2 shrink-0">
-            Task Description
-          </label>
-          <MarkdownEditor
-            value={content}
-            onChange={setContent}
-            placeholder="Describe what needs to be done..."
-            autoFocus
-            fill
-          />
+      {/* Restored draft banner */}
+      {restoredFromDraft && (
+        <div className="flex items-center justify-between px-5 py-2 bg-blue-50 border-b border-blue-200 text-blue-800 text-sm shrink-0">
+          <span className="flex items-center gap-2">
+            <span>📝</span>
+            <span>Draft restored from your previous session</span>
+          </span>
+          <button
+            onClick={dismissRestoredBanner}
+            className="ml-4 text-blue-400 hover:text-blue-600 font-medium text-xs"
+          >
+            Dismiss
+          </button>
         </div>
+      )}
 
-        {/* Acceptance Criteria — takes 1/3 of space */}
-        <div className="flex flex-col flex-1 min-h-0">
-          <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2 shrink-0">
-            Acceptance Criteria
-          </label>
-          <MarkdownEditor
-            value={acceptanceCriteria}
-            onChange={setAcceptanceCriteria}
-            placeholder="One criterion per line"
-            fill
-          />
+      {isWide ? (
+        /* ── Wide: side-by-side — Left: description/criteria/attachments | Right: config ── */
+        <div className="flex flex-1 min-h-0 overflow-hidden">
+          {/* Left panel — content editing */}
+          <div className="flex-[2] flex flex-col min-h-0 min-w-0 p-5 gap-4 overflow-y-auto border-r border-slate-200">
+            {descriptionSection}
+            {attachmentsSection}
+          </div>
+          {/* Right panel — configuration */}
+          <div className="flex-1 min-w-0 p-5 space-y-5 overflow-y-auto">
+            {modelSection}
+            {skillsSection}
+          </div>
         </div>
-      </div>
+      ) : (
+        /* ── Narrow: single column stacked ── */
+        <div className="flex-1 flex flex-col min-h-0 p-5 gap-4 overflow-y-auto">
+          {descriptionSection}
+          {attachmentsSection}
+          {modelSection}
+          {skillsSection}
+        </div>
+      )}
     </div>
   )
 }

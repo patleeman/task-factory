@@ -1,7 +1,7 @@
 import type { Task, Phase, ActivityEntry } from '@pi-factory/shared'
 import type { AgentStreamState } from '../hooks/useAgentStreaming'
 import { TaskDetailPane } from './TaskDetailPane'
-import { CreateTaskPane } from './CreateTaskPane'
+import { CreateTaskPane, type CreateTaskData } from './CreateTaskPane'
 import { ActivityLog } from './ActivityLog'
 
 export type RightPaneMode =
@@ -16,21 +16,22 @@ interface RightPaneProps {
   // Activity log props
   activity: ActivityEntry[]
   onActivityTaskClick: (task: any) => void
-  onSendMessage: (taskId: string, content: string) => void
+  onSendMessage: (taskId: string, content: string, attachmentIds?: string[]) => void
 
   // Agent streaming state
   agentStream: AgentStreamState
 
   // Task detail props
+  moveError: string | null
   onTaskClose: () => void
   onTaskMove: (phase: Phase) => void
   onTaskDelete: () => void
-  onSteer: (taskId: string, content: string) => void
-  onFollowUp: (taskId: string, content: string) => void
+  onSteer: (taskId: string, content: string, attachmentIds?: string[]) => void
+  onFollowUp: (taskId: string, content: string, attachmentIds?: string[]) => void
 
   // Create task props
   onCreateCancel: () => void
-  onCreateSubmit: (data: { content: string; acceptanceCriteria: string[] }) => void
+  onCreateSubmit: (data: CreateTaskData) => void
 }
 
 export function RightPane({
@@ -40,6 +41,7 @@ export function RightPane({
   onActivityTaskClick,
   onSendMessage,
   agentStream,
+  moveError,
   onTaskClose,
   onTaskMove,
   onTaskDelete,
@@ -56,6 +58,7 @@ export function RightPane({
           workspaceId={workspaceId || ''}
           activity={activity}
           agentStream={agentStream}
+          moveError={moveError}
           onClose={onTaskClose}
           onMove={onTaskMove}
           onDelete={onTaskDelete}
@@ -79,7 +82,6 @@ export function RightPane({
         <ActivityLog
           entries={activity}
           onTaskClick={onActivityTaskClick}
-          onSendMessage={onSendMessage}
         />
       )
   }

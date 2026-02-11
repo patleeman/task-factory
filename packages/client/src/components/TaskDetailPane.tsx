@@ -1,10 +1,14 @@
-import { useState, useEffect } from 'react'
-import type { Task, Phase, ActivityEntry } from '@pi-factory/shared'
+import { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react'
+import type { Task, Phase, ActivityEntry, ModelConfig } from '@pi-factory/shared'
 import { PHASES, PHASE_DISPLAY_NAMES } from '@pi-factory/shared'
 import { MarkdownEditor } from './MarkdownEditor'
 import { TaskChat } from './TaskChat'
 import type { AgentStreamState } from '../hooks/useAgentStreaming'
+import type { PostExecutionSkill } from '../types/pi'
+import { SkillSelector } from './SkillSelector'
+import { ModelSelector } from './ModelSelector'
 import ReactMarkdown from 'react-markdown'
+import { api } from '../api'
 
 type Tab = 'details' | 'chat'
 
@@ -13,12 +17,13 @@ interface TaskDetailPaneProps {
   workspaceId: string
   activity: ActivityEntry[]
   agentStream: AgentStreamState
+  moveError: string | null
   onClose: () => void
   onMove: (phase: Phase) => void
   onDelete?: () => void
-  onSendMessage: (taskId: string, content: string) => void
-  onSteer: (taskId: string, content: string) => void
-  onFollowUp: (taskId: string, content: string) => void
+  onSendMessage: (taskId: string, content: string, attachmentIds?: string[]) => void
+  onSteer: (taskId: string, content: string, attachmentIds?: string[]) => void
+  onFollowUp: (taskId: string, content: string, attachmentIds?: string[]) => void
 }
 
 export function TaskDetailPane({
@@ -28,6 +33,7 @@ export function TaskDetailPane({
   agentStream,
   onClose,
   onMove,
+  moveError,
   onDelete,
   onSendMessage,
   onSteer,
@@ -42,29 +48,74 @@ export function TaskDetailPane({
   const [editedCriteria, setEditedCriteria] = useState(
     task.frontmatter.acceptanceCriteria.join('\n')
   )
+  const [availableSkills, setAvailableSkills] = useState<PostExecutionSkill[]>([])
+  const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>(
+    task.frontmatter.postExecutionSkills || []
+  )
+  const [editedModelConfig, setEditedModelConfig] = useState<ModelConfig | undefined>(
+    task.frontmatter.modelConfig
+  )
+  const [isRegeneratingCriteria, setIsRegeneratingCriteria] = useState(false)
+  const [isWide, setIsWide] = useState(false)
+  const containerRef = useRef<HTMLDivElement>(null)
   const { frontmatter } = task
 
+  // Measure container width to decide split vs tabbed layout
+  useLayoutEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setIsWide(entry.contentRect.width >= 800)
+      }
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+
+  // Determine which fields to highlight based on move error
+  const missingAcceptanceCriteria =
+    moveError?.toLowerCase().includes('acceptance criteria') &&
+    frontmatter.acceptanceCriteria.length === 0
   // Count unread-ish: messages for this task
   const taskMessageCount = activity.filter(
     (e) => e.taskId === task.id && e.type === 'chat-message'
   ).length
 
-  // Reset edit state when task changes
+  // Fetch available post-execution skills
+  useEffect(() => {
+    fetch('/api/factory/skills')
+      .then(r => r.json())
+      .then(setAvailableSkills)
+      .catch(err => console.error('Failed to load post-execution skills:', err))
+  }, [])
+
+  // Reset edit state when task changes and set default tab based on chat content
   useEffect(() => {
     setIsEditing(false)
     setEditedTitle(task.frontmatter.title)
     setEditedContent(task.content)
     setEditedCriteria(task.frontmatter.acceptanceCriteria.join('\n'))
+    setSelectedSkillIds(task.frontmatter.postExecutionSkills || [])
+    setEditedModelConfig(task.frontmatter.modelConfig)
+
+    // Default to chat tab if there are messages, otherwise details tab
+    const hasChatMessages = activity.some(
+      (e) => e.taskId === task.id && e.type === 'chat-message'
+    )
+    setActiveTab(hasChatMessages ? 'chat' : 'details')
   }, [task.id])
 
-  const qualityChecks = [
-    { key: 'testsPass', label: 'Tests' },
-    { key: 'lintPass', label: 'Lint' },
-    { key: 'reviewDone', label: 'Review' },
-  ]
+  // Switch to details tab when a move error occurs so user sees highlighted fields
+  useEffect(() => {
+    if (moveError) setActiveTab('details')
+  }, [moveError])
 
   const canExecute = frontmatter.phase === 'ready' || frontmatter.phase === 'executing'
   const isExecutingPhase = frontmatter.phase === 'executing'
+  // The task phase is the source of truth — if the task isn't executing, the agent isn't running,
+  // regardless of what the stream state says (it can be stale)
+  const isAgentRunning = agentStream.isActive && isExecutingPhase
 
   const handleExecute = async () => {
     setIsExecuting(true)
@@ -89,19 +140,6 @@ export function TaskDetailPane({
     }
   }
 
-  const toggleQualityCheck = async (key: string) => {
-    const currentValue = frontmatter.qualityChecks[key as keyof typeof frontmatter.qualityChecks]
-    try {
-      await fetch(`/api/workspaces/${workspaceId}/tasks/${task.id}/quality`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ [key]: !currentValue }),
-      })
-    } catch (err) {
-      console.error('Failed to update quality check:', err)
-    }
-  }
-
   const handleSaveEdit = async () => {
     try {
       await fetch(`/api/workspaces/${workspaceId}/tasks/${task.id}`, {
@@ -114,11 +152,24 @@ export function TaskDetailPane({
             .split('\n')
             .map((s) => s.trim())
             .filter(Boolean),
+          postExecutionSkills: selectedSkillIds,
+          modelConfig: editedModelConfig,
         }),
       })
       setIsEditing(false)
     } catch (err) {
       console.error('Failed to save task:', err)
+    }
+  }
+
+  const handleRegenerateCriteria = async () => {
+    setIsRegeneratingCriteria(true)
+    try {
+      await api.regenerateCriteria(workspaceId, task.id)
+    } catch (err) {
+      console.error('Failed to regenerate acceptance criteria:', err)
+    } finally {
+      setIsRegeneratingCriteria(false)
     }
   }
 
@@ -136,7 +187,7 @@ export function TaskDetailPane({
   }
 
   return (
-    <div className="flex flex-col h-full bg-white">
+    <div ref={containerRef} className="flex flex-col h-full bg-white">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-200 bg-slate-50 shrink-0">
         <div className="flex items-center gap-2">
@@ -152,23 +203,22 @@ export function TaskDetailPane({
           </span>
         </div>
         <div className="flex items-center gap-1.5">
-          {canExecute && (
+          {isAgentRunning ? (
             <button
-              onClick={isExecutingPhase ? handleStop : handleExecute}
-              disabled={isExecuting}
-              className={`btn text-xs py-1 px-2.5 ${
-                isExecutingPhase
-                  ? 'bg-red-600 text-white hover:bg-red-700'
-                  : 'bg-green-600 text-white hover:bg-green-700'
-              }`}
+              onClick={handleStop}
+              className="btn text-xs py-1 px-2.5 bg-red-600 text-white hover:bg-red-700"
             >
-              {isExecuting
-                ? '...'
-                : isExecutingPhase
-                ? '⏹ Stop'
-                : '▶ Run'}
+              ⏹ Stop
             </button>
-          )}
+          ) : canExecute && !isExecutingPhase ? (
+            <button
+              onClick={handleExecute}
+              disabled={isExecuting}
+              className="btn text-xs py-1 px-2.5 bg-green-600 text-white hover:bg-green-700"
+            >
+              {isExecuting ? '...' : '▶ Run'}
+            </button>
+          ) : null}
           <div className="relative">
             <button
               onClick={() => setShowMoveMenu(!showMoveMenu)}
@@ -198,291 +248,515 @@ export function TaskDetailPane({
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="flex border-b border-slate-200 shrink-0">
-        <button
-          onClick={() => setActiveTab('chat')}
-          className={`flex-1 text-center py-2 text-sm font-medium transition-colors relative ${
-            activeTab === 'chat'
-              ? 'text-blue-600'
-              : 'text-slate-500 hover:text-slate-700'
-          }`}
-        >
-          Chat
-          {taskMessageCount > 0 && (
-            <span className={`ml-1.5 text-xs px-1.5 py-0.5 rounded-full ${
-              activeTab === 'chat'
-                ? 'bg-blue-100 text-blue-600'
-                : 'bg-slate-200 text-slate-500'
-            }`}>
-              {taskMessageCount}
-            </span>
-          )}
-          {activeTab === 'chat' && (
-            <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />
-          )}
-        </button>
-        <button
-          onClick={() => setActiveTab('details')}
-          className={`flex-1 text-center py-2 text-sm font-medium transition-colors relative ${
-            activeTab === 'details'
-              ? 'text-blue-600'
-              : 'text-slate-500 hover:text-slate-700'
-          }`}
-        >
-          Details
-          {activeTab === 'details' && (
-            <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />
-          )}
-        </button>
-      </div>
+      {/* Move error banner */}
+      {moveError && (
+        <div className="flex items-center gap-2 px-4 py-2.5 bg-amber-50 border-b border-amber-200 text-amber-800 text-sm shrink-0">
+          <span className="text-amber-500 shrink-0">⚠️</span>
+          <span>{moveError}</span>
+        </div>
+      )}
 
-      {/* Tab Content */}
-      {activeTab === 'chat' ? (
-        <TaskChat
-          taskId={task.id}
-          workspaceId={workspaceId}
-          entries={activity}
-          agentStream={agentStream}
-          onSendMessage={(content) => onSendMessage(task.id, content)}
-          onSteer={(content) => onSteer(task.id, content)}
-          onFollowUp={(content) => onFollowUp(task.id, content)}
-        />
+      {isWide ? (
+        /* ── Wide: side-by-side Chat | Details ── */
+        <div className="flex flex-1 min-h-0 overflow-hidden">
+          <div className="flex-1 min-w-0 border-r border-slate-200">
+            <TaskChat
+              taskId={task.id}
+              taskPhase={frontmatter.phase}
+              workspaceId={workspaceId}
+              entries={activity}
+              attachments={frontmatter.attachments || []}
+              agentStream={agentStream}
+              onSendMessage={(content, attachmentIds) => onSendMessage(task.id, content, attachmentIds)}
+              onSteer={(content, attachmentIds) => onSteer(task.id, content, attachmentIds)}
+              onFollowUp={(content, attachmentIds) => onFollowUp(task.id, content, attachmentIds)}
+              onStop={handleStop}
+            />
+          </div>
+          <div className="flex-1 min-w-0 overflow-y-auto min-h-0">
+            <DetailsContent
+              task={task}
+              workspaceId={workspaceId}
+              frontmatter={frontmatter}
+              isEditing={isEditing}
+              setIsEditing={setIsEditing}
+              editedTitle={editedTitle}
+              setEditedTitle={setEditedTitle}
+              editedContent={editedContent}
+              setEditedContent={setEditedContent}
+              editedCriteria={editedCriteria}
+              setEditedCriteria={setEditedCriteria}
+              editedModelConfig={editedModelConfig}
+              setEditedModelConfig={setEditedModelConfig}
+              selectedSkillIds={selectedSkillIds}
+              setSelectedSkillIds={setSelectedSkillIds}
+              availableSkills={availableSkills}
+              missingAcceptanceCriteria={missingAcceptanceCriteria}
+              isRegeneratingCriteria={isRegeneratingCriteria}
+              onRegenerateCriteria={handleRegenerateCriteria}
+              onSaveEdit={handleSaveEdit}
+              onDelete={handleDelete}
+            />
+          </div>
+        </div>
       ) : (
-        <div className="flex-1 overflow-y-auto min-h-0">
-          <div className="p-5 space-y-5">
-            {/* Title */}
-            <div>
-              {isEditing ? (
-                <input
-                  type="text"
-                  value={editedTitle}
-                  onChange={(e) => setEditedTitle(e.target.value)}
-                  className="text-xl font-bold text-slate-900 w-full bg-transparent border-b-2 border-blue-400 outline-none pb-1"
-                />
-              ) : (
-                <div className="flex items-start justify-between gap-4">
-                  <h1 className="text-xl font-bold text-slate-900 leading-tight">
-                    {frontmatter.title}
-                  </h1>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <button
-                      onClick={() => setIsEditing(true)}
-                      className="text-xs text-blue-600 hover:text-blue-800 font-medium"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      onClick={handleDelete}
-                      className="text-xs text-red-500 hover:text-red-700 font-medium"
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </div>
+        /* ── Narrow: tabbed Chat / Details ── */
+        <>
+          <div className="flex border-b border-slate-200 shrink-0">
+            <button
+              onClick={() => setActiveTab('chat')}
+              className={`flex-1 text-center py-2 text-sm font-medium transition-colors relative ${
+                activeTab === 'chat' ? 'text-blue-600' : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              Chat
+              {taskMessageCount > 0 && (
+                <span className={`ml-1.5 text-xs px-1.5 py-0.5 rounded-full ${
+                  activeTab === 'chat' ? 'bg-blue-100 text-blue-600' : 'bg-slate-200 text-slate-500'
+                }`}>{taskMessageCount}</span>
               )}
+              {activeTab === 'chat' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
+            </button>
+            <button
+              onClick={() => setActiveTab('details')}
+              className={`flex-1 text-center py-2 text-sm font-medium transition-colors relative ${
+                activeTab === 'details' ? 'text-blue-600' : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              Details
+              {activeTab === 'details' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
+            </button>
+          </div>
+          {activeTab === 'chat' ? (
+            <TaskChat
+              taskId={task.id}
+              taskPhase={frontmatter.phase}
+              workspaceId={workspaceId}
+              entries={activity}
+              attachments={frontmatter.attachments || []}
+              agentStream={agentStream}
+              onSendMessage={(content, attachmentIds) => onSendMessage(task.id, content, attachmentIds)}
+              onSteer={(content, attachmentIds) => onSteer(task.id, content, attachmentIds)}
+              onFollowUp={(content, attachmentIds) => onFollowUp(task.id, content, attachmentIds)}
+              onStop={handleStop}
+            />
+          ) : (
+            <div className="flex-1 overflow-y-auto min-h-0">
+              <DetailsContent
+                task={task}
+                workspaceId={workspaceId}
+                frontmatter={frontmatter}
+                isEditing={isEditing}
+                setIsEditing={setIsEditing}
+                editedTitle={editedTitle}
+                setEditedTitle={setEditedTitle}
+                editedContent={editedContent}
+                setEditedContent={setEditedContent}
+                editedCriteria={editedCriteria}
+                setEditedCriteria={setEditedCriteria}
+                editedModelConfig={editedModelConfig}
+                setEditedModelConfig={setEditedModelConfig}
+                selectedSkillIds={selectedSkillIds}
+                setSelectedSkillIds={setSelectedSkillIds}
+                availableSkills={availableSkills}
+                missingAcceptanceCriteria={missingAcceptanceCriteria}
+                isRegeneratingCriteria={isRegeneratingCriteria}
+                onRegenerateCriteria={handleRegenerateCriteria}
+                onSaveEdit={handleSaveEdit}
+                onDelete={handleDelete}
+              />
             </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
 
-            {/* Quality Gates */}
-            <div className="flex items-center gap-3 py-2 px-3 bg-slate-50 rounded-lg">
-              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Quality</span>
-              <div className="flex items-center gap-3">
-                {qualityChecks.map(({ key, label }) => {
-                  const passed = frontmatter.qualityChecks[key as keyof typeof frontmatter.qualityChecks]
-                  return (
-                    <button
-                      key={key}
-                      onClick={() => toggleQualityCheck(key)}
-                      className={`flex items-center gap-1.5 text-xs font-medium transition-colors ${
-                        passed
-                          ? 'text-green-700 hover:text-green-800'
-                          : 'text-slate-400 hover:text-slate-600'
-                      }`}
-                      title={label}
-                    >
-                      <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] ${
-                        passed ? 'bg-green-500 text-white' : 'bg-slate-200 text-slate-400'
-                      }`}>
-                        {passed ? '✓' : '·'}
-                      </span>
-                      {label}
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
+// =============================================================================
+// Details Content — shared between tabbed and side-by-side layouts
+// =============================================================================
 
-            {/* Plan (generated during planning phase) */}
-            {frontmatter.plan && (
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-3">
-                <div className="flex items-center gap-2">
-                  <span className="text-blue-600 text-sm">📋</span>
-                  <h3 className="text-xs font-semibold text-blue-700 uppercase tracking-wide">
-                    Plan
-                  </h3>
-                  <span className="text-[10px] text-blue-400 ml-auto">
-                    Generated {new Date(frontmatter.plan.generatedAt).toLocaleString()}
-                  </span>
-                </div>
-
-                {/* Goal */}
-                <div>
-                  <h4 className="text-xs font-semibold text-slate-600 mb-1">Goal</h4>
-                  <p className="text-sm text-slate-800">{frontmatter.plan.goal}</p>
-                </div>
-
-                {/* Steps */}
-                {frontmatter.plan.steps.length > 0 && (
-                  <div>
-                    <h4 className="text-xs font-semibold text-slate-600 mb-1">Steps</h4>
-                    <ol className="space-y-1 list-decimal list-inside">
-                      {frontmatter.plan.steps.map((step, i) => (
-                        <li key={i} className="text-sm text-slate-700">{step}</li>
-                      ))}
-                    </ol>
-                  </div>
-                )}
-
-                {/* Validation */}
-                {frontmatter.plan.validation.length > 0 && (
-                  <div>
-                    <h4 className="text-xs font-semibold text-slate-600 mb-1">Validation</h4>
-                    <ul className="space-y-1">
-                      {frontmatter.plan.validation.map((item, i) => (
-                        <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
-                          <span className="text-green-500 shrink-0 mt-0.5">✓</span>
-                          {item}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-
-                {/* Cleanup */}
-                {frontmatter.plan.cleanup.length > 0 && (
-                  <div>
-                    <h4 className="text-xs font-semibold text-slate-600 mb-1">Cleanup</h4>
-                    <ul className="space-y-1">
-                      {frontmatter.plan.cleanup.map((item, i) => (
-                        <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
-                          <span className="text-slate-400 shrink-0 mt-0.5">🧹</span>
-                          {item}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Planning in progress indicator */}
-            {frontmatter.phase === 'planning' && !frontmatter.plan && (
-              <div className="flex items-center gap-3 py-3 px-4 bg-amber-50 border border-amber-200 rounded-lg">
-                <div className="w-4 h-4 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
-                <span className="text-sm text-amber-700 font-medium">
-                  Planning agent is researching and generating a plan…
-                </span>
-              </div>
-            )}
-
-            {/* Acceptance Criteria */}
-            <div>
-              <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
-                Acceptance Criteria
-              </h3>
-              {isEditing ? (
-                <MarkdownEditor
-                  value={editedCriteria}
-                  onChange={setEditedCriteria}
-                  placeholder="One criterion per line"
-                  minHeight="160px"
-                />
-              ) : frontmatter.acceptanceCriteria.length > 0 ? (
-                <ul className="space-y-1.5">
-                  {frontmatter.acceptanceCriteria.map((criteria, i) => (
-                    <li key={i} className="flex items-start gap-2 text-sm">
-                      <span className="w-5 h-5 rounded border border-slate-300 flex items-center justify-center text-[10px] text-slate-400 shrink-0 mt-0.5">
-                        {i + 1}
-                      </span>
-                      <span className="text-slate-700">{criteria}</span>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-sm text-slate-400 italic">No acceptance criteria defined</p>
-              )}
-            </div>
-
-            {/* Description */}
-            <div>
-              <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
-                Description
-              </h3>
-              {isEditing ? (
-                <MarkdownEditor
-                  value={editedContent}
-                  onChange={setEditedContent}
-                  placeholder="Task description in markdown..."
-                  minHeight="400px"
-                />
-              ) : task.content ? (
-                <div className="prose prose-slate prose-sm max-w-none">
-                  <ReactMarkdown>{task.content}</ReactMarkdown>
-                </div>
-              ) : (
-                <p className="text-sm text-slate-400 italic">No description</p>
-              )}
-            </div>
-
-            {/* Edit actions */}
-            {isEditing && (
-              <div className="flex items-center gap-2 pt-2 border-t border-slate-200">
-                <button
-                  onClick={handleSaveEdit}
-                  className="btn btn-primary text-sm py-1.5 px-4"
-                >
-                  Save Changes
-                </button>
-                <button
-                  onClick={() => {
-                    setIsEditing(false)
-                    setEditedTitle(task.frontmatter.title)
-                    setEditedContent(task.content)
-                    setEditedCriteria(task.frontmatter.acceptanceCriteria.join('\n'))
-                  }}
-                  className="btn btn-secondary text-sm py-1.5 px-4"
-                >
-                  Discard
-                </button>
-              </div>
-            )}
-
-            {/* Metadata */}
-            <div className="text-xs text-slate-400 pt-4 border-t border-slate-100 space-y-1">
-              <div className="flex justify-between">
-                <span>Created</span>
-                <span>{new Date(frontmatter.created).toLocaleString()}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Updated</span>
-                <span>{new Date(frontmatter.updated).toLocaleString()}</span>
-              </div>
-              {frontmatter.branch && (
-                <div className="flex justify-between">
-                  <span>Branch</span>
-                  <span className="font-mono">{frontmatter.branch}</span>
-                </div>
-              )}
-              {frontmatter.prUrl && (
-                <div className="flex justify-between">
-                  <span>PR</span>
-                  <a href={frontmatter.prUrl} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">
-                    View PR →
-                  </a>
-                </div>
-              )}
+function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditing, editedTitle, setEditedTitle, editedContent, setEditedContent, editedCriteria, setEditedCriteria, editedModelConfig, setEditedModelConfig, selectedSkillIds, setSelectedSkillIds, availableSkills, missingAcceptanceCriteria, isRegeneratingCriteria, onRegenerateCriteria, onSaveEdit, onDelete }: any) {
+  return (
+    <div className="p-5 space-y-5">
+      {/* Title */}
+      <div>
+        {isEditing ? (
+          <input type="text" value={editedTitle} onChange={(e: any) => setEditedTitle(e.target.value)} className="text-xl font-bold text-slate-900 w-full bg-transparent border-b-2 border-blue-400 outline-none pb-1" />
+        ) : (
+          <div className="flex items-start justify-between gap-4">
+            <h1 className="text-xl font-bold text-slate-900 leading-tight">{frontmatter.title}</h1>
+            <div className="flex items-center gap-2 shrink-0">
+              <button onClick={() => setIsEditing(true)} className="text-xs text-blue-600 hover:text-blue-800 font-medium">Edit</button>
+              <button onClick={onDelete} className="text-xs text-red-500 hover:text-red-700 font-medium">Delete</button>
             </div>
           </div>
+        )}
+      </div>
+
+      {/* Model Configuration */}
+      {(isEditing || frontmatter.modelConfig) && (
+        <div>
+          <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Model</h3>
+          {isEditing ? (
+            <ModelSelector value={editedModelConfig} onChange={setEditedModelConfig} />
+          ) : frontmatter.modelConfig ? (
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-blue-50 border border-blue-200 text-xs font-medium text-blue-700">
+                <span className="text-blue-400">{frontmatter.modelConfig.provider}</span>
+                <span className="text-blue-300">/</span>
+                {frontmatter.modelConfig.modelId}
+              </span>
+              {frontmatter.modelConfig.thinkingLevel && (
+                <span className="inline-flex items-center px-2 py-1 rounded-md bg-purple-50 border border-purple-200 text-xs font-medium text-purple-700">
+                  🧠 {frontmatter.modelConfig.thinkingLevel}
+                </span>
+              )}
+            </div>
+          ) : null}
+        </div>
+      )}
+
+      {/* Post-Execution Skills */}
+      {(isEditing ? availableSkills.length > 0 : (frontmatter.postExecutionSkills || []).length > 0) && (
+        <div>
+          <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Post-Execution Skills</h3>
+          {isEditing ? (
+            <div>
+              <p className="text-xs text-slate-400 mb-2">Skills run automatically after the agent completes its main work.</p>
+              <SkillSelector availableSkills={availableSkills} selectedSkillIds={selectedSkillIds} onChange={setSelectedSkillIds} />
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {(frontmatter.postExecutionSkills || []).map((skillId: string, index: number) => {
+                const skill = availableSkills.find((s: any) => s.id === skillId)
+                return (
+                  <span key={skillId} className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-orange-50 border border-orange-200 text-xs font-medium text-orange-700">
+                    <span className="text-[10px] text-orange-400 font-bold">{index + 1}.</span>
+                    {skill?.type === 'loop' ? '🔄' : '🛡️'}
+                    {skill?.name || skillId}
+                  </span>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Plan */}
+      {frontmatter.plan && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <span className="text-blue-600 text-sm">📋</span>
+            <h3 className="text-xs font-semibold text-blue-700 uppercase tracking-wide">Plan</h3>
+            <span className="text-[10px] text-blue-400 ml-auto">Generated {new Date(frontmatter.plan.generatedAt).toLocaleString()}</span>
+          </div>
+          <div>
+            <h4 className="text-xs font-semibold text-slate-600 mb-1">Goal</h4>
+            <div className="prose prose-slate prose-sm max-w-none text-slate-800"><ReactMarkdown>{frontmatter.plan.goal}</ReactMarkdown></div>
+          </div>
+          {frontmatter.plan.steps.length > 0 && (
+            <div>
+              <h4 className="text-xs font-semibold text-slate-600 mb-1">Steps</h4>
+              <ol className="space-y-2">
+                {frontmatter.plan.steps.map((step: string, i: number) => (
+                  <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
+                    <span className="text-blue-600 font-semibold shrink-0 min-w-[1.5rem] text-right">{i + 1}.</span>
+                    <div className="prose prose-slate prose-sm max-w-none min-w-0 [&>p]:m-0"><ReactMarkdown>{step}</ReactMarkdown></div>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
+          {frontmatter.plan.validation.length > 0 && (
+            <div>
+              <h4 className="text-xs font-semibold text-slate-600 mb-1">Validation</h4>
+              <ul className="space-y-1.5">
+                {frontmatter.plan.validation.map((item: string, i: number) => (
+                  <li key={i} className="flex items-start gap-2 text-sm text-slate-700"><span className="text-green-500 shrink-0 mt-0.5">✓</span><div className="prose prose-slate prose-sm max-w-none min-w-0 [&>p]:m-0"><ReactMarkdown>{item}</ReactMarkdown></div></li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {frontmatter.plan.cleanup.length > 0 && (
+            <div>
+              <h4 className="text-xs font-semibold text-slate-600 mb-1">Cleanup</h4>
+              <ul className="space-y-1.5">
+                {frontmatter.plan.cleanup.map((item: string, i: number) => (
+                  <li key={i} className="flex items-start gap-2 text-sm text-slate-700"><span className="text-slate-400 shrink-0 mt-0.5">🧹</span><div className="prose prose-slate prose-sm max-w-none min-w-0 [&>p]:m-0"><ReactMarkdown>{item}</ReactMarkdown></div></li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Planning in progress */}
+      {frontmatter.phase === 'planning' && !frontmatter.plan && (
+        <div className="flex items-center gap-3 py-3 px-4 bg-amber-50 border border-amber-200 rounded-lg">
+          <div className="w-4 h-4 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
+          <span className="text-sm text-amber-700 font-medium">Planning agent is researching and generating a plan…</span>
+        </div>
+      )}
+
+      {/* Description */}
+      <div>
+        <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Description</h3>
+        {isEditing ? (
+          <MarkdownEditor value={editedContent} onChange={setEditedContent} placeholder="Task description in markdown..." minHeight="400px" />
+        ) : task.content ? (
+          <div className="prose prose-slate prose-sm max-w-none"><ReactMarkdown>{task.content}</ReactMarkdown></div>
+        ) : (
+          <p className="text-sm text-slate-400 italic">No description</p>
+        )}
+      </div>
+
+      {/* Acceptance Criteria */}
+      <div className={missingAcceptanceCriteria ? 'rounded-lg border-2 border-red-300 bg-red-50 p-3 -mx-1' : ''}>
+        <div className="flex items-center justify-between mb-2">
+          <h3 className={`text-xs font-semibold uppercase tracking-wide ${missingAcceptanceCriteria ? 'text-red-600' : 'text-slate-500'}`}>
+            {missingAcceptanceCriteria && <span className="mr-1">⚠</span>}Acceptance Criteria
+          </h3>
+          {!isEditing && (
+            <button onClick={onRegenerateCriteria} disabled={isRegeneratingCriteria} className="text-xs text-blue-600 hover:text-blue-800 font-medium disabled:opacity-50 disabled:cursor-wait flex items-center gap-1" title="Regenerate acceptance criteria using task description and plan">
+              {isRegeneratingCriteria ? (<><span className="inline-block w-3 h-3 border border-blue-400 border-t-transparent rounded-full animate-spin" />Regenerating…</>) : '↻ Regenerate'}
+            </button>
+          )}
+        </div>
+        {isEditing ? (
+          <MarkdownEditor value={editedCriteria} onChange={setEditedCriteria} placeholder="One criterion per line" minHeight="160px" />
+        ) : frontmatter.acceptanceCriteria.length > 0 ? (
+          <ul className="space-y-1.5">
+            {frontmatter.acceptanceCriteria.map((criteria: string, i: number) => (
+              <li key={i} className="flex items-start gap-2 text-sm">
+                <span className="w-5 h-5 rounded border border-slate-300 flex items-center justify-center text-[10px] text-slate-400 shrink-0 mt-0.5">{i + 1}</span>
+                <div className="prose prose-slate prose-sm max-w-none min-w-0 text-slate-700 [&>p]:m-0"><ReactMarkdown>{criteria}</ReactMarkdown></div>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className={`text-sm italic ${missingAcceptanceCriteria ? 'text-red-500 font-medium' : 'text-slate-400'}`}>No acceptance criteria defined</p>
+        )}
+      </div>
+
+      {/* Edit actions */}
+      {isEditing && (
+        <div className="flex items-center gap-2 pt-2 border-t border-slate-200">
+          <button onClick={onSaveEdit} className="btn btn-primary text-sm py-1.5 px-4">Save Changes</button>
+          <button onClick={() => { setIsEditing(false); setEditedTitle(task.frontmatter.title); setEditedContent(task.content); setEditedCriteria(task.frontmatter.acceptanceCriteria.join('\n')); setSelectedSkillIds(task.frontmatter.postExecutionSkills || []); setEditedModelConfig(task.frontmatter.modelConfig) }} className="btn btn-secondary text-sm py-1.5 px-4">Discard</button>
+        </div>
+      )}
+
+      {/* Attachments */}
+      <AttachmentsSection task={task} workspaceId={workspaceId} />
+
+      {/* Metadata */}
+      <div className="text-xs text-slate-400 pt-4 border-t border-slate-100 space-y-1">
+        <div className="flex justify-between"><span>Created</span><span>{new Date(frontmatter.created).toLocaleString()}</span></div>
+        <div className="flex justify-between"><span>Updated</span><span>{new Date(frontmatter.updated).toLocaleString()}</span></div>
+        {frontmatter.branch && <div className="flex justify-between"><span>Branch</span><span className="font-mono">{frontmatter.branch}</span></div>}
+        {frontmatter.prUrl && <div className="flex justify-between"><span>PR</span><a href={frontmatter.prUrl} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">View PR →</a></div>}
+      </div>
+    </div>
+  )
+}
+
+// =============================================================================
+// Attachments Section
+// =============================================================================
+
+function isImageMime(mimeType: string): boolean {
+  return mimeType.startsWith('image/')
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function AttachmentsSection({ task, workspaceId }: { task: Task; workspaceId: string }) {
+  const [isUploading, setIsUploading] = useState(false)
+  const [isDragOver, setIsDragOver] = useState(false)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const attachments = task.frontmatter.attachments || []
+
+  const handleUpload = useCallback(async (files: FileList | File[]) => {
+    const fileArray = Array.from(files)
+    if (fileArray.length === 0) return
+
+    setIsUploading(true)
+    try {
+      await api.uploadAttachments(workspaceId, task.id, fileArray)
+    } catch (err) {
+      console.error('Failed to upload attachments:', err)
+    } finally {
+      setIsUploading(false)
+    }
+  }, [workspaceId, task.id])
+
+  const handleDelete = async (attachmentId: string) => {
+    if (!confirm('Delete this attachment?')) return
+    try {
+      await api.deleteAttachment(workspaceId, task.id, attachmentId)
+    } catch (err) {
+      console.error('Failed to delete attachment:', err)
+    }
+  }
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragOver(true)
+  }
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragOver(false)
+  }
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragOver(false)
+    if (e.dataTransfer.files.length > 0) {
+      handleUpload(e.dataTransfer.files)
+    }
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
+          Attachments
+          {attachments.length > 0 && (
+            <span className="ml-1.5 text-slate-400 font-normal">({attachments.length})</span>
+          )}
+        </h3>
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          disabled={isUploading}
+          className="text-xs text-blue-600 hover:text-blue-800 font-medium disabled:opacity-50"
+        >
+          {isUploading ? 'Uploading...' : '+ Add Files'}
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept="image/*,.pdf,.txt,.md,.json,.csv,.log"
+          className="hidden"
+          onChange={(e) => {
+            if (e.target.files) handleUpload(e.target.files)
+            e.target.value = ''
+          }}
+        />
+      </div>
+
+      {/* Drop zone (shown when no attachments or dragging) */}
+      {(attachments.length === 0 || isDragOver) && (
+        <div
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors ${
+            isDragOver
+              ? 'border-blue-400 bg-blue-50'
+              : 'border-slate-200 bg-slate-50 hover:border-slate-300'
+          }`}
+        >
+          <div className="text-slate-400 text-2xl mb-1">📎</div>
+          <p className="text-sm text-slate-500">
+            {isDragOver ? 'Drop files here' : 'Drag & drop files or click "Add Files"'}
+          </p>
+          <p className="text-xs text-slate-400 mt-1">Images, PDFs, text files — up to 20 MB each</p>
+        </div>
+      )}
+
+      {/* Attachment grid */}
+      {attachments.length > 0 && (
+        <div
+          className="grid grid-cols-3 gap-2"
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+        >
+          {attachments.map((att) => {
+            const url = api.getAttachmentUrl(workspaceId, task.id, att.storedName)
+            const isImage = isImageMime(att.mimeType)
+
+            return (
+              <div
+                key={att.id}
+                className="group relative border border-slate-200 rounded-lg overflow-hidden bg-slate-50 hover:border-slate-300 transition-colors"
+              >
+                {isImage ? (
+                  <button
+                    onClick={() => setPreviewUrl(url)}
+                    className="block w-full aspect-square"
+                  >
+                    <img
+                      src={url}
+                      alt={att.filename}
+                      className="w-full h-full object-cover"
+                      loading="lazy"
+                    />
+                  </button>
+                ) : (
+                  <a
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex flex-col items-center justify-center w-full aspect-square p-2"
+                  >
+                    <span className="text-2xl mb-1">📄</span>
+                    <span className="text-[10px] text-slate-500 text-center truncate w-full px-1">
+                      {att.filename}
+                    </span>
+                  </a>
+                )}
+
+                {/* File info overlay */}
+                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <p className="text-[10px] text-white truncate">{att.filename}</p>
+                  <p className="text-[10px] text-white/70">{formatFileSize(att.size)}</p>
+                </div>
+
+                {/* Delete button */}
+                <button
+                  onClick={() => handleDelete(att.id)}
+                  className="absolute top-1 right-1 w-5 h-5 rounded-full bg-red-500 text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600"
+                  title="Delete attachment"
+                >
+                  ×
+                </button>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Image preview modal */}
+      {previewUrl && (
+        <div
+          className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-8"
+          onClick={() => setPreviewUrl(null)}
+        >
+          <button
+            onClick={() => setPreviewUrl(null)}
+            className="absolute top-4 right-4 w-8 h-8 rounded-full bg-white/20 text-white text-lg flex items-center justify-center hover:bg-white/30"
+          >
+            ×
+          </button>
+          <img
+            src={previewUrl}
+            alt="Preview"
+            className="max-w-full max-h-full object-contain rounded-lg shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
         </div>
       )}
     </div>

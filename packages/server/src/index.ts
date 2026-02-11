@@ -31,6 +31,7 @@ import {
   discoverTasks,
   canMoveToPhase,
   parseTaskFile,
+  reorderTasks,
 } from './task-service.js';
 import {
   createWorkspace,
@@ -181,6 +182,12 @@ app.post('/api/workspaces/:id/tasks', async (req, res) => {
       title = await generateTitle(request.content, request.acceptanceCriteria || []);
     }
 
+    // Generate acceptance criteria if not provided
+    if ((!request.acceptanceCriteria || request.acceptanceCriteria.length === 0) && request.content) {
+      const { generateAcceptanceCriteria } = await import('./acceptance-criteria-service.js');
+      request.acceptanceCriteria = await generateAcceptanceCriteria(request.content);
+    }
+
     const task = createTask(workspace.path, tasksDir, request, title);
 
     // Broadcast to subscribers
@@ -220,7 +227,7 @@ app.get('/api/workspaces/:workspaceId/tasks/:taskId', (req, res) => {
 });
 
 // Update task
-app.patch('/api/workspaces/:workspaceId/tasks/:taskId', (req, res) => {
+app.patch('/api/workspaces/:workspaceId/tasks/:taskId', async (req, res) => {
   const workspace = getWorkspaceById(req.params.workspaceId);
 
   if (!workspace) {
@@ -238,7 +245,17 @@ app.patch('/api/workspaces/:workspaceId/tasks/:taskId', (req, res) => {
   }
 
   try {
-    task = updateTask(task, req.body as UpdateTaskRequest);
+    const request = req.body as UpdateTaskRequest;
+
+    // Auto-generate acceptance criteria when description changes and criteria not explicitly provided
+    const descriptionChanged = request.content !== undefined && request.content !== task.content;
+    const criteriaNotProvided = request.acceptanceCriteria === undefined;
+    if (descriptionChanged && criteriaNotProvided && request.content) {
+      const { generateAcceptanceCriteria } = await import('./acceptance-criteria-service.js');
+      request.acceptanceCriteria = await generateAcceptanceCriteria(request.content);
+    }
+
+    task = updateTask(task, request);
 
     broadcastToWorkspace(workspace.id, {
       type: 'task:updated',
@@ -281,7 +298,7 @@ app.delete('/api/workspaces/:workspaceId/tasks/:taskId', async (req, res) => {
 });
 
 // Move task to phase
-app.post('/api/workspaces/:workspaceId/tasks/:taskId/move', (req, res) => {
+app.post('/api/workspaces/:workspaceId/tasks/:taskId/move', async (req, res) => {
   const workspace = getWorkspaceById(req.params.workspaceId);
 
   if (!workspace) {
@@ -322,8 +339,22 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/move', (req, res) => {
 
   const fromPhase = task.frontmatter.phase;
 
+  // If moving out of executing, stop the agent session first
+  if (fromPhase === 'executing' && toPhase !== 'executing') {
+    await stopTaskExecution(task.id);
+
+    const pauseEntry = createSystemEvent(
+      workspace.id,
+      task.id,
+      'phase-change',
+      'Agent execution paused — task moved out of executing',
+      { fromPhase, toPhase }
+    );
+    broadcastToWorkspace(workspace.id, { type: 'activity:entry', entry: pauseEntry });
+  }
+
   try {
-    task = moveTaskToPhase(task, toPhase, 'user', reason);
+    task = moveTaskToPhase(task, toPhase, 'user', reason, tasks);
 
     // Create system event
     createSystemEvent(
@@ -334,13 +365,18 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/move', (req, res) => {
       { fromPhase, toPhase }
     );
 
-    // If moving to executing, create task separator in activity log
-    if (toPhase === 'executing') {
+    // Create task separator in activity log when moving to executing
+    // or when moving backward (re-work) so the task appears at the
+    // bottom of the activity timeline as the current work item.
+    const fromIndex = PHASES.indexOf(fromPhase);
+    const toIndex = PHASES.indexOf(toPhase);
+    const isBackwardMove = toIndex < fromIndex;
+
+    if (toPhase === 'executing' || isBackwardMove) {
       createTaskSeparator(
         workspace.id,
         task.id,
         task.frontmatter.title,
-        task.frontmatter.type,
         toPhase
       );
     }
@@ -351,6 +387,16 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/move', (req, res) => {
       from: fromPhase,
       to: toPhase,
     });
+
+    // If a task moved to "ready", kick the queue manager to pick it up
+    if (toPhase === 'ready') {
+      kickQueue(workspace.id);
+    }
+
+    // If moved out of executing, kick queue to process next ready task
+    if (fromPhase === 'executing' && toPhase !== 'executing') {
+      kickQueue(workspace.id);
+    }
 
     // If moving to planning, start the planning agent asynchronously
     if (toPhase === 'planning') {
@@ -365,6 +411,38 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/move', (req, res) => {
     }
 
     res.json(task);
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// Reorder tasks within a phase
+app.post('/api/workspaces/:workspaceId/tasks/reorder', (req, res) => {
+  const workspace = getWorkspaceById(req.params.workspaceId);
+
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return;
+  }
+
+  const { phase, taskIds } = req.body as { phase: Phase; taskIds: string[] };
+
+  if (!phase || !Array.isArray(taskIds)) {
+    res.status(400).json({ error: 'phase and taskIds[] are required' });
+    return;
+  }
+
+  try {
+    const tasksDir = getTasksDir(workspace);
+    const reordered = reorderTasks(tasksDir, phase, taskIds);
+
+    broadcastToWorkspace(workspace.id, {
+      type: 'task:reordered',
+      phase,
+      taskIds,
+    });
+
+    res.json({ success: true, count: reordered.length });
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }
@@ -409,27 +487,85 @@ app.post('/api/workspaces/:workspaceId/activity', async (req, res) => {
     return;
   }
 
-  const { taskId, content, role } = req.body as {
+  const { taskId, content, role, metadata } = req.body as {
     taskId: string;
     content: string;
     role: 'user' | 'agent';
+    metadata?: Record<string, unknown>;
   };
 
-  const entry = createChatMessage(workspace.id, taskId, role, content);
+  const entry = createChatMessage(workspace.id, taskId, role, content, undefined, metadata);
 
   broadcastToWorkspace(workspace.id, {
     type: 'activity:entry',
     entry,
   });
 
-  // If there's an active agent session on this task, forward the message
+  // If user message and there's an active agent session, steer it.
+  // If no active session but task is in planning, start a planning agent.
   if (role === 'user' && taskId) {
-    const session = getActiveSession(taskId);
-    if (session?.piSession && session.status === 'running') {
-      // Steer the running agent with the user's message
-      steerTask(taskId, content).catch((err) => {
+    // Load image attachments referenced by this message (if any)
+    const attachmentIds = (metadata?.attachmentIds as string[]) || [];
+    let chatImages: { type: 'image'; data: string; mimeType: string }[] = [];
+    if (attachmentIds.length > 0) {
+      const tasksDir = getTasksDir(workspace);
+      const allTasks = discoverTasks(tasksDir);
+      const task = allTasks.find(t => t.id === taskId);
+      if (task) {
+        chatImages = loadAttachmentsByIds(
+          attachmentIds,
+          task.frontmatter.attachments || [],
+          workspace.path,
+          taskId,
+        );
+      }
+    }
+
+    const activeSession = getActiveSession(taskId);
+    if (activeSession?.piSession && activeSession.status === 'running') {
+      steerTask(taskId, content, chatImages.length > 0 ? chatImages : undefined).catch((err) => {
         console.error('Failed to steer agent with chat message:', err);
       });
+    } else if (activeSession?.piSession && (activeSession.status as string) === 'idle') {
+      // Agent finished without signaling completion (asked a question / flagged blocker).
+      // Send user's reply as a follow-up to resume the conversation.
+      activeSession.status = 'running';
+      broadcastToWorkspace(workspace.id, {
+        type: 'agent:execution_status',
+        taskId,
+        status: 'streaming',
+      });
+      followUpTask(taskId, content, chatImages.length > 0 ? chatImages : undefined).catch((err) => {
+        console.error('Failed to follow-up agent with chat message:', err);
+      });
+    } else if (!activeSession) {
+      // No active session — try to resume or start fresh depending on phase
+      const tasksDir = getTasksDir(workspace);
+      const tasks = discoverTasks(tasksDir);
+      const task = tasks.find((t) => t.id === taskId);
+
+      if (task && task.frontmatter.phase === 'planning') {
+        planTask({
+          task,
+          workspaceId: workspace.id,
+          workspacePath: workspace.path,
+          broadcastToWorkspace: (event) => broadcastToWorkspace(workspace.id, event),
+        }).catch((err) => {
+          console.error('Failed to start planning agent from chat:', err);
+        });
+      } else if (task && task.frontmatter.sessionFile) {
+        // Task has a previous conversation — resume it for chat
+        resumeChat(
+          task,
+          workspace.id,
+          workspace.path,
+          content,
+          (event) => broadcastToWorkspace(workspace.id, event),
+          chatImages.length > 0 ? chatImages : undefined,
+        ).catch((err) => {
+          console.error('Failed to resume chat for task:', err);
+        });
+      }
     }
   }
 
@@ -450,6 +586,26 @@ import {
   buildAgentContext,
   discoverPiThemes,
 } from './pi-integration.js';
+
+// Get available models (from Pi SDK ModelRegistry)
+app.get('/api/pi/available-models', async (_req, res) => {
+  try {
+    const { AuthStorage, ModelRegistry } = await import('@mariozechner/pi-coding-agent');
+    const authStorage = new AuthStorage();
+    const modelRegistry = new ModelRegistry(authStorage);
+    const available = modelRegistry.getAvailable();
+    const models = available.map((m: any) => ({
+      provider: typeof m.provider === 'string' ? m.provider : m.provider?.id || 'unknown',
+      id: m.id,
+      name: m.name,
+      reasoning: m.reasoning || false,
+    }));
+    res.json(models);
+  } catch (err) {
+    console.error('Failed to load available models:', err);
+    res.json([]);
+  }
+});
 
 // Get Pi settings
 app.get('/api/pi/settings', (_req, res) => {
@@ -486,6 +642,28 @@ app.get('/api/factory/extensions', (_req, res) => {
 app.post('/api/factory/extensions/reload', (_req, res) => {
   const paths = reloadRepoExtensions();
   res.json({ count: paths.length, paths });
+});
+
+// Get post-execution skills (Agent Skills spec)
+app.get('/api/factory/skills', (_req, res) => {
+  const skills = discoverPostExecutionSkills();
+  res.json(skills);
+});
+
+// Get single post-execution skill
+app.get('/api/factory/skills/:id', (req, res) => {
+  const skill = getPostExecutionSkill(req.params.id);
+  if (!skill) {
+    res.status(404).json({ error: 'Skill not found' });
+    return;
+  }
+  res.json(skill);
+});
+
+// Reload post-execution skills
+app.post('/api/factory/skills/reload', (_req, res) => {
+  const skills = reloadPostExecutionSkills();
+  res.json({ count: skills.length, skills: skills.map(s => s.id) });
 });
 
 // Get Pi skills
@@ -604,13 +782,30 @@ import {
   stopTaskExecution,
   steerTask,
   followUpTask,
+  resumeChat,
   getActiveSession,
   getAllActiveSessions,
   getRepoExtensionPaths,
   reloadRepoExtensions,
   validateQualityGates,
   checkAndAutoTransition,
+  regenerateAcceptanceCriteriaForTask,
+  loadAttachmentsByIds,
 } from './agent-execution-service.js';
+
+import {
+  discoverPostExecutionSkills,
+  getPostExecutionSkill,
+  reloadPostExecutionSkills,
+} from './post-execution-skills.js';
+
+import {
+  startQueueProcessing,
+  stopQueueProcessing,
+  getQueueStatus,
+  kickQueue,
+  initializeQueueManagers,
+} from './queue-manager.js';
 
 // Start task execution
 app.post('/api/workspaces/:workspaceId/tasks/:taskId/execute', async (req, res) => {
@@ -630,9 +825,16 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/execute', async (req, res) 
     return;
   }
   
-  // Move task to executing phase
-  if (task.frontmatter.phase !== 'executing') {
-    moveTaskToPhase(task, 'executing', 'user', 'Agent started execution');
+  // Move task to executing phase and broadcast the change
+  const fromPhase = task.frontmatter.phase;
+  if (fromPhase !== 'executing') {
+    moveTaskToPhase(task, 'executing', 'user', 'Agent started execution', tasks);
+    broadcastToWorkspace(workspace.id, {
+      type: 'task:moved',
+      task,
+      from: fromPhase,
+      to: 'executing',
+    });
   }
   
   try {
@@ -656,6 +858,9 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/execute', async (req, res) 
           from: 'executing',
           to: success ? 'complete' : 'executing',
         });
+
+        // Kick queue manager — there's now capacity for the next task
+        kickQueue(workspace.id);
       },
     });
     
@@ -666,14 +871,14 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/execute', async (req, res) 
 });
 
 // Stop task execution
-app.post('/api/workspaces/:workspaceId/tasks/:taskId/stop', (req, res) => {
-  const stopped = stopTaskExecution(req.params.taskId);
+app.post('/api/workspaces/:workspaceId/tasks/:taskId/stop', async (req, res) => {
+  const stopped = await stopTaskExecution(req.params.taskId);
   res.json({ stopped });
 });
 
 // Steer agent (interrupt with new instruction)
 app.post('/api/workspaces/:workspaceId/tasks/:taskId/steer', async (req, res) => {
-  const { content } = req.body as { content: string };
+  const { content, attachmentIds } = req.body as { content: string; attachmentIds?: string[] };
 
   if (!content) {
     res.status(400).json({ error: 'Content is required' });
@@ -683,18 +888,31 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/steer', async (req, res) =>
   // Log the user steer message in activity
   const workspace = getWorkspaceById(req.params.workspaceId);
   if (workspace) {
-    const entry = createChatMessage(workspace.id, req.params.taskId, 'user', content);
+    const metadata = attachmentIds && attachmentIds.length > 0 ? { attachmentIds } : undefined;
+    const entry = createChatMessage(workspace.id, req.params.taskId, 'user', content, undefined, metadata);
     broadcastToWorkspace(workspace.id, { type: 'activity:entry', entry });
     createSystemEvent(workspace.id, req.params.taskId, 'phase-change', 'User sent steering message');
   }
 
-  const ok = await steerTask(req.params.taskId, content);
+  // Load image attachments if referenced
+  let steerImages: { type: 'image'; data: string; mimeType: string }[] | undefined;
+  if (attachmentIds && attachmentIds.length > 0 && workspace) {
+    const tasksDir = getTasksDir(workspace);
+    const tasks = discoverTasks(tasksDir);
+    const task = tasks.find(t => t.id === req.params.taskId);
+    if (task) {
+      const images = loadAttachmentsByIds(attachmentIds, task.frontmatter.attachments || [], workspace.path, req.params.taskId);
+      if (images.length > 0) steerImages = images;
+    }
+  }
+
+  const ok = await steerTask(req.params.taskId, content, steerImages);
   res.json({ ok });
 });
 
 // Follow-up (queue for after agent finishes)
 app.post('/api/workspaces/:workspaceId/tasks/:taskId/follow-up', async (req, res) => {
-  const { content } = req.body as { content: string };
+  const { content, attachmentIds } = req.body as { content: string; attachmentIds?: string[] };
 
   if (!content) {
     res.status(400).json({ error: 'Content is required' });
@@ -704,12 +922,25 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/follow-up', async (req, res
   // Log the user follow-up message in activity
   const workspace = getWorkspaceById(req.params.workspaceId);
   if (workspace) {
-    const entry = createChatMessage(workspace.id, req.params.taskId, 'user', content);
+    const metadata = attachmentIds && attachmentIds.length > 0 ? { attachmentIds } : undefined;
+    const entry = createChatMessage(workspace.id, req.params.taskId, 'user', content, undefined, metadata);
     broadcastToWorkspace(workspace.id, { type: 'activity:entry', entry });
     createSystemEvent(workspace.id, req.params.taskId, 'phase-change', 'User queued follow-up message');
   }
 
-  const ok = await followUpTask(req.params.taskId, content);
+  // Load image attachments if referenced
+  let followUpImages: { type: 'image'; data: string; mimeType: string }[] | undefined;
+  if (attachmentIds && attachmentIds.length > 0 && workspace) {
+    const tasksDir = getTasksDir(workspace);
+    const tasks = discoverTasks(tasksDir);
+    const task = tasks.find(t => t.id === req.params.taskId);
+    if (task) {
+      const images = loadAttachmentsByIds(attachmentIds, task.frontmatter.attachments || [], workspace.path, req.params.taskId);
+      if (images.length > 0) followUpImages = images;
+    }
+  }
+
+  const ok = await followUpTask(req.params.taskId, content, followUpImages);
   res.json({ ok });
 });
 
@@ -729,6 +960,37 @@ app.get('/api/workspaces/:workspaceId/tasks/:taskId/execution', (req, res) => {
     endTime: session.endTime,
     output: session.output,
   });
+});
+
+// Regenerate acceptance criteria
+app.post('/api/workspaces/:workspaceId/tasks/:taskId/regenerate-criteria', async (req, res) => {
+  const workspace = getWorkspaceById(req.params.workspaceId);
+
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return;
+  }
+
+  const tasksDir = getTasksDir(workspace);
+  const tasks = discoverTasks(tasksDir);
+  const task = tasks.find(t => t.id === req.params.taskId);
+
+  if (!task) {
+    res.status(404).json({ error: 'Task not found' });
+    return;
+  }
+
+  try {
+    const criteria = await regenerateAcceptanceCriteriaForTask(
+      task,
+      workspace.id,
+      (event) => broadcastToWorkspace(workspace.id, event),
+    );
+
+    res.json({ criteria });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
 });
 
 // Validate quality gates
@@ -799,6 +1061,188 @@ app.patch('/api/workspaces/:workspaceId/tasks/:taskId/quality', async (req, res)
 app.get('/api/executions', (_req, res) => {
   const sessions = getAllActiveSessions();
   res.json(sessions);
+});
+
+// =============================================================================
+// Queue Manager API
+// =============================================================================
+
+// Get queue status
+app.get('/api/workspaces/:workspaceId/queue/status', (req, res) => {
+  const workspace = getWorkspaceById(req.params.workspaceId);
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return;
+  }
+  const status = getQueueStatus(workspace.id);
+  res.json(status);
+});
+
+// Start queue processing
+app.post('/api/workspaces/:workspaceId/queue/start', (req, res) => {
+  const workspace = getWorkspaceById(req.params.workspaceId);
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return;
+  }
+
+  const status = startQueueProcessing(
+    workspace.id,
+    (event) => broadcastToWorkspace(workspace.id, event),
+  );
+
+  createSystemEvent(
+    workspace.id,
+    '',
+    'phase-change',
+    'Queue processing started'
+  );
+
+  res.json(status);
+});
+
+// Stop queue processing
+app.post('/api/workspaces/:workspaceId/queue/stop', (req, res) => {
+  const workspace = getWorkspaceById(req.params.workspaceId);
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return;
+  }
+
+  const status = stopQueueProcessing(workspace.id);
+
+  createSystemEvent(
+    workspace.id,
+    '',
+    'phase-change',
+    'Queue processing stopped'
+  );
+
+  res.json(status);
+});
+
+// =============================================================================
+// Attachment API
+// =============================================================================
+
+import multer from 'multer';
+import { existsSync as fsExists, mkdirSync as fsMkdir, readdirSync as fsReaddir, unlinkSync as fsUnlink, statSync as fsStat } from 'fs';
+import { extname } from 'path';
+
+function getAttachmentsDir(workspace: import('@pi-factory/shared').Workspace, taskId: string): string {
+  return join(workspace.path, '.pi', 'tasks', 'attachments', taskId);
+}
+
+// Configure multer to store files in task-specific directories
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: (req, _file, cb) => {
+      const workspaceId = req.params.workspaceId as string;
+      const taskId = req.params.taskId as string;
+      const workspace = getWorkspaceById(workspaceId);
+      if (!workspace) return cb(new Error('Workspace not found'), '');
+      const dir = getAttachmentsDir(workspace, taskId);
+      if (!fsExists(dir)) fsMkdir(dir, { recursive: true });
+      cb(null, dir);
+    },
+    filename: (_req, file, cb) => {
+      const id = crypto.randomUUID().slice(0, 8);
+      const ext = extname(file.originalname) || '';
+      cb(null, `${id}${ext}`);
+    },
+  }),
+  limits: {
+    fileSize: 20 * 1024 * 1024, // 20MB per file
+  },
+});
+
+// Upload attachment(s) to a task
+app.post('/api/workspaces/:workspaceId/tasks/:taskId/attachments', upload.array('files', 10), async (req, res) => {
+  const workspaceId = req.params.workspaceId as string;
+  const taskId = req.params.taskId as string;
+  const workspace = getWorkspaceById(workspaceId);
+  if (!workspace) { res.status(404).json({ error: 'Workspace not found' }); return; }
+
+  const tasksDir = getTasksDir(workspace);
+  const tasks = discoverTasks(tasksDir);
+  let task = tasks.find(t => t.id === taskId);
+  if (!task) { res.status(404).json({ error: 'Task not found' }); return; }
+
+  const files = req.files as Express.Multer.File[];
+  if (!files || files.length === 0) { res.status(400).json({ error: 'No files provided' }); return; }
+
+  const newAttachments: import('@pi-factory/shared').Attachment[] = files.map(f => ({
+    id: f.filename.replace(extname(f.filename), ''),
+    filename: f.originalname,
+    storedName: f.filename,
+    mimeType: f.mimetype,
+    size: f.size,
+    createdAt: new Date().toISOString(),
+  }));
+
+  task.frontmatter.attachments = [...(task.frontmatter.attachments || []), ...newAttachments];
+  task.frontmatter.updated = new Date().toISOString();
+  const { saveTaskFile } = await import('./task-service.js');
+  saveTaskFile(task);
+
+  broadcastToWorkspace(workspace.id, { type: 'task:updated', task, changes: {} });
+
+  res.json(newAttachments);
+});
+
+// List attachments for a task
+app.get('/api/workspaces/:workspaceId/tasks/:taskId/attachments', (req, res) => {
+  const workspace = getWorkspaceById(req.params.workspaceId);
+  if (!workspace) { res.status(404).json({ error: 'Workspace not found' }); return; }
+
+  const tasksDir = getTasksDir(workspace);
+  const tasks = discoverTasks(tasksDir);
+  const task = tasks.find(t => t.id === req.params.taskId);
+  if (!task) { res.status(404).json({ error: 'Task not found' }); return; }
+
+  res.json(task.frontmatter.attachments || []);
+});
+
+// Serve an attachment file
+app.get('/api/workspaces/:workspaceId/tasks/:taskId/attachments/:storedName', (req, res) => {
+  const workspace = getWorkspaceById(req.params.workspaceId);
+  if (!workspace) { res.status(404).json({ error: 'Workspace not found' }); return; }
+
+  const dir = getAttachmentsDir(workspace, req.params.taskId);
+  const filePath = join(dir, req.params.storedName);
+
+  if (!fsExists(filePath)) { res.status(404).json({ error: 'Attachment not found' }); return; }
+
+  res.sendFile(filePath);
+});
+
+// Delete an attachment
+app.delete('/api/workspaces/:workspaceId/tasks/:taskId/attachments/:attachmentId', async (req, res) => {
+  const workspace = getWorkspaceById(req.params.workspaceId);
+  if (!workspace) { res.status(404).json({ error: 'Workspace not found' }); return; }
+
+  const tasksDir = getTasksDir(workspace);
+  const tasks = discoverTasks(tasksDir);
+  let task = tasks.find(t => t.id === req.params.taskId);
+  if (!task) { res.status(404).json({ error: 'Task not found' }); return; }
+
+  const attachment = (task.frontmatter.attachments || []).find(a => a.id === req.params.attachmentId);
+  if (!attachment) { res.status(404).json({ error: 'Attachment not found' }); return; }
+
+  // Delete file from disk
+  const dir = getAttachmentsDir(workspace, req.params.taskId);
+  const filePath = join(dir, attachment.storedName);
+  if (fsExists(filePath)) fsUnlink(filePath);
+
+  // Remove from task metadata
+  task.frontmatter.attachments = (task.frontmatter.attachments || []).filter(a => a.id !== req.params.attachmentId);
+  task.frontmatter.updated = new Date().toISOString();
+  const { saveTaskFile } = await import('./task-service.js');
+  saveTaskFile(task);
+
+  broadcastToWorkspace(workspace.id, { type: 'task:updated', task, changes: {} });
+
+  res.json({ success: true });
 });
 
 // Catch-all for SPA
@@ -910,6 +1354,11 @@ async function main() {
 ║  Listening on http://${HOST}:${PORT}                    ║
 ╚══════════════════════════════════════════════════════════╝
     `);
+
+    // Resume queue processing for workspaces that had it enabled
+    initializeQueueManagers((workspaceId, event) => {
+      broadcastToWorkspace(workspaceId, event);
+    });
   });
 }
 

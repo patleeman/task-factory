@@ -12,7 +12,6 @@ import type {
   TaskSeparatorEntry,
   ChatMessageEntry,
   SystemEventEntry,
-  TaskType,
   Phase,
 } from '@pi-factory/shared';
 import { getWorkspaceById } from './workspace-service.js';
@@ -66,7 +65,6 @@ export function createTaskSeparator(
   workspaceId: string,
   taskId: string,
   taskTitle: string,
-  taskType: TaskType,
   phase: Phase,
   agentId?: string
 ): TaskSeparatorEntry {
@@ -75,7 +73,6 @@ export function createTaskSeparator(
     id: crypto.randomUUID(),
     taskId,
     taskTitle,
-    taskType,
     phase,
     timestamp: new Date().toISOString(),
     agentId,
@@ -194,7 +191,6 @@ export function getActivityStream(
 export interface ActivityGroup {
   taskId: string;
   taskTitle: string;
-  taskType: TaskType;
   entries: ActivityEntry[];
   startTime: string;
   endTime: string;
@@ -211,7 +207,6 @@ export function groupActivityByTask(
       currentGroup = {
         taskId: entry.taskId,
         taskTitle: entry.taskTitle,
-        taskType: entry.taskType,
         entries: [entry],
         startTime: entry.timestamp,
         endTime: entry.timestamp,
@@ -224,7 +219,6 @@ export function groupActivityByTask(
       currentGroup = {
         taskId: entry.taskId,
         taskTitle: 'Unknown Task',
-        taskType: 'feature',
         entries: [entry],
         startTime: entry.timestamp,
         endTime: entry.timestamp,

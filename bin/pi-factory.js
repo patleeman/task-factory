@@ -45,7 +45,7 @@ Commands:
   --version, -v   Show version
 
 Environment Variables:
-  PORT            Server port (default: 9742)
+  PORT            Server port (default: 3000)
   HOST            Server host (default: 0.0.0.0)
 
 Examples:

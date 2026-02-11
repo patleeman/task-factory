@@ -9,11 +9,14 @@ import YAML from 'yaml';
 import type {
   Task,
   TaskFrontmatter,
+  TaskPlan,
   CreateTaskRequest,
   UpdateTaskRequest,
   Phase,
   QualityChecks,
   BlockedState,
+  Attachment,
+  ReorderTasksRequest,
 } from '@pi-factory/shared';
 
 
@@ -65,11 +68,9 @@ export function parseTaskContent(content: string, filePath: string): Task {
 
   // Ensure required fields with defaults
   const frontmatter: TaskFrontmatter = {
-    id: parsed.id || generateTaskId(),
+    id: parsed.id || `TASK-${crypto.randomUUID().slice(0, 8).toUpperCase()}`,
     title: parsed.title || 'Untitled Task',
     phase: parsed.phase || 'backlog',
-    type: parsed.type || 'feature',
-    priority: parsed.priority || 'medium',
     created: parsed.created || new Date().toISOString(),
     updated: parsed.updated || new Date().toISOString(),
     assigned: parsed.assigned,
@@ -77,11 +78,11 @@ export function parseTaskContent(content: string, filePath: string): Task {
     project: parsed.project || '',
     blockedCount: parsed.blockedCount || 0,
     blockedDuration: parsed.blockedDuration || 0,
+    order: parsed.order ?? 0,
     acceptanceCriteria: parsed.acceptanceCriteria || [],
     testingInstructions: parsed.testingInstructions || [],
-    estimatedEffort: parsed.estimatedEffort,
-    complexity: parsed.complexity,
     commits: parsed.commits || [],
+    attachments: parsed.attachments || [],
     qualityChecks: parsed.qualityChecks || {
       testsPass: false,
       lintPass: false,
@@ -135,26 +136,33 @@ export function createTask(
     mkdirSync(tasksDir, { recursive: true });
   }
 
-  const id = generateTaskId();
+  const id = generateTaskId(workspacePath, tasksDir);
   const now = new Date().toISOString();
   const fileName = `${id.toLowerCase()}.md`;
   const filePath = join(tasksDir, fileName);
+
+  // Assign order = max existing order in backlog + 1 (new tasks go to bottom)
+  const existingTasks = discoverTasks(tasksDir);
+  const backlogTasks = existingTasks.filter(t => t.frontmatter.phase === 'backlog');
+  const maxOrder = backlogTasks.reduce((max, t) => Math.max(max, t.frontmatter.order ?? 0), 0);
 
   const frontmatter: TaskFrontmatter = {
     id,
     title: title || request.title || 'Untitled Task',
     phase: 'backlog',
-    type: 'feature',
-    priority: 'medium',
     created: now,
     updated: now,
     workspace: workspacePath,
     project: basename(workspacePath),
     blockedCount: 0,
     blockedDuration: 0,
+    order: maxOrder + 1,
     acceptanceCriteria: request.acceptanceCriteria || [],
     testingInstructions: [],
     commits: [],
+    attachments: [],
+    modelConfig: request.modelConfig || undefined,
+    postExecutionSkills: request.postExecutionSkills || undefined,
     qualityChecks: {
       testsPass: false,
       lintPass: false,
@@ -199,6 +207,18 @@ export function updateTask(
     task.frontmatter.assigned = request.assigned || undefined;
   }
 
+  if (request.plan !== undefined) {
+    task.frontmatter.plan = request.plan;
+  }
+
+  if (request.postExecutionSkills !== undefined) {
+    task.frontmatter.postExecutionSkills = request.postExecutionSkills;
+  }
+
+  if (request.modelConfig !== undefined) {
+    task.frontmatter.modelConfig = request.modelConfig;
+  }
+
   if (request.qualityChecks !== undefined) {
     task.frontmatter.qualityChecks = {
       ...task.frontmatter.qualityChecks,
@@ -233,13 +253,31 @@ export function moveTaskToPhase(
   task: Task,
   newPhase: Phase,
   actor: 'user' | 'agent' | 'system',
-  reason?: string
+  reason?: string,
+  allTasks?: Task[],
 ): Task {
   const oldPhase = task.frontmatter.phase;
   const now = new Date().toISOString();
 
+  // Assign order at bottom of target phase
+  if (allTasks) {
+    const tasksInTarget = allTasks.filter(
+      t => t.frontmatter.phase === newPhase && t.id !== task.id
+    );
+    const maxOrder = tasksInTarget.reduce((max, t) => Math.max(max, t.frontmatter.order ?? 0), 0);
+    task.frontmatter.order = maxOrder + 1;
+  }
+
   if (newPhase === 'executing' && !task.frontmatter.started) {
     task.frontmatter.started = now;
+  }
+
+  // Rework: moving from complete back to ready — reset execution timestamps
+  if (oldPhase === 'complete' && newPhase === 'ready') {
+    task.frontmatter.completed = undefined;
+    task.frontmatter.started = undefined;
+    task.frontmatter.cycleTime = undefined;
+    task.frontmatter.leadTime = undefined;
   }
 
   if (newPhase === 'complete') {
@@ -296,11 +334,13 @@ export function discoverTasks(tasksDir: string): Task[] {
     }
   }
 
-  return tasks.sort(
-    (a, b) =>
-      new Date(b.frontmatter.updated).getTime() -
-      new Date(a.frontmatter.updated).getTime()
-  );
+  // Sort by order ASC (lower order = closer to top of column).
+  // For tasks with the same order (e.g. legacy tasks without order), fall back to created ASC.
+  return tasks.sort((a, b) => {
+    const orderDiff = (a.frontmatter.order ?? 0) - (b.frontmatter.order ?? 0);
+    if (orderDiff !== 0) return orderDiff;
+    return new Date(a.frontmatter.created).getTime() - new Date(b.frontmatter.created).getTime();
+  });
 }
 
 export function getTasksByPhase(tasks: Task[], phase: Phase): Task[] {
@@ -318,6 +358,37 @@ export function deleteTask(task: Task): void {
 }
 
 // =============================================================================
+// Reorder Tasks Within a Phase
+// =============================================================================
+
+export function reorderTasks(
+  tasksDir: string,
+  phase: Phase,
+  orderedTaskIds: string[],
+): Task[] {
+  const allTasks = discoverTasks(tasksDir);
+  const phaseTasks = allTasks.filter(t => t.frontmatter.phase === phase);
+  const now = new Date().toISOString();
+
+  // Build a map for quick lookup
+  const taskMap = new Map(phaseTasks.map(t => [t.id, t]));
+
+  // Assign order based on position in the provided array
+  const reordered: Task[] = [];
+  for (let i = 0; i < orderedTaskIds.length; i++) {
+    const task = taskMap.get(orderedTaskIds[i]);
+    if (task) {
+      task.frontmatter.order = i;
+      task.frontmatter.updated = now;
+      saveTaskFile(task);
+      reordered.push(task);
+    }
+  }
+
+  return reordered;
+}
+
+// =============================================================================
 // Validation
 // =============================================================================
 
@@ -332,9 +403,9 @@ export function canMoveToPhase(task: Task, targetPhase: Phase): {
     backlog: ['planning'],
     planning: ['backlog', 'ready'],
     ready: ['planning', 'executing'],
-    executing: ['ready', 'wrapup'],
-    wrapup: ['executing', 'complete'],
-    complete: ['wrapup'], // Can reopen
+    executing: ['ready', 'complete'],
+    complete: ['ready', 'archived'], // Rework (back to ready) or archive
+    archived: [], // Terminal state — no transitions out
   };
 
   if (!validTransitions[currentPhase].includes(targetPhase)) {
