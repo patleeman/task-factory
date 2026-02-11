@@ -1,0 +1,260 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* =============================================================================
+   Pi-Factory: Industrial Minimalist Theme
+   Inspired by Toyota Production System and factory floor control rooms
+   ============================================================================= */
+
+:root {
+  /* Safety Colors */
+  --safety-orange: #FF6B35;
+  --safety-yellow: #F7C948;
+  --safety-green: #2D9D5F;
+  --safety-red: #E63946;
+  
+  /* Industrial Grays */
+  --slate-50: #F8FAFC;
+  --slate-100: #F1F5F9;
+  --slate-200: #E2E8F0;
+  --slate-300: #CBD5E1;
+  --slate-400: #94A3B8;
+  --slate-500: #64748B;
+  --slate-600: #475569;
+  --slate-700: #334155;
+  --slate-800: #1E293B;
+  --slate-900: #0F172A;
+  
+  /* Task Type Colors */
+  --feature-blue: #3B82F6;
+  --bug-red: #EF4444;
+  --refactor-purple: #8B5CF6;
+  --research-amber: #F59E0B;
+  --spike-cyan: #06B6D4;
+  
+  /* Phase Colors */
+  --phase-backlog: var(--slate-400);
+  --phase-planning: var(--safety-yellow);
+  --phase-ready: var(--feature-blue);
+  --phase-executing: var(--safety-orange);
+  --phase-wrapup: var(--safety-green);
+  --phase-complete: var(--slate-500);
+  
+  /* Spacing */
+  --header-height: 56px;
+  --sidebar-width: 380px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--slate-50);
+  color: var(--slate-900);
+  line-height: 1.5;
+}
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--slate-100);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--slate-300);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--slate-400);
+}
+
+/* Typography */
+.font-mono {
+  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+}
+
+/* Animations */
+@keyframes pulse-orange {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 107, 53, 0.4); }
+  50% { box-shadow: 0 0 0 4px rgba(255, 107, 53, 0); }
+}
+
+@keyframes slide-in {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+.animate-pulse-orange {
+  animation: pulse-orange 2s ease-in-out infinite;
+}
+
+.animate-slide-in {
+  animation: slide-in 0.3s ease-out;
+}
+
+/* Phase Badges */
+.phase-badge {
+  @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium uppercase tracking-wide;
+}
+
+.phase-badge-backlog {
+  @apply bg-slate-200 text-slate-700;
+}
+
+.phase-badge-planning {
+  @apply bg-yellow-100 text-yellow-800;
+}
+
+.phase-badge-ready {
+  @apply bg-blue-100 text-blue-800;
+}
+
+.phase-badge-executing {
+  @apply bg-orange-100 text-orange-800;
+}
+
+.phase-badge-wrapup {
+  @apply bg-green-100 text-green-800;
+}
+
+.phase-badge-complete {
+  @apply bg-slate-200 text-slate-600;
+}
+
+/* Priority Indicators */
+.priority-critical {
+  @apply text-red-600;
+}
+
+.priority-high {
+  @apply text-orange-600;
+}
+
+.priority-medium {
+  @apply text-blue-600;
+}
+
+.priority-low {
+  @apply text-slate-500;
+}
+
+/* Task Type Colors */
+.type-feature { border-left-color: var(--feature-blue); }
+.type-bug { border-left-color: var(--bug-red); }
+.type-refactor { border-left-color: var(--refactor-purple); }
+.type-research { border-left-color: var(--research-amber); }
+.type-spike { border-left-color: var(--spike-cyan); }
+
+/* Kanban Column Headers */
+.column-header {
+  @apply flex items-center justify-between px-3 py-2 bg-slate-100 border-b border-slate-200;
+}
+
+/* Task Cards */
+.task-card {
+  @apply bg-white rounded-lg border border-slate-200 shadow-sm hover:shadow-md transition-shadow cursor-pointer;
+  border-left-width: 4px;
+}
+
+.task-card:hover {
+  @apply border-slate-300;
+}
+
+/* Activity Log */
+.activity-log {
+  @apply flex flex-col h-full bg-white border-l border-slate-200;
+}
+
+.activity-entry {
+  @apply px-4 py-3 border-b border-slate-100;
+}
+
+.activity-entry:last-child {
+  @apply border-b-0;
+}
+
+/* Task Separator */
+.task-separator {
+  @apply sticky top-0 z-10 px-4 py-2 bg-slate-50 border-y border-slate-200;
+}
+
+/* Chat Messages */
+.chat-message-user {
+  @apply ml-auto bg-blue-500 text-white rounded-2xl rounded-tr-sm;
+}
+
+.chat-message-agent {
+  @apply mr-auto bg-slate-100 text-slate-800 rounded-2xl rounded-tl-sm;
+}
+
+/* Quality Gates */
+.quality-check {
+  @apply flex items-center gap-2 text-sm;
+}
+
+.quality-check-pass {
+  @apply text-green-600;
+}
+
+.quality-check-fail {
+  @apply text-slate-400;
+}
+
+/* WIP Limit Warning */
+.wip-breach {
+  @apply bg-red-50 border-red-200 text-red-700;
+}
+
+/* Buttons */
+.btn {
+  @apply inline-flex items-center justify-center px-4 py-2 rounded-lg font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2;
+}
+
+.btn-primary {
+  @apply bg-slate-900 text-white hover:bg-slate-800 focus:ring-slate-500;
+}
+
+.btn-secondary {
+  @apply bg-white text-slate-700 border border-slate-300 hover:bg-slate-50 focus:ring-slate-500;
+}
+
+.btn-danger {
+  @apply bg-red-600 text-white hover:bg-red-700 focus:ring-red-500;
+}
+
+/* Form Elements */
+.input {
+  @apply block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500;
+}
+
+.select {
+  @apply block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500;
+}
+
+/* Modal */
+.modal-overlay {
+  @apply fixed inset-0 bg-black/50 flex items-center justify-center z-50;
+}
+
+.modal-content {
+  @apply bg-white rounded-xl shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-hidden;
+}
+
+/* Loading States */
+.skeleton {
+  @apply animate-pulse bg-slate-200 rounded;
+}

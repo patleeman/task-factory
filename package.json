@@ -1,0 +1,32 @@
+{
+  "name": "pi-factory",
+  "version": "0.1.0",
+  "description": "A lean manufacturing-inspired task queue system for AI agents",
+  "type": "module",
+  "bin": {
+    "pi-factory": "./bin/pi-factory.js"
+  },
+  "files": [
+    "bin/",
+    "dist/",
+    "packages/client/dist/"
+  ],
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:server": "npm run dev -w @pi-factory/server",
+    "dev:client": "npm run dev -w @pi-factory/client",
+    "build": "npm run build -w @pi-factory/shared && npm run build -w @pi-factory/server && npm run build -w @pi-factory/client && node scripts/bundle-server.js",
+    "start": "npm run start -w @pi-factory/server",
+    "lint": "npm run lint --workspaces",
+    "typecheck": "npm run typecheck --workspaces",
+    "test": "npm run test --workspaces --if-present"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "esbuild": "^0.27.3",
+    "typescript": "^5.7.3"
+  }
+}
