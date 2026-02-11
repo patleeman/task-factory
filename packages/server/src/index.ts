@@ -8,8 +8,10 @@ import express from 'express';
 import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import cors from 'cors';
-import { join, dirname } from 'path';
+import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
+import { readdirSync } from 'fs';
+import { homedir } from 'os';
 
 import type {
   Task,
@@ -21,7 +23,7 @@ import type {
 } from '@pi-factory/shared';
 import { PHASES, DEFAULT_WIP_LIMITS } from '@pi-factory/shared';
 
-import { initDatabase } from './db.js';
+
 import {
   createTask,
   updateTask,
@@ -36,7 +38,6 @@ import {
   getWorkspaceById,
   listWorkspaces,
   getTasksDir,
-  syncWorkspaceTasks,
 } from './workspace-service.js';
 import {
   createTaskSeparator,
@@ -50,7 +51,7 @@ import {
 // Configuration
 // =============================================================================
 
-const PORT = process.env.PORT ? parseInt(process.env.PORT) : 9742;
+const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
 const HOST = process.env.HOST || '0.0.0.0';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -87,6 +88,27 @@ app.use(express.static(clientDistPath));
 // Health check
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Browse directories (for folder picker)
+app.get('/api/browse', (req, res) => {
+  const rawPath = (req.query.path as string) || homedir();
+  const dir = resolve(rawPath.replace(/^~/, homedir()));
+
+  try {
+    const entries = readdirSync(dir, { withFileTypes: true });
+    const folders = entries
+      .filter(e => e.isDirectory() && !e.name.startsWith('.'))
+      .map(e => ({
+        name: e.name,
+        path: join(dir, e.name),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    res.json({ current: dir, folders });
+  } catch (err) {
+    res.status(400).json({ error: `Cannot read directory: ${dir}` });
+  }
 });
 
 // List workspaces
@@ -136,14 +158,11 @@ app.get('/api/workspaces/:id/tasks', (req, res) => {
   const tasksDir = getTasksDir(workspace);
   const tasks = discoverTasks(tasksDir);
 
-  // Sync to database
-  syncWorkspaceTasks(workspace);
-
   res.json(tasks);
 });
 
 // Create task
-app.post('/api/workspaces/:id/tasks', (req, res) => {
+app.post('/api/workspaces/:id/tasks', async (req, res) => {
   const workspace = getWorkspaceById(req.params.id);
 
   if (!workspace) {
@@ -152,9 +171,17 @@ app.post('/api/workspaces/:id/tasks', (req, res) => {
   }
 
   const tasksDir = getTasksDir(workspace);
+  const request = req.body as CreateTaskRequest;
 
   try {
-    const task = createTask(workspace.path, tasksDir, req.body as CreateTaskRequest);
+    // Generate title if not provided
+    let title = request.title;
+    if (!title && request.content) {
+      const { generateTitle } = await import('./title-service.js');
+      title = await generateTitle(request.content, request.acceptanceCriteria || []);
+    }
+
+    const task = createTask(workspace.path, tasksDir, request, title);
 
     // Broadcast to subscribers
     broadcastToWorkspace(workspace.id, {
@@ -296,7 +323,7 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/move', (req, res) => {
   const fromPhase = task.frontmatter.phase;
 
   try {
-    task = moveTaskToPhase(task, toPhase, 'user', reason, workspace.id);
+    task = moveTaskToPhase(task, toPhase, 'user', reason);
 
     // Create system event
     createSystemEvent(
@@ -558,7 +585,7 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/execute', async (req, res) 
   
   // Move task to executing phase
   if (task.frontmatter.phase !== 'executing') {
-    moveTaskToPhase(task, 'executing', 'user', 'Agent started execution', workspace.id);
+    moveTaskToPhase(task, 'executing', 'user', 'Agent started execution');
   }
   
   try {
@@ -582,7 +609,7 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/execute', async (req, res) 
       onComplete: (success) => {
         if (success) {
           // Auto-move to wrapup
-          moveTaskToPhase(task, 'wrapup', 'system', 'Execution completed', workspace.id);
+          moveTaskToPhase(task, 'wrapup', 'system', 'Execution completed');
         }
         
         broadcastToWorkspace(workspace.id, {
@@ -677,7 +704,7 @@ app.patch('/api/workspaces/:workspaceId/tasks/:taskId/quality', async (req, res)
   saveTaskFile(task);
   
   // Check for auto-transition
-  checkAndAutoTransition(task, workspace.id, workspace.path);
+  checkAndAutoTransition(task, workspace.path);
   
   broadcastToWorkspace(workspace.id, {
     type: 'task:updated',
@@ -794,9 +821,6 @@ function broadcastToWorkspace(workspaceId: string, event: ServerEvent) {
 // =============================================================================
 
 async function main() {
-  // Initialize database
-  initDatabase();
-
   server.listen(PORT, HOST, () => {
     console.log(`
 ╔══════════════════════════════════════════════════════════╗

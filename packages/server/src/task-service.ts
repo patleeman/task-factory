@@ -15,19 +15,32 @@ import type {
   QualityChecks,
   BlockedState,
 } from '@pi-factory/shared';
-import { saveTaskMetadata, updateTaskPhase } from './db.js';
+
 
 // =============================================================================
 // Task File Operations
 // =============================================================================
 
-const TASK_ID_PREFIX = 'TASK-';
-let taskCounter = 0;
+export function generateTaskId(workspacePath: string, tasksDir: string): string {
+  // Prefix: first 4 letters of workspace folder name, uppercase
+  const folderName = basename(workspacePath).replace(/[^a-zA-Z]/g, '');
+  const prefix = (folderName.slice(0, 4) || 'TASK').toUpperCase();
 
-export function generateTaskId(): string {
-  taskCounter++;
-  const timestamp = Date.now().toString(36).toUpperCase();
-  return `${TASK_ID_PREFIX}${timestamp}-${taskCounter.toString().padStart(3, '0')}`;
+  // Find highest existing number in this workspace's tasks
+  let maxNum = 0;
+  if (existsSync(tasksDir)) {
+    const files = readdirSync(tasksDir);
+    const pattern = new RegExp(`^${prefix.toLowerCase()}-(\\d+)\\.md$`);
+    for (const file of files) {
+      const match = file.match(pattern);
+      if (match) {
+        const num = parseInt(match[1], 10);
+        if (num > maxNum) maxNum = num;
+      }
+    }
+  }
+
+  return `${prefix}-${maxNum + 1}`;
 }
 
 export function parseTaskFile(filePath: string): Task {
@@ -44,7 +57,11 @@ export function parseTaskContent(content: string, filePath: string): Task {
   }
 
   const [, yamlContent, bodyContent] = frontmatterMatch;
-  const parsed = YAML.parse(yamlContent) as Partial<TaskFrontmatter>;
+  const parsed = YAML.parse(yamlContent) as Partial<TaskFrontmatter> & { history?: any[] };
+
+  // Pull history out — it's stored in YAML but not part of TaskFrontmatter type
+  const history = Array.isArray(parsed.history) ? parsed.history : [];
+  delete parsed.history;
 
   // Ensure required fields with defaults
   const frontmatter: TaskFrontmatter = {
@@ -78,14 +95,19 @@ export function parseTaskContent(content: string, filePath: string): Task {
     id: frontmatter.id,
     frontmatter,
     content: bodyContent.trim(),
-    history: [], // Loaded separately from DB
+    history,
     filePath,
   };
 }
 
 export function serializeTask(task: Task): string {
-  const frontmatter = task.frontmatter;
-  const yamlContent = YAML.stringify(frontmatter, {
+  // Combine frontmatter + history into a single YAML block
+  const yamlObj: Record<string, unknown> = { ...task.frontmatter };
+  if (task.history.length > 0) {
+    yamlObj.history = task.history;
+  }
+
+  const yamlContent = YAML.stringify(yamlObj, {
     indent: 2,
     lineWidth: 0,
   });
@@ -105,7 +127,8 @@ export function saveTaskFile(task: Task): void {
 export function createTask(
   workspacePath: string,
   tasksDir: string,
-  request: CreateTaskRequest
+  request: CreateTaskRequest,
+  title?: string
 ): Task {
   // Ensure tasks directory exists
   if (!existsSync(tasksDir)) {
@@ -119,10 +142,10 @@ export function createTask(
 
   const frontmatter: TaskFrontmatter = {
     id,
-    title: request.title,
+    title: title || request.title || 'Untitled Task',
     phase: 'backlog',
-    type: request.type,
-    priority: request.priority,
+    type: 'feature',
+    priority: 'medium',
     created: now,
     updated: now,
     workspace: workspacePath,
@@ -130,9 +153,7 @@ export function createTask(
     blockedCount: 0,
     blockedDuration: 0,
     acceptanceCriteria: request.acceptanceCriteria || [],
-    testingInstructions: request.testingInstructions || [],
-    estimatedEffort: request.estimatedEffort,
-    complexity: request.complexity,
+    testingInstructions: [],
     commits: [],
     qualityChecks: {
       testsPass: false,
@@ -166,28 +187,12 @@ export function updateTask(
     task.frontmatter.title = request.title;
   }
 
-  if (request.priority !== undefined) {
-    task.frontmatter.priority = request.priority;
-  }
-
   if (request.content !== undefined) {
     task.content = request.content;
   }
 
   if (request.acceptanceCriteria !== undefined) {
     task.frontmatter.acceptanceCriteria = request.acceptanceCriteria;
-  }
-
-  if (request.testingInstructions !== undefined) {
-    task.frontmatter.testingInstructions = request.testingInstructions;
-  }
-
-  if (request.estimatedEffort !== undefined) {
-    task.frontmatter.estimatedEffort = request.estimatedEffort;
-  }
-
-  if (request.complexity !== undefined) {
-    task.frontmatter.complexity = request.complexity;
   }
 
   if (request.assigned !== undefined) {
@@ -228,12 +233,9 @@ export function moveTaskToPhase(
   task: Task,
   newPhase: Phase,
   actor: 'user' | 'agent' | 'system',
-  reason?: string,
-  workspaceId?: string
+  reason?: string
 ): Task {
   const oldPhase = task.frontmatter.phase;
-
-  // Update timestamps based on phase
   const now = new Date().toISOString();
 
   if (newPhase === 'executing' && !task.frontmatter.started) {
@@ -257,14 +259,16 @@ export function moveTaskToPhase(
   task.frontmatter.phase = newPhase;
   task.frontmatter.updated = now;
 
+  // Record transition in task history
+  task.history.push({
+    from: oldPhase,
+    to: newPhase,
+    timestamp: now,
+    actor,
+    reason,
+  });
+
   saveTaskFile(task);
-
-  // Update database
-  if (workspaceId) {
-    updateTaskPhase(task.id, newPhase, actor, reason);
-    saveTaskMetadata(task, workspaceId);
-  }
-
   return task;
 }
 

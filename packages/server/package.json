@@ -13,14 +13,12 @@
   "dependencies": {
     "@mariozechner/pi-coding-agent": "^0.52.6",
     "@pi-factory/shared": "file:../shared",
-    "better-sqlite3": "^12.6.2",
     "cors": "^2.8.5",
     "express": "^4.21.2",
     "ws": "^8.18.0",
     "yaml": "^2.8.2"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.13",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/node": "^22.19.7",

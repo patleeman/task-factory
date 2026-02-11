@@ -2,12 +2,21 @@
 // Workspace Service
 // =============================================================================
 // Manages workspace configuration and discovery
+// Workspaces are stored as .pi/factory.json files in the workspace directory.
+// A registry at ~/.pi/factory/workspaces.json tracks known workspace paths.
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join, basename } from 'path';
+import { homedir } from 'os';
 import type { Workspace, WorkspaceConfig } from '@pi-factory/shared';
-import { initDatabase, saveTaskMetadata } from './db.js';
 import { discoverTasks } from './task-service.js';
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+const REGISTRY_DIR = join(homedir(), '.pi', 'factory');
+const REGISTRY_PATH = join(REGISTRY_DIR, 'workspaces.json');
 
 const DEFAULT_CONFIG: WorkspaceConfig = {
   taskLocations: ['.pi/tasks'],
@@ -26,6 +35,65 @@ const DEFAULT_CONFIG: WorkspaceConfig = {
 };
 
 // =============================================================================
+// Registry (lightweight index of known workspaces)
+// =============================================================================
+
+interface WorkspaceEntry {
+  id: string;
+  path: string;
+  name: string;
+}
+
+function loadRegistry(): WorkspaceEntry[] {
+  if (!existsSync(REGISTRY_PATH)) return [];
+  try {
+    return JSON.parse(readFileSync(REGISTRY_PATH, 'utf-8'));
+  } catch {
+    return [];
+  }
+}
+
+function saveRegistry(entries: WorkspaceEntry[]): void {
+  if (!existsSync(REGISTRY_DIR)) {
+    mkdirSync(REGISTRY_DIR, { recursive: true });
+  }
+  writeFileSync(REGISTRY_PATH, JSON.stringify(entries, null, 2), 'utf-8');
+}
+
+function addToRegistry(entry: WorkspaceEntry): void {
+  const entries = loadRegistry().filter((e) => e.path !== entry.path);
+  entries.push(entry);
+  saveRegistry(entries);
+}
+
+function removeFromRegistry(id: string): void {
+  const entries = loadRegistry().filter((e) => e.id !== id);
+  saveRegistry(entries);
+}
+
+// =============================================================================
+// Read workspace config from disk
+// =============================================================================
+
+function readWorkspaceConfig(workspacePath: string): WorkspaceConfig | null {
+  const configPath = join(workspacePath, '.pi', 'factory.json');
+  if (!existsSync(configPath)) return null;
+  try {
+    return JSON.parse(readFileSync(configPath, 'utf-8'));
+  } catch {
+    return null;
+  }
+}
+
+function writeWorkspaceConfig(workspacePath: string, config: WorkspaceConfig): void {
+  const piDir = join(workspacePath, '.pi');
+  if (!existsSync(piDir)) {
+    mkdirSync(piDir, { recursive: true });
+  }
+  writeFileSync(join(piDir, 'factory.json'), JSON.stringify(config, null, 2), 'utf-8');
+}
+
+// =============================================================================
 // Workspace CRUD
 // =============================================================================
 
@@ -34,47 +102,25 @@ export function createWorkspace(
   name?: string,
   config?: Partial<WorkspaceConfig>
 ): Workspace {
-  const db = initDatabase();
-
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
+
+  const mergedConfig: WorkspaceConfig = {
+    ...DEFAULT_CONFIG,
+    ...config,
+  };
 
   const workspace: Workspace = {
     id,
     path,
     name: name || basename(path),
-    config: {
-      ...DEFAULT_CONFIG,
-      ...config,
-    },
+    config: mergedConfig,
     createdAt: now,
     updatedAt: now,
   };
 
-  // Ensure .pi directory exists
-  const piDir = join(path, '.pi');
-  if (!existsSync(piDir)) {
-    mkdirSync(piDir, { recursive: true });
-  }
-
-  // Save workspace config
-  const configPath = join(piDir, 'factory.json');
-  writeFileSync(configPath, JSON.stringify(workspace.config, null, 2), 'utf-8');
-
-  // Save to database
-  const stmt = db.prepare(`
-    INSERT OR REPLACE INTO workspaces (id, path, name, config, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `);
-
-  stmt.run(
-    id,
-    path,
-    workspace.name,
-    JSON.stringify(workspace.config),
-    now,
-    now
-  );
+  // Write config to workspace directory
+  writeWorkspaceConfig(path, mergedConfig);
 
   // Ensure tasks directory exists
   const tasksDir = getTasksDir(workspace);
@@ -82,40 +128,32 @@ export function createWorkspace(
     mkdirSync(tasksDir, { recursive: true });
   }
 
+  // Track in registry
+  addToRegistry({ id, path, name: workspace.name });
+
   return workspace;
 }
 
 export function loadWorkspace(path: string): Workspace | null {
-  const db = initDatabase();
+  // Check registry first
+  const entries = loadRegistry();
+  const entry = entries.find((e) => e.path === path);
 
-  // Check if workspace exists in DB
-  const stmt = db.prepare(`SELECT * FROM workspaces WHERE path = ?`);
-  const row = stmt.get(path) as
-    | {
-        id: string;
-        path: string;
-        name: string;
-        config: string;
-        created_at: string;
-        updated_at: string;
-      }
-    | undefined;
+  const config = readWorkspaceConfig(path);
 
-  if (row) {
+  if (entry && config) {
     return {
-      id: row.id,
-      path: row.path,
-      name: row.name,
-      config: JSON.parse(row.config),
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
+      id: entry.id,
+      path: entry.path,
+      name: entry.name,
+      config,
+      createdAt: '', // Not tracked in file — not important
+      updatedAt: '',
     };
   }
 
-  // Check if .pi/factory.json exists
-  const configPath = join(path, '.pi', 'factory.json');
-  if (existsSync(configPath)) {
-    const config = JSON.parse(readFileSync(configPath, 'utf-8')) as WorkspaceConfig;
+  // Config file exists but not in registry — register it
+  if (config) {
     return createWorkspace(path, basename(path), config);
   }
 
@@ -123,77 +161,56 @@ export function loadWorkspace(path: string): Workspace | null {
 }
 
 export function getWorkspaceById(id: string): Workspace | null {
-  const db = initDatabase();
+  const entries = loadRegistry();
+  const entry = entries.find((e) => e.id === id);
+  if (!entry) return null;
 
-  const stmt = db.prepare(`SELECT * FROM workspaces WHERE id = ?`);
-  const row = stmt.get(id) as
-    | {
-        id: string;
-        path: string;
-        name: string;
-        config: string;
-        created_at: string;
-        updated_at: string;
-      }
-    | undefined;
-
-  if (!row) return null;
+  const config = readWorkspaceConfig(entry.path);
+  if (!config) return null;
 
   return {
-    id: row.id,
-    path: row.path,
-    name: row.name,
-    config: JSON.parse(row.config),
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
+    id: entry.id,
+    path: entry.path,
+    name: entry.name,
+    config,
+    createdAt: '',
+    updatedAt: '',
   };
 }
 
 export function listWorkspaces(): Workspace[] {
-  const db = initDatabase();
+  const entries = loadRegistry();
+  const workspaces: Workspace[] = [];
 
-  const stmt = db.prepare(`SELECT * FROM workspaces ORDER BY updated_at DESC`);
-  const rows = stmt.all() as {
-    id: string;
-    path: string;
-    name: string;
-    config: string;
-    created_at: string;
-    updated_at: string;
-  }[];
+  for (const entry of entries) {
+    const config = readWorkspaceConfig(entry.path);
+    if (config) {
+      workspaces.push({
+        id: entry.id,
+        path: entry.path,
+        name: entry.name,
+        config,
+        createdAt: '',
+        updatedAt: '',
+      });
+    }
+    // If config file is gone, the workspace dir was deleted — skip it
+  }
 
-  return rows.map((row) => ({
-    id: row.id,
-    path: row.path,
-    name: row.name,
-    config: JSON.parse(row.config),
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  }));
+  return workspaces;
 }
 
 export function updateWorkspaceConfig(
   workspace: Workspace,
   config: Partial<WorkspaceConfig>
 ): Workspace {
-  const db = initDatabase();
-
   workspace.config = {
     ...workspace.config,
     ...config,
   };
   workspace.updatedAt = new Date().toISOString();
 
-  // Save to file
-  const configPath = join(workspace.path, '.pi', 'factory.json');
-  writeFileSync(configPath, JSON.stringify(workspace.config, null, 2), 'utf-8');
-
-  // Update database
-  const stmt = db.prepare(`
-    UPDATE workspaces SET config = ?, updated_at = ? WHERE id = ?
-  `);
-
-  stmt.run(JSON.stringify(workspace.config), workspace.updatedAt, workspace.id);
+  writeWorkspaceConfig(workspace.path, workspace.config);
 
   return workspace;
 }
@@ -210,17 +227,4 @@ export function getTasksDir(workspace: Workspace): string {
   }
 
   return join(workspace.path, location);
-}
-
-// =============================================================================
-// Workspace Sync
-// =============================================================================
-
-export function syncWorkspaceTasks(workspace: Workspace): void {
-  const tasksDir = getTasksDir(workspace);
-  const tasks = discoverTasks(tasksDir);
-
-  for (const task of tasks) {
-    saveTaskMetadata(task, workspace.id);
-  }
 }

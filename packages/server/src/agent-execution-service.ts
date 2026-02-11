@@ -408,7 +408,6 @@ export async function validateQualityGates(
 
 export async function checkAndAutoTransition(
   task: Task,
-  workspaceId: string,
   workspacePath: string
 ): Promise<void> {
   const gates = await validateQualityGates(task, workspacePath);
@@ -420,7 +419,7 @@ export async function checkAndAutoTransition(
     gates.lintPass &&
     gates.reviewDone
   ) {
-    moveTaskToPhase(task, 'complete', 'system', 'All quality gates passed', workspaceId);
+    moveTaskToPhase(task, 'complete', 'system', 'All quality gates passed');
   }
 }
 

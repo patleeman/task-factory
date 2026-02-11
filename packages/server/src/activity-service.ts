@@ -1,8 +1,12 @@
 // =============================================================================
 // Activity Log Service
 // =============================================================================
-// Manages the unified timeline of agent activity across all tasks
+// Manages the unified timeline of agent activity across all tasks.
+// Activity is stored as a JSONL file per workspace at .pi/factory/activity.jsonl.
+// At typical agent usage, this file stays small (thousands of lines max).
 
+import { existsSync, readFileSync, appendFileSync, mkdirSync } from 'fs';
+import { join } from 'path';
 import type {
   ActivityEntry,
   TaskSeparatorEntry,
@@ -11,7 +15,48 @@ import type {
   TaskType,
   Phase,
 } from '@pi-factory/shared';
-import { addActivityEntry, getActivityLog, getRecentActivity } from './db.js';
+import { getWorkspaceById } from './workspace-service.js';
+
+// =============================================================================
+// File Operations
+// =============================================================================
+
+function activityFilePath(workspaceId: string): string {
+  const workspace = getWorkspaceById(workspaceId);
+  if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`);
+  return join(workspace.path, '.pi', 'factory', 'activity.jsonl');
+}
+
+function ensureActivityDir(filePath: string): void {
+  const dir = filePath.substring(0, filePath.lastIndexOf('/'));
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
+  }
+}
+
+function appendEntry(workspaceId: string, entry: ActivityEntry): void {
+  const filePath = activityFilePath(workspaceId);
+  ensureActivityDir(filePath);
+  appendFileSync(filePath, JSON.stringify(entry) + '\n', 'utf-8');
+}
+
+function readAllEntries(workspaceId: string): ActivityEntry[] {
+  const filePath = activityFilePath(workspaceId);
+  if (!existsSync(filePath)) return [];
+
+  const lines = readFileSync(filePath, 'utf-8').trim().split('\n').filter(Boolean);
+  const entries: ActivityEntry[] = [];
+
+  for (const line of lines) {
+    try {
+      entries.push(JSON.parse(line));
+    } catch {
+      // Skip malformed lines
+    }
+  }
+
+  return entries;
+}
 
 // =============================================================================
 // Entry Creation Helpers
@@ -36,7 +81,7 @@ export function createTaskSeparator(
     agentId,
   };
 
-  addActivityEntry(workspaceId, entry);
+  appendEntry(workspaceId, entry);
   return entry;
 }
 
@@ -59,7 +104,7 @@ export function createChatMessage(
     metadata,
   };
 
-  addActivityEntry(workspaceId, entry);
+  appendEntry(workspaceId, entry);
   return entry;
 }
 
@@ -80,7 +125,7 @@ export function createSystemEvent(
     metadata,
   };
 
-  addActivityEntry(workspaceId, entry);
+  appendEntry(workspaceId, entry);
   return entry;
 }
 
@@ -92,7 +137,9 @@ export function getActivityTimeline(
   workspaceId: string,
   limit: number = 100
 ): ActivityEntry[] {
-  return getRecentActivity(workspaceId, limit);
+  const entries = readAllEntries(workspaceId);
+  // Return newest first, capped at limit
+  return entries.reverse().slice(0, limit);
 }
 
 export function getActivityForTask(
@@ -100,7 +147,11 @@ export function getActivityForTask(
   taskId: string,
   limit: number = 50
 ): ActivityEntry[] {
-  return getActivityLog(workspaceId, { taskId, limit });
+  const entries = readAllEntries(workspaceId);
+  return entries
+    .filter((e) => e.taskId === taskId)
+    .reverse()
+    .slice(0, limit);
 }
 
 // =============================================================================
@@ -118,13 +169,16 @@ export function getActivityStream(
   cursor?: string,
   limit: number = 50
 ): ActivityStream {
-  const entries = getActivityLog(workspaceId, {
-    before: cursor,
-    limit: limit + 1, // Get one extra to check if there are more
-  });
+  const all = readAllEntries(workspaceId).reverse(); // newest first
 
-  const hasMore = entries.length > limit;
-  const results = hasMore ? entries.slice(0, limit) : entries;
+  let filtered = all;
+  if (cursor) {
+    const idx = all.findIndex((e) => e.timestamp < cursor);
+    filtered = idx >= 0 ? all.slice(idx) : [];
+  }
+
+  const hasMore = filtered.length > limit;
+  const results = filtered.slice(0, limit);
 
   return {
     entries: results,
@@ -152,10 +206,8 @@ export function groupActivityByTask(
   const groups: ActivityGroup[] = [];
   let currentGroup: ActivityGroup | null = null;
 
-  // Process entries in reverse chronological order (newest first)
   for (const entry of entries) {
     if (entry.type === 'task-separator') {
-      // Start a new group
       currentGroup = {
         taskId: entry.taskId,
         taskTitle: entry.taskTitle,
@@ -166,12 +218,9 @@ export function groupActivityByTask(
       };
       groups.push(currentGroup);
     } else if (currentGroup && entry.taskId === currentGroup.taskId) {
-      // Add to current group
       currentGroup.entries.push(entry);
-      currentGroup.startTime = entry.timestamp; // Update start (oldest in group)
+      currentGroup.startTime = entry.timestamp;
     } else {
-      // Entry for a different task without a separator
-      // Create an implicit group
       currentGroup = {
         taskId: entry.taskId,
         taskTitle: 'Unknown Task',
@@ -214,18 +263,13 @@ export function calculateActivityStats(
     if (entry.type === 'chat-message') {
       totalMessages++;
       taskIds.add(entry.taskId);
-      if (entry.role === 'user') {
-        userMessages++;
-      } else {
-        agentMessages++;
-      }
+      if (entry.role === 'user') userMessages++;
+      else agentMessages++;
     } else if (entry.type === 'task-separator') {
       tasksStarted++;
       taskIds.add(entry.taskId);
     } else if (entry.type === 'system-event') {
-      if (entry.event === 'task-completed') {
-        tasksCompleted++;
-      }
+      if (entry.event === 'task-completed') tasksCompleted++;
       taskIds.add(entry.taskId);
     }
   }
@@ -238,7 +282,6 @@ export function calculateActivityStats(
     agentMessages,
     tasksStarted,
     tasksCompleted,
-    averageMessagesPerTask:
-      uniqueTasks > 0 ? Math.round(totalMessages / uniqueTasks) : 0,
+    averageMessagesPerTask: uniqueTasks > 0 ? Math.round(totalMessages / uniqueTasks) : 0,
   };
 }
