@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useMemo } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import type { Task, Phase } from '@pi-factory/shared'
 import { PHASES, PHASE_DISPLAY_NAMES, DEFAULT_WIP_LIMITS } from '@pi-factory/shared'
 import { TaskCard } from './TaskCard'
@@ -45,7 +45,7 @@ export function KanbanBoard({ tasksByPhase, onTaskClick, onMoveTask, onReorderTa
   }, [tasksByPhase])
 
   // Compute insertion index based on cursor Y relative to cards in the column
-  const computeDropIndex = useCallback((e: React.DragEvent, _phase: Phase): number => {
+  const computeDropIndex = useCallback((e: React.DragEvent): number => {
     const column = e.currentTarget as HTMLElement
     const cardElements = column.querySelectorAll('[data-task-id]')
     const mouseY = e.clientY
@@ -61,30 +61,41 @@ export function KanbanBoard({ tasksByPhase, onTaskClick, onMoveTask, onReorderTa
     return cardElements.length
   }, [])
 
+  // Helper to update drop target only when it actually changed
+  const updateDropTarget = useCallback((dt: DropTarget | null) => {
+    dropTargetRef.current = dt
+    setDropTarget(prev => {
+      if (prev === dt) return prev
+      if (prev && dt && prev.phase === dt.phase && prev.index === dt.index) return prev
+      return dt
+    })
+  }, [])
+
   const handleDragOver = useCallback((e: React.DragEvent, phase: Phase) => {
     if (!e.dataTransfer.types.includes(DRAG_MIME)) return
     e.preventDefault()
     e.dataTransfer.dropEffect = 'move'
-    setDragOverPhase(phase)
+    setDragOverPhase(prev => prev === phase ? prev : phase)
 
-    const index = computeDropIndex(e, phase)
-    setDropTarget({ phase, index })
-  }, [computeDropIndex])
+    const index = computeDropIndex(e)
+    updateDropTarget({ phase, index })
+  }, [computeDropIndex, updateDropTarget])
 
   const handleDragLeave = useCallback((e: React.DragEvent) => {
     const relatedTarget = e.relatedTarget as HTMLElement | null
     const currentTarget = e.currentTarget as HTMLElement
     if (!relatedTarget || !currentTarget.contains(relatedTarget)) {
       setDragOverPhase(null)
-      setDropTarget(null)
+      updateDropTarget(null)
     }
-  }, [])
+  }, [updateDropTarget])
 
   const handleDrop = useCallback((e: React.DragEvent, toPhase: Phase) => {
     e.preventDefault()
-    const currentDropTarget = dropTarget
+    // Read from ref to get the latest value, avoiding stale-closure issues
+    const currentDropTarget = dropTargetRef.current
     setDragOverPhase(null)
-    setDropTarget(null)
+    updateDropTarget(null)
 
     const raw = e.dataTransfer.getData(DRAG_MIME)
     if (!raw) return
@@ -119,7 +130,7 @@ export function KanbanBoard({ tasksByPhase, onTaskClick, onMoveTask, onReorderTa
     } catch {
       // Invalid drag data, ignore
     }
-  }, [findTaskById, onMoveTask, onReorderTasks, tasksByPhase, dropTarget])
+  }, [findTaskById, onMoveTask, onReorderTasks, tasksByPhase, updateDropTarget])
 
   // Called from TaskCard onDragStart — we stash the source info for drop indicator logic
   const handleCardDragStart = useCallback((taskId: string, fromPhase: Phase) => {
@@ -129,8 +140,8 @@ export function KanbanBoard({ tasksByPhase, onTaskClick, onMoveTask, onReorderTa
   const handleCardDragEnd = useCallback(() => {
     dragSourceRef.current = null
     setDragOverPhase(null)
-    setDropTarget(null)
-  }, [])
+    updateDropTarget(null)
+  }, [updateDropTarget])
 
   return (
     <div className="flex h-full gap-4 p-4 min-w-max">
