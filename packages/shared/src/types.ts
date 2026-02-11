@@ -12,7 +12,6 @@ export type Phase =
   | 'planning'
   | 'ready'
   | 'executing'
-  | 'wrapup'
   | 'complete';
 
 export const PHASES: Phase[] = [
@@ -20,7 +19,6 @@ export const PHASES: Phase[] = [
   'planning',
   'ready',
   'executing',
-  'wrapup',
   'complete',
 ];
 
@@ -29,7 +27,6 @@ export const PHASE_DISPLAY_NAMES: Record<Phase, string> = {
   planning: 'Planning',
   ready: 'Ready',
   executing: 'Executing',
-  wrapup: 'Wrapup',
   complete: 'Complete',
 };
 
@@ -39,7 +36,6 @@ export const DEFAULT_WIP_LIMITS: Record<Phase, number | null> = {
   planning: 3,
   ready: 5,
   executing: 1,
-  wrapup: 2,
   complete: null,
 };
 
@@ -110,6 +106,9 @@ export interface TaskFrontmatter {
   // Quality gates
   qualityChecks: QualityChecks;
 
+  // Plan (generated during planning phase)
+  plan?: TaskPlan;
+
   // Blocker tracking
   blocked: BlockedState;
 }
@@ -118,6 +117,18 @@ export interface QualityChecks {
   testsPass: boolean;
   lintPass: boolean;
   reviewDone: boolean;
+}
+
+// =============================================================================
+// Task Plan (generated during planning phase)
+// =============================================================================
+
+export interface TaskPlan {
+  goal: string;          // What the agent is trying to achieve
+  steps: string[];       // What it needs to do to achieve that goal
+  validation: string[];  // How to validate the goal has been achieved
+  cleanup: string[];     // Post-completion cleanup actions
+  generatedAt: string;   // ISO 8601 timestamp
 }
 
 export interface BlockedState {
@@ -289,27 +300,19 @@ export interface MetricSummary {
 // =============================================================================
 
 export interface CreateTaskRequest {
-  title: string;
-  type: TaskType;
-  priority: Priority;
-  content?: string;
-  acceptanceCriteria?: string[];
-  testingInstructions?: string[];
-  estimatedEffort?: string;
-  complexity?: Complexity;
+  title?: string; // Auto-generated if not provided
+  content: string; // Task description
+  acceptanceCriteria: string[];
 }
 
 export interface UpdateTaskRequest {
   title?: string;
   phase?: Phase;
-  priority?: Priority;
   content?: string;
   acceptanceCriteria?: string[];
-  testingInstructions?: string[];
-  estimatedEffort?: string;
-  complexity?: Complexity;
   assigned?: string | null;
   qualityChecks?: Partial<QualityChecks>;
+  plan?: TaskPlan;
   blocked?: Partial<BlockedState>;
 }
 
@@ -334,7 +337,21 @@ export type ServerEvent =
   | { type: 'activity:entry'; entry: ActivityEntry }
   | { type: 'agent:status'; agent: Agent }
   | { type: 'metrics:updated'; metrics: Metrics }
-  | { type: 'wip:breach'; phase: Phase; current: number; limit: number };
+  | { type: 'wip:breach'; phase: Phase; current: number; limit: number }
+  // Streaming events for live agent output
+  | { type: 'agent:streaming_start'; taskId: string }
+  | { type: 'agent:streaming_text'; taskId: string; delta: string }
+  | { type: 'agent:streaming_end'; taskId: string; fullText: string }
+  | { type: 'agent:thinking_delta'; taskId: string; delta: string }
+  | { type: 'agent:thinking_end'; taskId: string }
+  | { type: 'agent:tool_start'; taskId: string; toolName: string; toolCallId: string }
+  | { type: 'agent:tool_update'; taskId: string; toolCallId: string; delta: string }
+  | { type: 'agent:tool_end'; taskId: string; toolCallId: string; toolName: string; isError: boolean; result?: string }
+  | { type: 'agent:turn_end'; taskId: string }
+  | { type: 'agent:execution_status'; taskId: string; status: AgentExecutionStatus }
+  | { type: 'task:plan_generated'; taskId: string; plan: TaskPlan };
+
+export type AgentExecutionStatus = 'idle' | 'streaming' | 'tool_use' | 'thinking' | 'completed' | 'error';
 
 export type ClientEvent =
   | { type: 'subscribe'; workspaceId: string }

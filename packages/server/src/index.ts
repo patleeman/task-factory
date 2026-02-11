@@ -352,6 +352,18 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/move', (req, res) => {
       to: toPhase,
     });
 
+    // If moving to planning, start the planning agent asynchronously
+    if (toPhase === 'planning') {
+      planTask({
+        task,
+        workspaceId: workspace.id,
+        workspacePath: workspace.path,
+        broadcastToWorkspace: (event) => broadcastToWorkspace(workspace.id, event),
+      }).catch((err) => {
+        console.error('Planning agent failed:', err);
+      });
+    }
+
     res.json(task);
   } catch (err) {
     res.status(500).json({ error: String(err) });
@@ -389,7 +401,7 @@ app.get('/api/workspaces/:workspaceId/tasks/:taskId/activity', (req, res) => {
 });
 
 // Send message to activity log
-app.post('/api/workspaces/:workspaceId/activity', (req, res) => {
+app.post('/api/workspaces/:workspaceId/activity', async (req, res) => {
   const workspace = getWorkspaceById(req.params.workspaceId);
 
   if (!workspace) {
@@ -409,6 +421,17 @@ app.post('/api/workspaces/:workspaceId/activity', (req, res) => {
     type: 'activity:entry',
     entry,
   });
+
+  // If there's an active agent session on this task, forward the message
+  if (role === 'user' && taskId) {
+    const session = getActiveSession(taskId);
+    if (session?.piSession && session.status === 'running') {
+      // Steer the running agent with the user's message
+      steerTask(taskId, content).catch((err) => {
+        console.error('Failed to steer agent with chat message:', err);
+      });
+    }
+  }
 
   res.json(entry);
 });
@@ -440,10 +463,29 @@ app.get('/api/pi/models', (_req, res) => {
   res.json(models || { providers: {} });
 });
 
-// Get Pi extensions
+// Get Pi extensions (global, from ~/.pi/agent/extensions/)
 app.get('/api/pi/extensions', (_req, res) => {
   const extensions = discoverPiExtensions();
   res.json(extensions);
+});
+
+// Get repo-local extensions (from pi-factory's own extensions/ dir)
+app.get('/api/factory/extensions', (_req, res) => {
+  const paths = getRepoExtensionPaths();
+  const extensions = paths.map((p) => {
+    const parts = p.split('/');
+    const name = parts[parts.length - 1] === 'index.ts'
+      ? parts[parts.length - 2]
+      : parts[parts.length - 1].replace(/\.ts$/, '');
+    return { name, path: p };
+  });
+  res.json(extensions);
+});
+
+// Reload repo-local extensions
+app.post('/api/factory/extensions/reload', (_req, res) => {
+  const paths = reloadRepoExtensions();
+  res.json({ count: paths.length, paths });
 });
 
 // Get Pi skills
@@ -558,9 +600,14 @@ app.get('/api/workspaces/:workspaceId/extensions', (req, res) => {
 
 import {
   executeTask,
+  planTask,
   stopTaskExecution,
+  steerTask,
+  followUpTask,
   getActiveSession,
   getAllActiveSessions,
+  getRepoExtensionPaths,
+  reloadRepoExtensions,
   validateQualityGates,
   checkAndAutoTransition,
 } from './agent-execution-service.js';
@@ -593,30 +640,21 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/execute', async (req, res) 
       task,
       workspaceId: workspace.id,
       workspacePath: workspace.path,
+      broadcastToWorkspace: (event) => broadcastToWorkspace(workspace.id, event),
       onOutput: (output) => {
-        broadcastToWorkspace(workspace.id, {
-          type: 'activity:entry',
-          entry: {
-            type: 'chat-message',
-            id: crypto.randomUUID(),
-            taskId: task.id,
-            role: 'agent',
-            content: output,
-            timestamp: new Date().toISOString(),
-          },
-        });
+        // Output callback is for legacy/simulation only
       },
       onComplete: (success) => {
         if (success) {
-          // Auto-move to wrapup
-          moveTaskToPhase(task, 'wrapup', 'system', 'Execution completed');
+          // Auto-move to complete
+          moveTaskToPhase(task, 'complete', 'system', 'Execution completed');
         }
         
         broadcastToWorkspace(workspace.id, {
           type: 'task:moved',
           task,
           from: 'executing',
-          to: success ? 'wrapup' : 'executing',
+          to: success ? 'complete' : 'executing',
         });
       },
     });
@@ -631,6 +669,48 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/execute', async (req, res) 
 app.post('/api/workspaces/:workspaceId/tasks/:taskId/stop', (req, res) => {
   const stopped = stopTaskExecution(req.params.taskId);
   res.json({ stopped });
+});
+
+// Steer agent (interrupt with new instruction)
+app.post('/api/workspaces/:workspaceId/tasks/:taskId/steer', async (req, res) => {
+  const { content } = req.body as { content: string };
+
+  if (!content) {
+    res.status(400).json({ error: 'Content is required' });
+    return;
+  }
+
+  // Log the user steer message in activity
+  const workspace = getWorkspaceById(req.params.workspaceId);
+  if (workspace) {
+    const entry = createChatMessage(workspace.id, req.params.taskId, 'user', content);
+    broadcastToWorkspace(workspace.id, { type: 'activity:entry', entry });
+    createSystemEvent(workspace.id, req.params.taskId, 'phase-change', 'User sent steering message');
+  }
+
+  const ok = await steerTask(req.params.taskId, content);
+  res.json({ ok });
+});
+
+// Follow-up (queue for after agent finishes)
+app.post('/api/workspaces/:workspaceId/tasks/:taskId/follow-up', async (req, res) => {
+  const { content } = req.body as { content: string };
+
+  if (!content) {
+    res.status(400).json({ error: 'Content is required' });
+    return;
+  }
+
+  // Log the user follow-up message in activity
+  const workspace = getWorkspaceById(req.params.workspaceId);
+  if (workspace) {
+    const entry = createChatMessage(workspace.id, req.params.taskId, 'user', content);
+    broadcastToWorkspace(workspace.id, { type: 'activity:entry', entry });
+    createSystemEvent(workspace.id, req.params.taskId, 'phase-change', 'User queued follow-up message');
+  }
+
+  const ok = await followUpTask(req.params.taskId, content);
+  res.json({ ok });
 });
 
 // Get task execution status

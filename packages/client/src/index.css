@@ -38,7 +38,6 @@
   --phase-planning: var(--safety-yellow);
   --phase-ready: var(--feature-blue);
   --phase-executing: var(--safety-orange);
-  --phase-wrapup: var(--safety-green);
   --phase-complete: var(--slate-500);
   
   /* Spacing */
@@ -127,13 +126,16 @@ body {
   @apply bg-orange-100 text-orange-800;
 }
 
-.phase-badge-wrapup {
-  @apply bg-green-100 text-green-800;
-}
-
 .phase-badge-complete {
   @apply bg-slate-200 text-slate-600;
 }
+
+/* Phase Dots */
+.phase-dot-backlog { background: var(--phase-backlog); }
+.phase-dot-planning { background: var(--phase-planning); }
+.phase-dot-ready { background: var(--phase-ready); }
+.phase-dot-executing { background: var(--phase-executing); }
+.phase-dot-complete { background: var(--phase-complete); }
 
 /* Priority Indicators */
 .priority-critical {
@@ -166,12 +168,16 @@ body {
 
 /* Task Cards */
 .task-card {
-  @apply bg-white rounded-lg border border-slate-200 shadow-sm hover:shadow-md transition-shadow cursor-pointer;
+  @apply bg-white rounded-lg border border-slate-200 shadow-sm hover:shadow-md transition-all cursor-grab;
   border-left-width: 4px;
 }
 
 .task-card:hover {
   @apply border-slate-300;
+}
+
+.task-card:active {
+  cursor: grabbing;
 }
 
 /* Activity Log */
@@ -192,7 +198,61 @@ body {
   @apply sticky top-0 z-10 px-4 py-2 bg-slate-50 border-y border-slate-200;
 }
 
-/* Chat Messages */
+/* Chat Bubbles */
+.chat-bubble {
+  @apply max-w-[85%] px-3.5 py-2.5 rounded-2xl;
+}
+
+.chat-bubble-user {
+  @apply bg-blue-500 text-white rounded-br-sm;
+}
+
+.chat-bubble-agent {
+  @apply bg-slate-100 text-slate-800 rounded-bl-sm;
+}
+
+/* Markdown inside agent chat bubbles */
+.chat-markdown p {
+  @apply mb-1.5 last:mb-0;
+}
+
+.chat-markdown pre {
+  @apply bg-slate-200/60 rounded-lg p-2.5 my-2 overflow-x-auto text-xs;
+}
+
+.chat-markdown code {
+  @apply bg-slate-200/60 rounded px-1 py-0.5 text-xs font-mono;
+}
+
+.chat-markdown pre code {
+  @apply bg-transparent p-0;
+}
+
+.chat-markdown ul, .chat-markdown ol {
+  @apply pl-4 mb-1.5 space-y-0.5;
+}
+
+.chat-markdown ul {
+  @apply list-disc;
+}
+
+.chat-markdown ol {
+  @apply list-decimal;
+}
+
+.chat-markdown a {
+  @apply text-blue-600 underline;
+}
+
+.chat-markdown h1, .chat-markdown h2, .chat-markdown h3 {
+  @apply font-semibold mb-1;
+}
+
+.chat-markdown blockquote {
+  @apply border-l-2 border-slate-300 pl-3 italic text-slate-600 my-1.5;
+}
+
+/* Legacy compat */
 .chat-message-user {
   @apply ml-auto bg-blue-500 text-white rounded-2xl rounded-tr-sm;
 }
@@ -245,13 +305,82 @@ body {
   @apply block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500;
 }
 
-/* Modal */
+/* Modal — only used for rare settings dialogs */
 .modal-overlay {
   @apply fixed inset-0 bg-black/50 flex items-center justify-center z-50;
 }
 
 .modal-content {
   @apply bg-white rounded-xl shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-hidden;
+}
+
+/* Right pane transitions */
+.right-pane-enter {
+  animation: fade-in 0.15s ease-out;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateX(8px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+/* Resize Handle */
+.resize-handle {
+  width: 5px;
+  cursor: col-resize;
+  background: transparent;
+  position: relative;
+  flex-shrink: 0;
+  z-index: 10;
+  transition: background 0.15s;
+}
+
+.resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  background: var(--slate-200);
+  transition: width 0.15s, background 0.15s, left 0.15s;
+}
+
+.resize-handle:hover::after,
+.resize-handle:active::after {
+  width: 3px;
+  left: calc(50% - 1px);
+  background: var(--safety-orange);
+}
+
+/* CodeMirror overrides — ensure it fills container properly */
+.cm-editor {
+  height: 100%;
+}
+
+.cm-editor .cm-scroller {
+  overflow: auto;
+}
+
+/* Flex-fill editor: make CodeMirror fill its parent */
+/* Flex-fill editor: make CodeMirror stretch to fill parent */
+.editor-fill {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.editor-fill .cm-editor {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.editor-fill .cm-editor .cm-scroller {
+  flex: 1;
+  min-height: 0;
 }
 
 /* Loading States */
