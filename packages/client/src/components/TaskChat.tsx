@@ -72,11 +72,22 @@ function formatToolHeader(name: string, args?: Record<string, unknown>): { prefi
       const preview = summary.length > 80 ? summary.slice(0, 77) + '...' : summary
       return { prefix: '✅ complete', detail: preview || String(a.taskId || '') }
     }
+    case 'ask_questions': {
+      const questions = Array.isArray(a.questions) ? a.questions : []
+      const count = questions.length
+      const firstQ = questions[0]
+      const preview = firstQ?.text
+        ? (firstQ.text.length > 60 ? firstQ.text.slice(0, 57) + '...' : firstQ.text)
+        : ''
+      const suffix = count > 1 ? ` (+${count - 1} more)` : ''
+      return { prefix: '❓ ask', detail: `${preview}${suffix}` }
+    }
     default: {
       const parts = Object.entries(a)
         .filter(([, v]) => v != null)
         .map(([k, v]) => {
           if (typeof v === 'string') return `${k}=${v.length > 50 ? v.slice(0, 47) + '...' : v}`
+          if (typeof v === 'object') return `${k}=[${Array.isArray(v) ? `${v.length} items` : 'object'}]`
           return `${k}=${v}`
         })
       return { prefix: name.toLowerCase(), detail: parts.join(' ') }
