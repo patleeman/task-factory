@@ -571,8 +571,8 @@ export function WorkspacePage() {
                 agentStream={planningStream.agentStream}
                 onSendMessage={handlePlanningMessage}
                 onReset={handleResetPlanning}
-                title="Planning Agent"
-                emptyState={{ title: 'Planning Agent', subtitle: 'Ask me to research, plan, or decompose work into tasks' }}
+                title="Foreman"
+                emptyState={{ title: 'Foreman', subtitle: 'Ask me to research, plan, or decompose work into tasks' }}
               />
             ) : (
               /* Task mode: show task chat in left pane */

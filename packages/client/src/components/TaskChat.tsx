@@ -7,16 +7,19 @@ import { api } from '../api'
 type SendMode = 'message' | 'steer' | 'followUp'
 
 interface TaskChatProps {
-  taskId: string
-  taskPhase: Phase
+  taskId?: string
+  taskPhase?: Phase
   workspaceId?: string
   entries: ActivityEntry[]
-  attachments: Attachment[]
+  attachments?: Attachment[]
   agentStream: AgentStreamState
   onSendMessage: (content: string, attachmentIds?: string[]) => void
-  onSteer: (content: string, attachmentIds?: string[]) => void
-  onFollowUp: (content: string, attachmentIds?: string[]) => void
-  onStop: () => void
+  onSteer?: (content: string, attachmentIds?: string[]) => void
+  onFollowUp?: (content: string, attachmentIds?: string[]) => void
+  onStop?: () => void
+  onReset?: () => void
+  title?: string
+  emptyState?: { title: string; subtitle: string }
 }
 
 const STATUS_CONFIG: Record<AgentExecutionStatus, { label: string; color: string; pulse?: boolean }> = {
@@ -182,8 +185,8 @@ const ToolCallBlock = memo(function ToolCallBlock({ toolCall }: { toolCall: Tool
   const [expanded, setExpanded] = useState(false)
 
   const header = useMemo(
-    () => formatToolHeader(toolCall.toolName),
-    [toolCall.toolName]
+    () => formatToolHeader(toolCall.toolName, toolCall.input),
+    [toolCall.toolName, toolCall.input]
   )
 
   const outputInfo = useMemo(() => {
@@ -354,6 +357,9 @@ export function TaskChat({
   onSteer,
   onFollowUp,
   onStop,
+  onReset,
+  title,
+  emptyState,
 }: TaskChatProps) {
   const [input, setInput] = useState('')
   const [isComposing, setIsComposing] = useState(false)
@@ -366,16 +372,16 @@ export function TaskChat({
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // Task phase is the source of truth — if the task isn't executing,
-  // the agent isn't running regardless of what the stream state says
-  const isActive = agentStream.isActive && taskPhase === 'executing'
+  // When taskPhase is provided, it's the source of truth for active state.
+  // When not provided (planning mode), just use agentStream.isActive directly.
+  const isActive = taskPhase ? agentStream.isActive && taskPhase === 'executing' : agentStream.isActive
 
-  // Agent is waiting for user input — task is executing but agent isn't actively running.
-  // This happens when the agent asks a question or flags a blocker without calling task_complete.
-  const isWaitingForInput = !agentStream.isActive && taskPhase === 'executing' && agentStream.status === 'idle'
+  const isWaitingForInput = taskPhase
+    ? !agentStream.isActive && taskPhase === 'executing' && agentStream.status === 'idle'
+    : false
 
   const taskEntries = useMemo(
-    () => entries.filter((e) => e.taskId === taskId).reverse(),
+    () => taskId ? entries.filter((e) => e.taskId === taskId).reverse() : entries,
     [entries, taskId]
   )
 
@@ -384,8 +390,8 @@ export function TaskChat({
   }, [taskEntries.length, agentStream.streamingText.length])
 
   useEffect(() => {
-    setSendMode(isActive ? 'steer' : 'message')
-  }, [isActive])
+    setSendMode(isActive && onSteer ? 'steer' : 'message')
+  }, [isActive, onSteer])
 
   const addFiles = useCallback((files: FileList | File[]) => {
     const newFiles = Array.from(files)
@@ -403,7 +409,7 @@ export function TaskChat({
 
     // Upload pending files first (for any send mode)
     let attachmentIds: string[] | undefined
-    if (pendingFiles.length > 0 && workspaceId) {
+    if (pendingFiles.length > 0 && workspaceId && taskId) {
       setIsUploading(true)
       try {
         const uploaded = await api.uploadAttachments(workspaceId, taskId, pendingFiles)
@@ -417,9 +423,9 @@ export function TaskChat({
       setIsUploading(false)
     }
 
-    if (sendMode === 'steer') {
+    if (sendMode === 'steer' && onSteer) {
       if (trimmed) onSteer(trimmed, attachmentIds)
-    } else if (sendMode === 'followUp') {
+    } else if (sendMode === 'followUp' && onFollowUp) {
       if (trimmed) onFollowUp(trimmed, attachmentIds)
     } else {
       if (trimmed || attachmentIds) {
@@ -458,7 +464,7 @@ export function TaskChat({
     if (e.key === 'Enter' && !e.shiftKey && !e.altKey) {
       e.preventDefault()
       handleSend()
-    } else if (e.key === 'Enter' && e.altKey && isActive) {
+    } else if (e.key === 'Enter' && e.altKey && isActive && onFollowUp) {
       e.preventDefault()
       const trimmed = input.trim()
       if (trimmed) { onFollowUp(trimmed); setInput('') }
@@ -468,7 +474,19 @@ export function TaskChat({
   const statusConfig = STATUS_CONFIG[agentStream.status]
 
   return (
-    <div className="flex flex-col h-full min-h-0">
+    <div className="flex flex-col h-full min-h-0 relative">
+      {/* Header — shown when title or reset is provided */}
+      {(title || onReset) && (
+        <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-200 bg-slate-50 shrink-0">
+          {title && <h2 className="font-semibold text-xs text-slate-500 uppercase tracking-wide">{title}</h2>}
+          {onReset && (
+            <button onClick={onReset} className="text-[10px] text-slate-400 hover:text-slate-600 font-mono transition-colors" title="Reset conversation">
+              reset
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Waiting for input banner */}
       {isWaitingForInput && (
         <div className="flex items-center gap-2 px-4 py-2 bg-amber-50 border-b border-amber-200 shrink-0">
@@ -487,12 +505,22 @@ export function TaskChat({
               {agentStream.toolCalls[agentStream.toolCalls.length - 1].toolName}
             </span>
           )}
-          <button
-            onClick={onStop}
-            className="ml-auto text-xs font-mono text-red-500 hover:text-red-600 bg-red-50 hover:bg-red-100 px-2 py-0.5 rounded transition-colors"
-          >
-            ⏹ stop
-          </button>
+          {onStop && (
+            <button
+              onClick={onStop}
+              className="ml-auto text-xs font-mono text-red-500 hover:text-red-600 bg-red-50 hover:bg-red-100 px-2 py-0.5 rounded transition-colors"
+            >
+              ⏹ stop
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Empty state */}
+      {taskEntries.length === 0 && !isActive && emptyState && (
+        <div className="flex flex-col items-center justify-center text-slate-400 absolute inset-0 z-0 pointer-events-none">
+          <p className="text-sm font-medium text-slate-500 mb-1">{emptyState.title}</p>
+          <p className="text-xs">{emptyState.subtitle}</p>
         </div>
       )}
 
@@ -512,7 +540,7 @@ export function TaskChat({
           </div>
         )}
         <div className="px-4 py-3 space-y-1 text-[14px] leading-relaxed">
-          {taskEntries.length === 0 && !isActive && (
+          {taskEntries.length === 0 && !isActive && !emptyState && (
             <div className="text-center py-16 text-slate-400">
               <p className="text-sm font-mono">no messages yet</p>
               <p className="text-xs mt-1">send a message or execute the task</p>
@@ -549,7 +577,7 @@ export function TaskChat({
               if (entry.role === 'user') {
                 const msgAttachmentIds = (meta?.attachmentIds as string[]) || []
                 const msgAttachments = msgAttachmentIds
-                  .map(id => attachments.find(a => a.id === id))
+                  .map(id => (attachments || []).find(a => a.id === id))
                   .filter(Boolean) as Attachment[]
 
                 return (
@@ -558,7 +586,7 @@ export function TaskChat({
                     {msgAttachments.length > 0 && (
                       <div className="flex flex-wrap gap-2 mt-2">
                         {msgAttachments.map(att => {
-                          const url = workspaceId ? api.getAttachmentUrl(workspaceId, taskId, att.storedName) : ''
+                          const url = workspaceId && taskId ? api.getAttachmentUrl(workspaceId, taskId, att.storedName) : ''
                           const isImage = att.mimeType.startsWith('image/')
                           return isImage ? (
                             <a key={att.id} href={url} target="_blank" rel="noopener noreferrer" className="block">
@@ -587,8 +615,9 @@ export function TaskChat({
                 )
               }
 
-              // Agent message — check if it looks like tool output (old entries without metadata)
-              const toolInfo = guessToolInfo(entry.content)
+              // Agent message — check if it looks like tool output (old execution entries without metadata)
+              // Skip for planning entries (taskId starting with __) — those always have proper metadata now
+              const toolInfo = taskId && !taskId.startsWith('__') ? guessToolInfo(entry.content) : null
               if (toolInfo) {
                 return (
                   <InferredToolBlock
@@ -636,7 +665,7 @@ export function TaskChat({
 
       {/* Input */}
       <div className="shrink-0 border-t border-slate-200 bg-white">
-        {isActive && (
+        {isActive && onSteer && (
           <div className="flex items-center gap-1 px-3 pt-2 pb-0">
             <button
               onClick={() => setSendMode('steer')}
@@ -648,16 +677,18 @@ export function TaskChat({
             >
               ⚡ steer
             </button>
-            <button
-              onClick={() => setSendMode('followUp')}
-              className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded transition-colors ${
-                sendMode === 'followUp'
-                  ? 'bg-blue-100 text-blue-700'
-                  : 'text-slate-400 hover:text-slate-600'
-              }`}
-            >
-              ↩ follow-up
-            </button>
+            {onFollowUp && (
+              <button
+                onClick={() => setSendMode('followUp')}
+                className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded transition-colors ${
+                  sendMode === 'followUp'
+                    ? 'bg-blue-100 text-blue-700'
+                    : 'text-slate-400 hover:text-slate-600'
+                }`}
+              >
+                ↩ follow-up
+              </button>
+            )}
             <span className="text-[10px] text-slate-400 font-mono ml-auto">
               {sendMode === 'steer' ? 'interrupts after current tool' : 'queued for when agent finishes'}
             </span>
@@ -698,26 +729,30 @@ export function TaskChat({
         )}
 
         <div className="flex gap-2 items-end p-3">
-          {/* Attach file button */}
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isUploading}
-            className="text-[10px] font-medium text-slate-400 hover:text-slate-600 transition-colors py-2 px-1.5 shrink-0 disabled:opacity-50"
-            title="Attach files"
-          >
-            Attach
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            accept="image/*,.pdf,.txt,.md,.json,.csv,.log"
-            className="hidden"
-            onChange={(e) => {
-              if (e.target.files) addFiles(e.target.files)
-              e.target.value = ''
-            }}
-          />
+          {/* Attach file button — only for execution tasks with real file upload support */}
+          {workspaceId && taskId && attachments && (
+            <>
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isUploading}
+              className="text-[10px] font-medium text-slate-400 hover:text-slate-600 transition-colors py-2 px-1.5 shrink-0 disabled:opacity-50"
+              title="Attach files"
+            >
+              📎
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept="image/*,.pdf,.txt,.md,.json,.csv,.log"
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files) addFiles(e.target.files)
+                e.target.value = ''
+              }}
+            />
+            </>
+          )}
           <textarea
             ref={textareaRef}
             data-chat-input

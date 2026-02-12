@@ -792,7 +792,8 @@ function handlePiEvent(
         taskId,
         toolName: event.toolName,
         toolCallId: event.toolCallId,
-      });
+        input: (event as any).args || {},
+      } as any);
       break;
     }
 

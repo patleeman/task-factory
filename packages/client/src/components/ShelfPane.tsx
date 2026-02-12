@@ -93,7 +93,7 @@ export function ShelfPane({
           <div className="flex flex-col items-center justify-center h-full text-slate-400 px-6">
             <p className="text-sm font-medium text-slate-500 mb-1">Production queue is empty</p>
             <p className="text-xs text-center">
-              Chat with the planning agent to create draft tasks and artifacts
+              Chat with the Foreman to create draft tasks and artifacts
             </p>
           </div>
         ) : (

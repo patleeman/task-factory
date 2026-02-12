@@ -4,6 +4,7 @@ import type { ServerEvent, AgentExecutionStatus } from '@pi-factory/shared'
 export interface ToolCallState {
   toolCallId: string
   toolName: string
+  input?: Record<string, unknown>
   output: string
   isComplete: boolean
   isError: boolean
@@ -114,6 +115,7 @@ export function useAgentStreaming(
               {
                 toolCallId: msg.toolCallId,
                 toolName: msg.toolName,
+                input: (msg as any).input,
                 output: '',
                 isComplete: false,
                 isError: false,

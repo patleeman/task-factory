@@ -393,7 +393,7 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
       {frontmatter.phase === 'planning' && !frontmatter.plan && (
         <div className="flex items-center gap-3 py-3 px-4 bg-amber-50 border border-amber-200 rounded-lg">
           <div className="w-4 h-4 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
-          <span className="text-sm text-amber-700 font-medium">Planning agent is researching and generating a plan…</span>
+          <span className="text-sm text-amber-700 font-medium">Foreman is researching and generating a plan…</span>
         </div>
       )}
 

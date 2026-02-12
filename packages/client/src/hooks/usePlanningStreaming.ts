@@ -1,64 +1,84 @@
 import { useState, useEffect, useRef } from 'react'
-import type { ServerEvent, PlanningAgentStatus, PlanningMessage, Shelf } from '@pi-factory/shared'
-
-export interface PlanningToolCallState {
-  toolCallId: string
-  toolName: string
-  output: string
-  isComplete: boolean
-  isError: boolean
-}
+import type { ServerEvent, PlanningMessage, ActivityEntry, Shelf } from '@pi-factory/shared'
+import type { AgentStreamState, ToolCallState } from './useAgentStreaming'
 
 export interface PlanningStreamState {
-  status: PlanningAgentStatus
-  streamingText: string
-  thinkingText: string
-  toolCalls: PlanningToolCallState[]
-  messages: PlanningMessage[]
+  /** Agent stream state — same type as execution agent, drop into TaskChat directly */
+  agentStream: AgentStreamState
+  /** Messages as ActivityEntry[] — same type as execution agent, drop into TaskChat directly */
+  entries: ActivityEntry[]
+  /** Shelf state */
   shelf: Shelf | null
-  isActive: boolean
 }
 
-const INITIAL_STATE: PlanningStreamState = {
+const INITIAL_AGENT_STREAM: AgentStreamState = {
   status: 'idle',
   streamingText: '',
   thinkingText: '',
   toolCalls: [],
-  messages: [],
-  shelf: null,
   isActive: false,
 }
 
 /**
+ * Convert PlanningMessage[] to ActivityEntry[] so TaskChat renders them identically.
+ */
+function messagesToEntries(messages: PlanningMessage[]): ActivityEntry[] {
+  return messages.map((msg): ActivityEntry => {
+    if (msg.role === 'tool') {
+      return {
+        type: 'chat-message',
+        id: msg.id,
+        taskId: PLANNING_TASK_ID,
+        role: 'agent',
+        content: msg.content,
+        timestamp: msg.timestamp,
+        metadata: {
+          toolName: msg.metadata?.toolName,
+          args: msg.metadata?.args,
+          isError: msg.metadata?.isError,
+        },
+      }
+    }
+    return {
+      type: 'chat-message',
+      id: msg.id,
+      taskId: PLANNING_TASK_ID,
+      role: msg.role === 'user' ? 'user' : 'agent',
+      content: msg.content,
+      timestamp: msg.timestamp,
+    }
+  })
+}
+
+/**
  * Tracks live planning agent streaming state for a workspace.
+ * Returns data in the same format as useAgentStreaming so TaskChat works for both.
  */
 export function usePlanningStreaming(
   workspaceId: string | null,
   subscribe: (handler: (event: ServerEvent) => void) => () => void,
   initialMessages?: PlanningMessage[],
 ): PlanningStreamState {
-  const [state, setState] = useState<PlanningStreamState>(INITIAL_STATE)
+  const [messages, setMessages] = useState<PlanningMessage[]>([])
+  const [agentStream, setAgentStream] = useState<AgentStreamState>(INITIAL_AGENT_STREAM)
+  const [shelf, setShelf] = useState<Shelf | null>(null)
   const workspaceIdRef = useRef(workspaceId)
   workspaceIdRef.current = workspaceId
 
   useEffect(() => {
-    setState(INITIAL_STATE)
+    setMessages([])
+    setAgentStream(INITIAL_AGENT_STREAM)
   }, [workspaceId])
 
   // Seed with initial messages loaded from server, or clear on reset
   useEffect(() => {
     if (!initialMessages) return
-    setState((prev) => {
-      // Reset requested (empty array passed after a reset call)
-      if (initialMessages.length === 0 && prev.messages.length > 0) {
-        return { ...INITIAL_STATE }
-      }
-      // Seed only if we haven't received any streaming messages yet
-      if (initialMessages.length > 0 && prev.messages.length === 0) {
-        return { ...prev, messages: initialMessages }
-      }
-      return prev
-    })
+    if (initialMessages.length === 0) {
+      setMessages([])
+      setAgentStream(INITIAL_AGENT_STREAM)
+    } else {
+      setMessages((prev) => prev.length === 0 ? initialMessages : prev)
+    }
   }, [initialMessages])
 
   useEffect(() => {
@@ -66,41 +86,37 @@ export function usePlanningStreaming(
       const currentWsId = workspaceIdRef.current
       if (!currentWsId) return
 
-      // Only handle planning events for our workspace
       if ('workspaceId' in msg && (msg as any).workspaceId !== currentWsId) return
 
       switch (msg.type) {
         case 'planning:status':
-          setState((prev) => ({
+          setAgentStream((prev) => ({
             ...prev,
-            status: msg.status,
+            status: msg.status as any,
             isActive: msg.status !== 'idle' && msg.status !== 'error',
           }))
           break
 
         case 'planning:message':
-          setState((prev) => ({
-            ...prev,
-            messages: [...prev.messages, msg.message],
-          }))
+          setMessages((prev) => [...prev, msg.message])
           break
 
         case 'planning:streaming_text':
-          setState((prev) => ({
+          setAgentStream((prev) => ({
             ...prev,
             streamingText: prev.streamingText + msg.delta,
           }))
           break
 
         case 'planning:streaming_end':
-          setState((prev) => ({
+          setAgentStream((prev) => ({
             ...prev,
             streamingText: '',
           }))
           break
 
         case 'planning:thinking_delta':
-          setState((prev) => ({
+          setAgentStream((prev) => ({
             ...prev,
             thinkingText: prev.thinkingText + msg.delta,
             status: 'thinking',
@@ -108,14 +124,14 @@ export function usePlanningStreaming(
           break
 
         case 'planning:thinking_end':
-          setState((prev) => ({
+          setAgentStream((prev) => ({
             ...prev,
             thinkingText: '',
           }))
           break
 
         case 'planning:tool_start':
-          setState((prev) => ({
+          setAgentStream((prev) => ({
             ...prev,
             status: 'tool_use',
             toolCalls: [
@@ -123,16 +139,17 @@ export function usePlanningStreaming(
               {
                 toolCallId: msg.toolCallId,
                 toolName: msg.toolName,
+                input: (msg as any).input,
                 output: '',
                 isComplete: false,
                 isError: false,
-              },
+              } as ToolCallState,
             ],
           }))
           break
 
         case 'planning:tool_update':
-          setState((prev) => ({
+          setAgentStream((prev) => ({
             ...prev,
             toolCalls: prev.toolCalls.map((tc) =>
               tc.toolCallId === msg.toolCallId
@@ -143,7 +160,7 @@ export function usePlanningStreaming(
           break
 
         case 'planning:tool_end':
-          setState((prev) => ({
+          setAgentStream((prev) => ({
             ...prev,
             toolCalls: prev.toolCalls.map((tc) =>
               tc.toolCallId === msg.toolCallId
@@ -154,21 +171,23 @@ export function usePlanningStreaming(
           break
 
         case 'planning:turn_end':
-          setState((prev) => ({
+          setAgentStream((prev) => ({
             ...prev,
             toolCalls: [],
           }))
           break
 
         case 'shelf:updated':
-          setState((prev) => ({
-            ...prev,
-            shelf: msg.shelf,
-          }))
+          setShelf(msg.shelf)
           break
       }
     })
   }, [subscribe])
 
-  return state
+  // Convert messages to entries for TaskChat
+  const entries = messagesToEntries(messages)
+
+  return { agentStream, entries, shelf }
 }
+
+export const PLANNING_TASK_ID = '__planning__'
