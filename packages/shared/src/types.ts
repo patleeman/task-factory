@@ -137,6 +137,9 @@ export interface TaskFrontmatter {
   // Agent session file (for resuming conversation on re-execution)
   sessionFile?: string;
 
+  // Post-execution summary (generated after task completion)
+  postExecutionSummary?: PostExecutionSummary;
+
   // Blocker tracking
   blocked: BlockedState;
 }
@@ -151,6 +154,43 @@ export interface TaskPlan {
   validation: string[];  // How to validate the goal has been achieved
   cleanup: string[];     // Post-completion cleanup actions
   generatedAt: string;   // ISO 8601 timestamp
+}
+
+// =============================================================================
+// Post-Execution Summary
+// =============================================================================
+
+export interface PostExecutionSummary {
+  summary: string;           // Short description of work done
+  completedAt: string;       // ISO 8601
+  fileDiffs: FileDiff[];     // Word-level diffs of changed files
+  criteriaValidation: CriterionValidation[];
+  artifacts: SummaryArtifact[];
+}
+
+export interface FileDiff {
+  filePath: string;
+  hunks: DiffHunk[];
+}
+
+export interface DiffHunk {
+  /** 'add' for new text, 'del' for removed text, 'ctx' for unchanged context */
+  type: 'add' | 'del' | 'ctx';
+  content: string;
+}
+
+export type CriterionStatus = 'pass' | 'fail' | 'pending';
+
+export interface CriterionValidation {
+  criterion: string;
+  status: CriterionStatus;
+  evidence: string;
+}
+
+export interface SummaryArtifact {
+  name: string;
+  url: string;
+  type: string;  // e.g. 'screenshot', 'log', 'report'
 }
 
 export interface BlockedState {

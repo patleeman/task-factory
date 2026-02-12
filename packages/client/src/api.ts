@@ -1,4 +1,4 @@
-import type { Task, Workspace, ActivityEntry, Phase, Attachment, QueueStatus, PlanningMessage, PlanningAgentStatus, Shelf, DraftTask, TaskDefaults } from '@pi-factory/shared'
+import type { Task, Workspace, ActivityEntry, Phase, Attachment, QueueStatus, PlanningMessage, PlanningAgentStatus, Shelf, DraftTask, TaskDefaults, PostExecutionSummary, CriterionStatus } from '@pi-factory/shared'
 
 export interface AvailableModel {
   provider: string
@@ -301,5 +301,49 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updates),
     })
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Post-Execution Summary
+  // ─────────────────────────────────────────────────────────────────────────
+
+  async getSummary(workspaceId: string, taskId: string): Promise<PostExecutionSummary | null> {
+    const res = await fetch(`/api/workspaces/${workspaceId}/tasks/${taskId}/summary`)
+    if (res.status === 404) return null
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to fetch summary' }))
+      throw new Error(err.error || `Failed (${res.status})`)
+    }
+    return res.json()
+  },
+
+  async generateSummary(workspaceId: string, taskId: string): Promise<PostExecutionSummary> {
+    const res = await fetch(`/api/workspaces/${workspaceId}/tasks/${taskId}/summary/generate`, {
+      method: 'POST',
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to generate summary' }))
+      throw new Error(err.error || `Failed (${res.status})`)
+    }
+    return res.json()
+  },
+
+  async updateCriterionStatus(
+    workspaceId: string,
+    taskId: string,
+    index: number,
+    status: CriterionStatus,
+    evidence?: string,
+  ): Promise<PostExecutionSummary> {
+    const res = await fetch(`/api/workspaces/${workspaceId}/tasks/${taskId}/summary/criteria/${index}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status, evidence: evidence || '' }),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to update criterion' }))
+      throw new Error(err.error || `Failed (${res.status})`)
+    }
+    return res.json()
   },
 }

@@ -23,6 +23,7 @@ import { buildAgentContext, type PiSkill } from './pi-integration.js';
 import { moveTaskToPhase, updateTask, saveTaskFile } from './task-service.js';
 import { runPostExecutionSkills } from './post-execution-skills.js';
 import { withTimeout } from './with-timeout.js';
+import { generateAndPersistSummary } from './summary-service.js';
 
 // =============================================================================
 // Repo-local Extension Discovery
@@ -643,6 +644,20 @@ async function handleAgentTurnEnd(
       );
       session.broadcastToWorkspace?.({ type: 'activity:entry', entry: hookErrEntry });
     }
+  }
+
+  // Generate post-execution summary before marking complete
+  try {
+    const postSummary = generateAndPersistSummary(task, summary);
+    const summaryEntry = createSystemEvent(
+      workspaceId,
+      task.id,
+      'phase-change',
+      `Post-execution summary generated (${postSummary.fileDiffs.length} file diffs, ${postSummary.criteriaValidation.length} criteria)`,
+    );
+    session.broadcastToWorkspace?.({ type: 'activity:entry', entry: summaryEntry });
+  } catch (summaryErr) {
+    console.error('Failed to generate post-execution summary:', summaryErr);
   }
 
   if (session.status !== 'error') {

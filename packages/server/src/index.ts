@@ -1090,6 +1090,118 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/regenerate-criteria', async
   }
 });
 
+// =============================================================================
+// Post-Execution Summary API
+// =============================================================================
+
+import {
+  generateAndPersistSummary,
+  updateCriterionStatus,
+} from './summary-service.js';
+
+import type { CriterionStatus } from '@pi-factory/shared';
+
+// Get post-execution summary
+app.get('/api/workspaces/:workspaceId/tasks/:taskId/summary', (req, res) => {
+  const workspace = getWorkspaceById(req.params.workspaceId);
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return;
+  }
+
+  const tasksDir = getTasksDir(workspace);
+  const tasks = discoverTasks(tasksDir);
+  const task = tasks.find(t => t.id === req.params.taskId);
+
+  if (!task) {
+    res.status(404).json({ error: 'Task not found' });
+    return;
+  }
+
+  if (!task.frontmatter.postExecutionSummary) {
+    res.status(404).json({ error: 'No summary exists for this task' });
+    return;
+  }
+
+  res.json(task.frontmatter.postExecutionSummary);
+});
+
+// Update a criterion's validation status
+app.patch('/api/workspaces/:workspaceId/tasks/:taskId/summary/criteria/:index', (req, res) => {
+  const workspace = getWorkspaceById(req.params.workspaceId);
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return;
+  }
+
+  const tasksDir = getTasksDir(workspace);
+  const tasks = discoverTasks(tasksDir);
+  const task = tasks.find(t => t.id === req.params.taskId);
+
+  if (!task) {
+    res.status(404).json({ error: 'Task not found' });
+    return;
+  }
+
+  const index = parseInt(req.params.index, 10);
+  if (isNaN(index)) {
+    res.status(400).json({ error: 'Invalid criterion index' });
+    return;
+  }
+
+  const { status, evidence } = req.body as { status: CriterionStatus; evidence?: string };
+  if (!status || !['pass', 'fail', 'pending'].includes(status)) {
+    res.status(400).json({ error: 'Invalid status — must be pass, fail, or pending' });
+    return;
+  }
+
+  const summary = updateCriterionStatus(task, index, status, evidence || '');
+  if (!summary) {
+    res.status(404).json({ error: 'No summary exists or invalid index' });
+    return;
+  }
+
+  broadcastToWorkspace(workspace.id, {
+    type: 'task:updated',
+    task,
+    changes: {},
+  });
+
+  res.json(summary);
+});
+
+// Generate (or regenerate) post-execution summary
+app.post('/api/workspaces/:workspaceId/tasks/:taskId/summary/generate', (req, res) => {
+  const workspace = getWorkspaceById(req.params.workspaceId);
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return;
+  }
+
+  const tasksDir = getTasksDir(workspace);
+  const tasks = discoverTasks(tasksDir);
+  const task = tasks.find(t => t.id === req.params.taskId);
+
+  if (!task) {
+    res.status(404).json({ error: 'Task not found' });
+    return;
+  }
+
+  try {
+    const summary = generateAndPersistSummary(task);
+
+    broadcastToWorkspace(workspace.id, {
+      type: 'task:updated',
+      task,
+      changes: {},
+    });
+
+    res.json(summary);
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
 // Get all active executions
 app.get('/api/executions', (_req, res) => {
   const sessions = getAllActiveSessions();

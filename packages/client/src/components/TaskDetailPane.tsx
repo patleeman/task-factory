@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import type { Task, Phase, ModelConfig } from '@pi-factory/shared'
+import type { Task, Phase, ModelConfig, PostExecutionSummary as PostExecutionSummaryType } from '@pi-factory/shared'
 import { PHASES, PHASE_DISPLAY_NAMES, getPromotePhase, getDemotePhase } from '@pi-factory/shared'
 import { MarkdownEditor } from './MarkdownEditor'
 import type { PostExecutionSkill } from '../types/pi'
 import { SkillSelector } from './SkillSelector'
 import { ModelSelector } from './ModelSelector'
+import { PostExecutionSummary, GenerateSummaryButton } from './PostExecutionSummary'
 import ReactMarkdown from 'react-markdown'
 import { api } from '../api'
 
@@ -225,8 +226,18 @@ export function TaskDetailPane({
 // =============================================================================
 
 function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditing, editedTitle, setEditedTitle, editedContent, setEditedContent, editedCriteria, setEditedCriteria, editedModelConfig, setEditedModelConfig, selectedSkillIds, setSelectedSkillIds, availableSkills, missingAcceptanceCriteria, isRegeneratingCriteria, isPlanGenerating, onRegenerateCriteria, onSaveEdit, onDelete }: any) {
+  const isCompleted = frontmatter.phase === 'complete' || frontmatter.phase === 'archived'
+
   return (
     <div className="p-5 space-y-5">
+      {/* Post-Execution Summary (for completed tasks) */}
+      {isCompleted && (
+        <PostExecutionSummarySection
+          task={task}
+          workspaceId={workspaceId}
+        />
+      )}
+
       {/* Title */}
       <div>
         {isEditing ? (
@@ -629,6 +640,40 @@ function AttachmentsSection({ task, workspaceId }: { task: Task; workspaceId: st
         </div>
       )}
     </div>
+  )
+}
+
+// =============================================================================
+// Post-Execution Summary Section
+// =============================================================================
+
+function PostExecutionSummarySection({ task, workspaceId }: { task: Task; workspaceId: string }) {
+  const [summary, setSummary] = useState<PostExecutionSummaryType | undefined>(
+    task.frontmatter.postExecutionSummary
+  )
+
+  // Sync with task data when task changes
+  useEffect(() => {
+    setSummary(task.frontmatter.postExecutionSummary)
+  }, [task.id, task.frontmatter.postExecutionSummary])
+
+  if (summary) {
+    return (
+      <PostExecutionSummary
+        summary={summary}
+        workspaceId={workspaceId}
+        taskId={task.id}
+        onSummaryUpdated={setSummary}
+      />
+    )
+  }
+
+  return (
+    <GenerateSummaryButton
+      workspaceId={workspaceId}
+      taskId={task.id}
+      onGenerated={setSummary}
+    />
   )
 }
 
