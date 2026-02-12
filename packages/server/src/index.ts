@@ -32,6 +32,7 @@ import {
   canMoveToPhase,
   parseTaskFile,
   reorderTasks,
+  saveTaskFile,
   shouldResumeInterruptedPlanning,
 } from './task-service.js';
 import {
@@ -955,7 +956,6 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/apply-wrapper', async (req,
   try {
     const updated = applyWrapper(task, wrapperId);
     updated.frontmatter.updated = new Date().toISOString();
-    const { saveTaskFile } = await import('./task-service.js');
     saveTaskFile(updated);
 
     broadcastToWorkspace(workspace.id, { type: 'task:updated', task: updated, changes: {} });

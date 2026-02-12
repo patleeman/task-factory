@@ -612,7 +612,7 @@ async function runAgentExecution(
       session.broadcastToWorkspace?.({
         type: 'agent:execution_status',
         taskId: task.id,
-        status: 'pre-hooks' as any,
+        status: 'pre-hooks',
       });
 
       const preStartEntry = createSystemEvent(

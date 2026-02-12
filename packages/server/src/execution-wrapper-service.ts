@@ -22,8 +22,7 @@ import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join, dirname, basename } from 'path';
 import { fileURLToPath } from 'url';
 import YAML from 'yaml';
-import type { ExecutionWrapper } from '@pi-factory/shared';
-import type { Task } from '@pi-factory/shared';
+import type { ExecutionWrapper, Task } from '@pi-factory/shared';
 
 // =============================================================================
 // Wrapper Discovery
