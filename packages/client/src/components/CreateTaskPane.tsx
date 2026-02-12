@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react'
-import type { ModelConfig } from '@pi-factory/shared'
+import type { ModelConfig, NewTaskFormState } from '@pi-factory/shared'
 import { DEFAULT_POST_EXECUTION_SKILLS } from '@pi-factory/shared'
 import { MarkdownEditor } from './MarkdownEditor'
 import { SkillSelector } from './SkillSelector'
 import { ModelSelector } from './ModelSelector'
 import { useLocalStorageDraft } from '../hooks/useLocalStorageDraft'
+import { api } from '../api'
 import type { PostExecutionSkill } from '../types/pi'
 
 export interface CreateTaskData {
@@ -15,8 +16,11 @@ export interface CreateTaskData {
 }
 
 interface CreateTaskPaneProps {
+  workspaceId: string
   onCancel: () => void
   onSubmit: (data: CreateTaskData) => void
+  /** Incoming form updates from the planning agent (via WebSocket) */
+  agentFormUpdates?: Partial<NewTaskFormState> | null
 }
 
 function formatFileSize(bytes: number): string {
@@ -25,7 +29,7 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-export function CreateTaskPane({ onCancel, onSubmit }: CreateTaskPaneProps) {
+export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdates }: CreateTaskPaneProps) {
   const { initialDraft, restoredFromDraft, updateDraft, clearDraft, dismissRestoredBanner } = useLocalStorageDraft()
 
   const [content, setContent] = useState(initialDraft.content)
@@ -45,6 +49,37 @@ export function CreateTaskPane({ onCancel, onSubmit }: CreateTaskPaneProps) {
       .then(setAvailableSkills)
       .catch(err => console.error('Failed to load post-execution skills:', err))
   }, [])
+
+  // Register form with server when pane opens, unregister on close
+  useEffect(() => {
+    const formState: NewTaskFormState = {
+      content,
+      selectedSkillIds,
+      modelConfig,
+    }
+    api.openTaskForm(workspaceId, formState).catch(() => {})
+    return () => {
+      api.closeTaskForm(workspaceId).catch(() => {})
+    }
+  }, [workspaceId]) // Only on mount/unmount
+
+  // Sync form changes to server (debounced)
+  const syncTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
+  useEffect(() => {
+    if (syncTimer.current) clearTimeout(syncTimer.current)
+    syncTimer.current = setTimeout(() => {
+      api.syncTaskForm(workspaceId, { content, selectedSkillIds, modelConfig }).catch(() => {})
+    }, 300)
+    return () => { if (syncTimer.current) clearTimeout(syncTimer.current) }
+  }, [workspaceId, content, selectedSkillIds, modelConfig])
+
+  // Apply incoming updates from the planning agent
+  useEffect(() => {
+    if (!agentFormUpdates) return
+    if (agentFormUpdates.content !== undefined) setContent(agentFormUpdates.content)
+    if (agentFormUpdates.selectedSkillIds !== undefined) setSelectedSkillIds(agentFormUpdates.selectedSkillIds)
+    if (agentFormUpdates.modelConfig !== undefined) setModelConfig(agentFormUpdates.modelConfig)
+  }, [agentFormUpdates])
 
   // Measure container width to decide side-by-side vs stacked layout
   useLayoutEffect(() => {

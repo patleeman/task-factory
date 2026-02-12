@@ -1254,6 +1254,8 @@ import {
   getPlanningMessages,
   getPlanningStatus,
   resetPlanningSession,
+  registerTaskFormCallbacks,
+  unregisterTaskFormCallbacks,
 } from './planning-agent-service.js';
 
 import {
@@ -1325,6 +1327,74 @@ app.post('/api/workspaces/:workspaceId/planning/reset', async (req, res) => {
     return;
   }
   await resetPlanningSession(workspace.id);
+  res.json({ ok: true });
+});
+
+// =============================================================================
+// New Task Form State (bridge between planning agent and create-task UI)
+// =============================================================================
+
+import type { NewTaskFormState } from '@pi-factory/shared';
+
+const taskFormStates = new Map<string, NewTaskFormState>();
+
+// Client tells server the create-task form is open (syncs current state)
+app.post('/api/workspaces/:workspaceId/task-form/open', (req, res) => {
+  const workspace = getWorkspaceById(req.params.workspaceId);
+  if (!workspace) { res.status(404).json({ error: 'Workspace not found' }); return; }
+
+  const formState: NewTaskFormState = req.body;
+  taskFormStates.set(workspace.id, formState);
+
+  // Register callbacks so the agent extension tool can access form state
+  registerTaskFormCallbacks(workspace.id, {
+    getFormState: () => taskFormStates.get(workspace.id) || null,
+    updateFormState: (updates) => {
+      const current = taskFormStates.get(workspace.id);
+      if (!current) return 'Form is not open';
+      const updated = { ...current, ...updates };
+      taskFormStates.set(workspace.id, updated);
+      broadcastToWorkspace(workspace.id, {
+        type: 'planning:task_form_updated',
+        workspaceId: workspace.id,
+        formState: updates,
+      });
+      return 'Form updated successfully';
+    },
+    getAvailableModels: async () => {
+      const { AuthStorage, ModelRegistry } = await import('@mariozechner/pi-coding-agent');
+      const auth = new AuthStorage();
+      const registry = new ModelRegistry(auth);
+      return registry.getAvailable();
+    },
+    getAvailableSkills: () => {
+      const { discoverPostExecutionSkills } = require('./post-execution-skills.js');
+      return discoverPostExecutionSkills();
+    },
+  });
+
+  res.json({ ok: true });
+});
+
+// Client tells server the create-task form is closed
+app.post('/api/workspaces/:workspaceId/task-form/close', (req, res) => {
+  const workspace = getWorkspaceById(req.params.workspaceId);
+  if (!workspace) { res.status(404).json({ error: 'Workspace not found' }); return; }
+
+  taskFormStates.delete(workspace.id);
+  unregisterTaskFormCallbacks(workspace.id);
+  res.json({ ok: true });
+});
+
+// Client syncs form state changes to server
+app.patch('/api/workspaces/:workspaceId/task-form', (req, res) => {
+  const workspace = getWorkspaceById(req.params.workspaceId);
+  if (!workspace) { res.status(404).json({ error: 'Workspace not found' }); return; }
+
+  const current = taskFormStates.get(workspace.id);
+  if (!current) { res.json({ ok: true }); return; }
+
+  taskFormStates.set(workspace.id, { ...current, ...req.body });
   res.json({ ok: true });
 });
 

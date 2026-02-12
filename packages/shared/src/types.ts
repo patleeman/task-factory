@@ -463,9 +463,14 @@ export interface Shelf {
 // Planning agent chat message
 export interface PlanningMessage {
   id: string;
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'tool';
   content: string;
   timestamp: string;       // ISO 8601
+  metadata?: {
+    toolName?: string;
+    args?: Record<string, unknown>;
+    isError?: boolean;
+  };
 }
 
 // Planning agent WebSocket events
@@ -480,9 +485,18 @@ export type PlanningEvent =
   | { type: 'planning:thinking_end'; workspaceId: string }
   | { type: 'planning:turn_end'; workspaceId: string }
   | { type: 'planning:status'; workspaceId: string; status: PlanningAgentStatus }
-  | { type: 'shelf:updated'; workspaceId: string; shelf: Shelf };
+  | { type: 'shelf:updated'; workspaceId: string; shelf: Shelf }
+  | { type: 'planning:task_form_updated'; workspaceId: string; formState: Partial<NewTaskFormState> };
 
 export type PlanningAgentStatus = 'idle' | 'streaming' | 'tool_use' | 'thinking' | 'error';
+
+// New task form state (managed by planning agent)
+export interface NewTaskFormState {
+  content: string;
+  selectedSkillIds: string[];
+  modelConfig?: ModelConfig;
+  skillOrder?: string[];
+}
 
 // =============================================================================
 // Utility Types

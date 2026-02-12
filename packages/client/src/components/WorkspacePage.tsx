@@ -5,12 +5,11 @@ import { api } from '../api'
 import { PipelineBar } from './PipelineBar'
 import { TaskDetailPane } from './TaskDetailPane'
 import { CreateTaskPane } from './CreateTaskPane'
-import { ChatPane } from './ChatPane'
 import { ShelfPane } from './ShelfPane'
 import { ResizeHandle } from './ResizeHandle'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { useAgentStreaming } from '../hooks/useAgentStreaming'
-import { usePlanningStreaming } from '../hooks/usePlanningStreaming'
+import { usePlanningStreaming, PLANNING_TASK_ID } from '../hooks/usePlanningStreaming'
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts'
 import { TaskChat } from './TaskChat'
 
@@ -566,11 +565,14 @@ export function WorkspacePage() {
             style={{ width: leftPaneWidth }}
           >
             {mode === 'planning' ? (
-              <ChatPane
-                workspaceId={workspaceId || ''}
-                planningStream={planningStream}
+              <TaskChat
+                taskId={PLANNING_TASK_ID}
+                entries={planningStream.entries}
+                agentStream={planningStream.agentStream}
                 onSendMessage={handlePlanningMessage}
                 onReset={handleResetPlanning}
+                title="Planning Agent"
+                emptyState={{ title: 'Planning Agent', subtitle: 'Ask me to research, plan, or decompose work into tasks' }}
               />
             ) : (
               /* Task mode: show task chat in left pane */
@@ -615,6 +617,7 @@ export function WorkspacePage() {
             {mode === 'planning' ? (
               mainPane.type === 'create-task' ? (
                 <CreateTaskPane
+                  workspaceId={workspaceId || ''}
                   onCancel={() => setMainPane({ type: 'empty' })}
                   onSubmit={handleCreateTask}
                 />
@@ -686,3 +689,4 @@ function EmptyState({ onCreateTask }: { onCreateTask: () => void }) {
     </div>
   )
 }
+

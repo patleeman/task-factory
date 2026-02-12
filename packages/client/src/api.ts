@@ -234,4 +234,30 @@ export const api = {
     })
     return res.json()
   },
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // New Task Form (planning agent integration)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  async openTaskForm(workspaceId: string, formState: any): Promise<void> {
+    await fetch(`/api/workspaces/${workspaceId}/task-form/open`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(formState),
+    })
+  },
+
+  async closeTaskForm(workspaceId: string): Promise<void> {
+    await fetch(`/api/workspaces/${workspaceId}/task-form/close`, {
+      method: 'POST',
+    })
+  },
+
+  async syncTaskForm(workspaceId: string, updates: any): Promise<void> {
+    await fetch(`/api/workspaces/${workspaceId}/task-form`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    })
+  },
 }

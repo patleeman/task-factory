@@ -26,6 +26,7 @@ export function ShelfPane({
   const hasDrafts = drafts.length > 0
 
   if (focusedArtifact) {
+    console.log('[ShelfPane] Rendering focused artifact:', focusedArtifact.id, 'html length:', focusedArtifact.html?.length)
     return (
       <div className="flex flex-col h-full">
         <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-200 bg-slate-50 shrink-0">
@@ -61,7 +62,7 @@ export function ShelfPane({
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-200 bg-slate-50 shrink-0">
         <h2 className="font-semibold text-xs text-slate-500 uppercase tracking-wide">
-          Workspace
+          Production Queue
           {shelf.items.length > 0 && (
             <span className="ml-1.5 text-slate-400 font-normal">({shelf.items.length})</span>
           )}
@@ -90,7 +91,7 @@ export function ShelfPane({
       <div className="flex-1 overflow-y-auto min-h-0">
         {shelf.items.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-slate-400 px-6">
-            <p className="text-sm font-medium text-slate-500 mb-1">Shelf is empty</p>
+            <p className="text-sm font-medium text-slate-500 mb-1">Production queue is empty</p>
             <p className="text-xs text-center">
               Chat with the planning agent to create draft tasks and artifacts
             </p>
@@ -114,7 +115,10 @@ export function ShelfPane({
                 return (
                   <div
                     key={artifact.id}
-                    onClick={() => setFocusedArtifact(artifact)}
+                    onClick={() => {
+                      console.log('[ShelfPane] Artifact clicked:', artifact.id, artifact.name)
+                      setFocusedArtifact(artifact)
+                    }}
                     className="border border-slate-200 rounded-lg p-3 cursor-pointer hover:border-slate-300 hover:bg-slate-50 transition-colors group"
                   >
                     <div className="flex items-center justify-between">

@@ -40,6 +40,11 @@ import { getWorkspaceById } from './workspace-service.js';
 import { discoverTasks } from './task-service.js';
 import { getTasksDir } from './workspace-service.js';
 import { getRepoExtensionPaths } from './agent-execution-service.js';
+import {
+  startQueueProcessing,
+  stopQueueProcessing,
+  getQueueStatus,
+} from './queue-manager.js';
 
 // =============================================================================
 // Shelf callback registry — used by extension tools
@@ -259,8 +264,9 @@ async function getOrCreateSession(
 
     session.piSession = piSession;
 
-    // Register shelf callbacks so extension tools can create drafts/artifacts
+    // Register callbacks so extension tools can interact with the factory
     registerShelfCallbacks(workspaceId, broadcast);
+    registerFactoryControlCallbacks(workspaceId, broadcast);
 
     // Subscribe to streaming events
     session.unsubscribe = piSession.subscribe((event: AgentSessionEvent) => {
@@ -390,14 +396,17 @@ Parameters:
 - item_id (string, optional): ID of the item (required for remove/update)
 - updates (object, optional): Fields to update on a draft task (title, content, acceptance_criteria, type, priority, complexity)
 
+### factory_control
+Start, stop, or check the status of the factory queue (the execution pipeline that processes tasks).
+Parameters:
+- action (string): "status" to check, "start" to begin processing, "stop" to pause
+
 ## Guidelines
 - Keep tasks small and focused — each should be completable in a single agent session
 - Write clear acceptance criteria that are specific and testable
 - When in doubt, ask the user for clarification
 - Use artifacts for anything that benefits from visual presentation
-- Be conversational and helpful — you're a collaborator, not just a task creator
-
-Respond briefly to acknowledge you're ready, then wait for the user's first message.`;
+- Be conversational and helpful — you're a collaborator, not just a task creator`;
 }
 
 // =============================================================================
@@ -493,7 +502,8 @@ function handlePlanningEvent(
         workspaceId,
         toolName: event.toolName,
         toolCallId: event.toolCallId,
-      });
+        input: (event as any).args || {},
+      } as any);
       break;
     }
 
@@ -515,6 +525,9 @@ function handlePlanningEvent(
         ? event.result
         : (event as any).content?.map((c: any) => c.type === 'text' ? c.text : '').join('') || '';
 
+      // Get the args we stored at tool_start
+      const toolInfo = session.toolCallArgs.get(event.toolCallId);
+
       broadcast({
         type: 'planning:tool_end',
         workspaceId,
@@ -523,6 +536,21 @@ function handlePlanningEvent(
         isError: event.isError,
         result: resultText,
       });
+
+      // Persist tool result as a planning message with metadata (same pattern as execution agent)
+      const toolMsg: PlanningMessage = {
+        id: crypto.randomUUID(),
+        role: 'tool',
+        content: resultText,
+        timestamp: new Date().toISOString(),
+        metadata: {
+          toolName: event.toolName,
+          args: toolInfo?.args || {},
+          isError: event.isError,
+        },
+      };
+      session.messages.push(toolMsg);
+      broadcast({ type: 'planning:message', workspaceId, message: toolMsg });
 
       session.toolCallArgs.delete(event.toolCallId);
       session.status = 'streaming';
@@ -631,6 +659,7 @@ async function sendToAgent(
           });
           session.piSession = piSession;
           registerShelfCallbacks(workspaceId, broadcast);
+          registerFactoryControlCallbacks(workspaceId, broadcast);
           session.unsubscribe = piSession.subscribe((event: AgentSessionEvent) => {
             handlePlanningEvent(event, session);
           });
@@ -727,5 +756,73 @@ export async function resetPlanningSession(workspaceId: string): Promise<void> {
   }
   planningSessions.delete(workspaceId);
   unregisterShelfCallbacks(workspaceId);
+  unregisterFactoryControlCallbacks(workspaceId);
   persistMessagesSync(workspaceId, []);
+}
+
+// =============================================================================
+// Task Form Callbacks (bridge between planning agent and create-task UI)
+// =============================================================================
+
+export interface TaskFormCallbacks {
+  getFormState: () => any | null;
+  updateFormState: (updates: Record<string, unknown>) => string;
+  getAvailableModels: () => Promise<any[]>;
+  getAvailableSkills: () => any[];
+}
+
+declare global {
+  var __piFactoryTaskFormCallbacks: Map<string, TaskFormCallbacks> | undefined;
+  var __piFactoryControlCallbacks: Map<string, {
+    getStatus: () => any;
+    start: () => any;
+    stop: () => any;
+  }> | undefined;
+}
+
+function ensureTaskFormRegistry(): Map<string, TaskFormCallbacks> {
+  if (!globalThis.__piFactoryTaskFormCallbacks) {
+    globalThis.__piFactoryTaskFormCallbacks = new Map();
+  }
+  return globalThis.__piFactoryTaskFormCallbacks;
+}
+
+export function registerTaskFormCallbacks(workspaceId: string, callbacks: TaskFormCallbacks): void {
+  ensureTaskFormRegistry().set(workspaceId, callbacks);
+}
+
+export function unregisterTaskFormCallbacks(workspaceId: string): void {
+  globalThis.__piFactoryTaskFormCallbacks?.delete(workspaceId);
+}
+
+// =============================================================================
+// Factory Control Callbacks (start/stop queue from planning agent)
+// =============================================================================
+
+function ensureControlRegistry(): Map<string, { getStatus: () => any; start: () => any; stop: () => any }> {
+  if (!globalThis.__piFactoryControlCallbacks) {
+    globalThis.__piFactoryControlCallbacks = new Map();
+  }
+  return globalThis.__piFactoryControlCallbacks;
+}
+
+function registerFactoryControlCallbacks(
+  workspaceId: string,
+  broadcast: (event: ServerEvent) => void,
+): void {
+  ensureControlRegistry().set(workspaceId, {
+    getStatus: () => getQueueStatus(workspaceId),
+    start: () => {
+      const status = startQueueProcessing(workspaceId, broadcast);
+      return status;
+    },
+    stop: () => {
+      const status = stopQueueProcessing(workspaceId);
+      return status;
+    },
+  });
+}
+
+function unregisterFactoryControlCallbacks(workspaceId: string): void {
+  globalThis.__piFactoryControlCallbacks?.delete(workspaceId);
 }
