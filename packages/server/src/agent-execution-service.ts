@@ -1665,7 +1665,7 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
     broadcastToWorkspace?.({
       type: 'agent:execution_status',
       taskId: task.id,
-      status: 'completed',
+      status: savedPlan ? 'completed' : 'error',
     });
 
     return savedPlan;
@@ -1695,7 +1695,7 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
       return savedPlan;
     }
 
-    console.error(`Planning agent failed for ${task.id}, using fallback planner:`, err);
+    console.error(`Planning agent failed for ${task.id}:`, err);
 
     // Clean up failed session so no background stream continues.
     session.unsubscribe?.();
@@ -1710,16 +1710,31 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
     activeSessions.delete(task.id);
     registry.delete(task.id);
 
+    task.frontmatter.planningStatus = 'error';
+    task.frontmatter.updated = new Date().toISOString();
+    saveTaskFile(task);
+
+    broadcastToWorkspace?.({
+      type: 'task:updated',
+      task,
+      changes: {},
+    });
+
     const entry = createSystemEvent(
       workspaceId,
       task.id,
       'phase-change',
-      `Planning agent failed (${errMessage}). Running fallback planning.`
+      `Planning agent failed (${errMessage}). No plan was saved.`
     );
     broadcastToWorkspace?.({ type: 'activity:entry', entry });
 
-    // Fall back to simulation so task planning doesn't get stuck forever.
-    return simulatePlanningAgent(task, workspaceId, broadcastToWorkspace);
+    broadcastToWorkspace?.({
+      type: 'agent:execution_status',
+      taskId: task.id,
+      status: 'error',
+    });
+
+    return null;
   }
 }
 
@@ -1808,100 +1823,6 @@ export async function regenerateAcceptanceCriteriaForTask(
     console.error('Failed to regenerate acceptance criteria:', err);
     return task.frontmatter.acceptanceCriteria;
   }
-}
-
-/**
- * Simulated planning agent — generates a plan based on task metadata
- * when the Pi SDK is unavailable.
- */
-function simulatePlanningAgent(
-  task: Task,
-  workspaceId: string,
-  broadcastToWorkspace?: (event: any) => void,
-): Promise<TaskPlan> {
-  return new Promise((resolve) => {
-    const { frontmatter, content } = task;
-
-    const steps = [
-      'Analyzing task requirements and description...',
-      'Reviewing acceptance criteria...',
-      'Identifying affected files and components...',
-      'Determining implementation approach...',
-      'Defining validation strategy...',
-      'Generating structured plan...',
-    ];
-
-    let stepIndex = 0;
-
-    broadcastToWorkspace?.({
-      type: 'agent:streaming_start',
-      taskId: task.id,
-    });
-
-    const interval = setInterval(() => {
-      if (stepIndex >= steps.length) {
-        clearInterval(interval);
-
-        // Generate acceptance criteria + plan from task metadata
-        const acceptanceCriteria = frontmatter.acceptanceCriteria.length > 0
-          ? frontmatter.acceptanceCriteria
-          : [
-              'Implementation matches the task description and expected behavior.',
-              'Relevant tests are added or updated and pass.',
-              'No regressions are introduced in existing behavior.',
-            ];
-
-        const plan: TaskPlan = {
-          goal: frontmatter.title + (content ? ` — ${content.slice(0, 200)}` : ''),
-          steps: acceptanceCriteria.map((c, i) => `Step ${i + 1}: Implement "${c}"`),
-          validation: acceptanceCriteria.map(c => `Verify: ${c}`),
-          cleanup: [
-            'Remove any temporary debug code',
-            'Update documentation if needed',
-          ],
-          generatedAt: new Date().toISOString(),
-        };
-
-        broadcastToWorkspace?.({
-          type: 'agent:streaming_end',
-          taskId: task.id,
-          fullText: 'Plan generated.',
-        });
-
-        // Save the plan
-        const agentMsg = createChatMessage(
-          workspaceId,
-          task.id,
-          'agent',
-          `I've analyzed the task and generated a plan. Check the **Details** tab to see the full plan.\n\n**Goal:** ${plan.goal}\n\n**${plan.steps.length} steps** identified, **${plan.validation.length} validation checks**, **${plan.cleanup.length} cleanup items**.`
-        );
-        broadcastToWorkspace?.({ type: 'activity:entry', entry: agentMsg });
-
-        finalizePlan(task, acceptanceCriteria, plan, workspaceId, broadcastToWorkspace);
-
-        broadcastToWorkspace?.({
-          type: 'agent:execution_status',
-          taskId: task.id,
-          status: 'completed',
-        });
-
-        resolve(plan);
-        return;
-      }
-
-      const output = steps[stepIndex];
-      const msgEntry = createChatMessage(workspaceId, task.id, 'agent', output);
-      broadcastToWorkspace?.({ type: 'activity:entry', entry: msgEntry });
-
-      broadcastToWorkspace?.({
-        type: 'agent:streaming_text',
-        taskId: task.id,
-        delta: output + '\n',
-      });
-
-      stepIndex++;
-    }, 1500);
-  });
 }
 
 // =============================================================================

@@ -68,6 +68,15 @@ export const api = {
     }
     return res.json()
   },
+  async regenerateTaskPlan(workspaceId: string, taskId: string): Promise<void> {
+    const res = await fetch(`/api/workspaces/${workspaceId}/tasks/${taskId}/plan/regenerate`, {
+      method: 'POST',
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Plan regeneration failed' }))
+      throw new Error(err.error || `Plan regeneration failed (${res.status})`)
+    }
+  },
   async reorderTasks(workspaceId: string, phase: Phase, taskIds: string[]): Promise<void> {
     const res = await fetch(`/api/workspaces/${workspaceId}/tasks/reorder`, {
       method: 'POST',

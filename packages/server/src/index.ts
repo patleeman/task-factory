@@ -313,6 +313,41 @@ app.patch('/api/workspaces/:workspaceId/tasks/:taskId', async (req, res) => {
   }
 });
 
+// Regenerate task plan
+app.post('/api/workspaces/:workspaceId/tasks/:taskId/plan/regenerate', (req, res) => {
+  const workspace = getWorkspaceById(req.params.workspaceId);
+
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return;
+  }
+
+  const tasksDir = getTasksDir(workspace);
+  const tasks = discoverTasks(tasksDir);
+  const task = tasks.find((t) => t.id === req.params.taskId);
+
+  if (!task) {
+    res.status(404).json({ error: 'Task not found' });
+    return;
+  }
+
+  if (task.frontmatter.planningStatus === 'running' && !task.frontmatter.plan) {
+    res.status(409).json({ error: 'Plan generation is already running for this task' });
+    return;
+  }
+
+  res.json({ success: true });
+
+  void planTask({
+    task,
+    workspaceId: workspace.id,
+    workspacePath: workspace.path,
+    broadcastToWorkspace: (event: any) => broadcastToWorkspace(workspace.id, event),
+  }).catch((err) => {
+    console.error('Plan regeneration failed:', err);
+  });
+});
+
 // Delete task
 app.delete('/api/workspaces/:workspaceId/tasks/:taskId', async (req, res) => {
   const workspace = getWorkspaceById(req.params.workspaceId);

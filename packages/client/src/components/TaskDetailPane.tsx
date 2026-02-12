@@ -216,6 +216,26 @@ export function TaskDetailPane({
 
 function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditing, editedTitle, setEditedTitle, editedContent, setEditedContent, editedCriteria, setEditedCriteria, editedModelConfig, setEditedModelConfig, selectedSkillIds, setSelectedSkillIds, availableSkills, missingAcceptanceCriteria, isPlanGenerating, onSaveEdit, onDelete }: any) {
   const isCompleted = frontmatter.phase === 'complete' || frontmatter.phase === 'archived'
+  const [isRegeneratingPlan, setIsRegeneratingPlan] = useState(false)
+  const [planRegenerationError, setPlanRegenerationError] = useState<string | null>(null)
+
+  useEffect(() => {
+    setPlanRegenerationError(null)
+    setIsRegeneratingPlan(false)
+  }, [task.id, frontmatter.plan?.generatedAt, frontmatter.planningStatus])
+
+  const handleRegeneratePlan = async () => {
+    setPlanRegenerationError(null)
+    setIsRegeneratingPlan(true)
+
+    try {
+      await api.regenerateTaskPlan(workspaceId, task.id)
+    } catch (err) {
+      setPlanRegenerationError(err instanceof Error ? err.message : 'Failed to regenerate plan')
+    } finally {
+      setIsRegeneratingPlan(false)
+    }
+  }
 
   return (
     <div className="p-5 space-y-5">
@@ -303,6 +323,26 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
               <h3 className="text-xs font-semibold text-blue-700 uppercase tracking-wide">Generating Plan…</h3>
               <p className="text-xs text-blue-500 mt-0.5">Planning agent is exploring the codebase — follow along in the chat</p>
             </div>
+          </div>
+        </div>
+      )}
+      {!frontmatter.plan && frontmatter.planningStatus === 'error' && !isPlanGenerating && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 space-y-3">
+          <div>
+            <h3 className="text-xs font-semibold text-amber-700 uppercase tracking-wide">Plan not available</h3>
+            <p className="text-xs text-amber-700/80 mt-1">Plan generation failed. Regenerate to try again.</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleRegeneratePlan}
+              disabled={isRegeneratingPlan}
+              className="btn text-xs py-1.5 px-3 bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isRegeneratingPlan ? 'Regenerating…' : '↻ Regenerate Plan'}
+            </button>
+            {planRegenerationError && (
+              <span className="text-xs text-red-600">{planRegenerationError}</span>
+            )}
           </div>
         </div>
       )}
