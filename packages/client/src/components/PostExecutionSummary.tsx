@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { PostExecutionSummary as PostExecutionSummaryType, FileDiff, DiffHunk, CriterionValidation, SummaryArtifact } from '@pi-factory/shared'
 import { api } from '../api'
 
@@ -15,8 +15,15 @@ export function PostExecutionSummary({
   taskId,
   onSummaryUpdated,
 }: PostExecutionSummaryProps) {
-  const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set())
+  const [expandedFiles, setExpandedFiles] = useState<Set<string>>(
+    () => new Set(summary.fileDiffs.map(diff => diff.filePath))
+  )
   const [isRegenerating, setIsRegenerating] = useState(false)
+  const diffExpansionKey = summary.fileDiffs.map(diff => diff.filePath).join('\n')
+
+  useEffect(() => {
+    setExpandedFiles(new Set(summary.fileDiffs.map(diff => diff.filePath)))
+  }, [summary.completedAt, diffExpansionKey])
 
   const toggleFile = (filePath: string) => {
     setExpandedFiles(prev => {

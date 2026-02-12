@@ -216,6 +216,7 @@ export function TaskDetailPane({
 
 function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditing, editedTitle, setEditedTitle, editedContent, setEditedContent, editedCriteria, setEditedCriteria, editedModelConfig, setEditedModelConfig, selectedSkillIds, setSelectedSkillIds, availableSkills, missingAcceptanceCriteria, isPlanGenerating, onSaveEdit, onDelete }: any) {
   const isCompleted = frontmatter.phase === 'complete' || frontmatter.phase === 'archived'
+  const hasSummary = Boolean(task.frontmatter.postExecutionSummary)
   const [isRegeneratingPlan, setIsRegeneratingPlan] = useState(false)
   const [planRegenerationError, setPlanRegenerationError] = useState<string | null>(null)
 
@@ -239,18 +240,15 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
 
   return (
     <div className="p-5 space-y-5">
-      {/* Post-Execution Summary (for completed tasks) */}
-      {isCompleted && (
-        <PostExecutionSummarySection
-          task={task}
-          workspaceId={workspaceId}
-        />
-      )}
-
       {/* Title */}
       <div>
         {isEditing ? (
-          <input type="text" value={editedTitle} onChange={(e: any) => setEditedTitle(e.target.value)} className="text-xl font-bold text-slate-900 w-full bg-transparent border-b-2 border-blue-400 outline-none pb-1" />
+          <input
+            type="text"
+            value={editedTitle}
+            onChange={(e: any) => setEditedTitle(e.target.value)}
+            className="text-xl font-bold text-slate-900 w-full bg-transparent border-b-2 border-blue-400 outline-none pb-1"
+          />
         ) : (
           <div className="flex items-start justify-between gap-4">
             <h1 className="text-xl font-bold text-slate-900 leading-tight">{frontmatter.title}</h1>
@@ -311,121 +309,141 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
         </div>
       )}
 
-      {/* Plan */}
-      {!frontmatter.plan && isPlanGenerating && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <div className="flex items-center gap-3">
-            <svg className="animate-spin h-4 w-4 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-            </svg>
-            <div>
-              <h3 className="text-xs font-semibold text-blue-700 uppercase tracking-wide">Generating Plan…</h3>
-              <p className="text-xs text-blue-500 mt-0.5">Planning agent is exploring the codebase — follow along in the chat</p>
-            </div>
-          </div>
+      {/* Section 1: Original description + attachments */}
+      <section className="rounded-xl border border-slate-200 bg-slate-50/40 overflow-hidden">
+        <div className="px-4 py-2.5 border-b border-slate-200 bg-white/70">
+          <h2 className="text-xs font-semibold text-slate-600 uppercase tracking-wide">1. Original Description & Attachments</h2>
         </div>
-      )}
-      {!frontmatter.plan && frontmatter.planningStatus === 'error' && !isPlanGenerating && (
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 space-y-3">
+        <div className="p-4 space-y-5">
           <div>
-            <h3 className="text-xs font-semibold text-amber-700 uppercase tracking-wide">Plan not available</h3>
-            <p className="text-xs text-amber-700/80 mt-1">Plan generation failed. Regenerate to try again.</p>
+            <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Description</h3>
+            {isEditing ? (
+              <MarkdownEditor value={editedContent} onChange={setEditedContent} placeholder="Task description in markdown..." minHeight="400px" />
+            ) : task.content ? (
+              <div className="prose prose-slate prose-sm max-w-none"><ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{task.content}</ReactMarkdown></div>
+            ) : (
+              <p className="text-sm text-slate-400 italic">No description</p>
+            )}
           </div>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={handleRegeneratePlan}
-              disabled={isRegeneratingPlan}
-              className="btn text-xs py-1.5 px-3 bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isRegeneratingPlan ? 'Regenerating…' : '↻ Regenerate Plan'}
-            </button>
-            {planRegenerationError && (
-              <span className="text-xs text-red-600">{planRegenerationError}</span>
+
+          <AttachmentsSection task={task} workspaceId={workspaceId} />
+        </div>
+      </section>
+
+      {/* Section 2: Generated plan + acceptance criteria */}
+      <section className="rounded-xl border border-blue-200 bg-blue-50/40 overflow-hidden">
+        <div className="px-4 py-2.5 border-b border-blue-200 bg-blue-50/70">
+          <h2 className="text-xs font-semibold text-blue-700 uppercase tracking-wide">2. Generated Plan & Acceptance Criteria</h2>
+        </div>
+        <div className="p-4 space-y-5">
+          {!frontmatter.plan && isPlanGenerating && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <div className="flex items-center gap-3">
+                <svg className="animate-spin h-4 w-4 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <div>
+                  <h3 className="text-xs font-semibold text-blue-700 uppercase tracking-wide">Generating Plan…</h3>
+                  <p className="text-xs text-blue-500 mt-0.5">Planning agent is exploring the codebase — follow along in the chat</p>
+                </div>
+              </div>
+            </div>
+          )}
+          {!frontmatter.plan && frontmatter.planningStatus === 'error' && !isPlanGenerating && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 space-y-3">
+              <div>
+                <h3 className="text-xs font-semibold text-amber-700 uppercase tracking-wide">Plan not available</h3>
+                <p className="text-xs text-amber-700/80 mt-1">Plan generation failed. Regenerate to try again.</p>
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={handleRegeneratePlan}
+                  disabled={isRegeneratingPlan}
+                  className="btn text-xs py-1.5 px-3 bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isRegeneratingPlan ? 'Regenerating…' : '↻ Regenerate Plan'}
+                </button>
+                {planRegenerationError && (
+                  <span className="text-xs text-red-600">{planRegenerationError}</span>
+                )}
+              </div>
+            </div>
+          )}
+          {!frontmatter.plan && !isPlanGenerating && frontmatter.planningStatus !== 'error' && (
+            <div className="bg-white border border-blue-200 rounded-lg p-3">
+              <p className="text-sm text-slate-500">No generated plan yet.</p>
+            </div>
+          )}
+          {frontmatter.plan && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <h3 className="text-xs font-semibold text-blue-700 uppercase tracking-wide">Plan</h3>
+                <span className="text-[10px] text-blue-400 ml-auto">Generated {new Date(frontmatter.plan.generatedAt).toLocaleString()}</span>
+              </div>
+              <div>
+                <h4 className="text-xs font-semibold text-slate-600 mb-1">Goal</h4>
+                <div className="prose prose-slate prose-sm max-w-none text-slate-800"><ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{frontmatter.plan.goal}</ReactMarkdown></div>
+              </div>
+              {frontmatter.plan.steps.length > 0 && (
+                <div>
+                  <h4 className="text-xs font-semibold text-slate-600 mb-1">Steps</h4>
+                  <ol className="space-y-2">
+                    {frontmatter.plan.steps.map((step: string, i: number) => (
+                      <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
+                        <span className="text-blue-600 font-semibold shrink-0 min-w-[1.5rem] text-right">{i + 1}.</span>
+                        <div className="prose prose-slate prose-sm max-w-none min-w-0 [&>p]:m-0"><ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{step}</ReactMarkdown></div>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              )}
+              {frontmatter.plan.validation.length > 0 && (
+                <div>
+                  <h4 className="text-xs font-semibold text-slate-600 mb-1">Validation</h4>
+                  <ul className="space-y-1.5">
+                    {frontmatter.plan.validation.map((item: string, i: number) => (
+                      <li key={i} className="flex items-start gap-2 text-sm text-slate-700"><span className="text-green-500 shrink-0 mt-0.5">✓</span><div className="prose prose-slate prose-sm max-w-none min-w-0 [&>p]:m-0"><ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{item}</ReactMarkdown></div></li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {frontmatter.plan.cleanup.length > 0 && (
+                <div>
+                  <h4 className="text-xs font-semibold text-slate-600 mb-1">Cleanup</h4>
+                  <ul className="space-y-1.5">
+                    {frontmatter.plan.cleanup.map((item: string, i: number) => (
+                      <li key={i} className="flex items-start gap-2 text-sm text-slate-700"><span className="text-slate-400 shrink-0 mt-0.5 text-xs">—</span><div className="prose prose-slate prose-sm max-w-none min-w-0 [&>p]:m-0"><ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{item}</ReactMarkdown></div></li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className={missingAcceptanceCriteria ? 'rounded-lg border-2 border-red-300 bg-red-50 p-3 -mx-1' : ''}>
+            <div className="mb-2">
+              <h3 className={`text-xs font-semibold uppercase tracking-wide ${missingAcceptanceCriteria ? 'text-red-600' : 'text-slate-500'}`}>
+                {missingAcceptanceCriteria && <span className="mr-1 text-red-500">!</span>}Acceptance Criteria
+              </h3>
+            </div>
+            {isEditing ? (
+              <MarkdownEditor value={editedCriteria} onChange={setEditedCriteria} placeholder="One criterion per line" minHeight="160px" />
+            ) : frontmatter.acceptanceCriteria.length > 0 ? (
+              <ul className="space-y-1.5">
+                {frontmatter.acceptanceCriteria.map((criteria: string, i: number) => (
+                  <li key={i} className="flex items-start gap-2 text-sm">
+                    <span className="w-5 h-5 rounded border border-slate-300 flex items-center justify-center text-[10px] text-slate-400 shrink-0 mt-0.5">{i + 1}</span>
+                    <div className="prose prose-slate prose-sm max-w-none min-w-0 text-slate-700 [&>p]:m-0"><ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{criteria}</ReactMarkdown></div>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className={`text-sm italic ${missingAcceptanceCriteria ? 'text-red-500 font-medium' : 'text-slate-400'}`}>No acceptance criteria defined</p>
             )}
           </div>
         </div>
-      )}
-      {frontmatter.plan && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-3">
-          <div className="flex items-center gap-2">
-            <h3 className="text-xs font-semibold text-blue-700 uppercase tracking-wide">Plan</h3>
-            <span className="text-[10px] text-blue-400 ml-auto">Generated {new Date(frontmatter.plan.generatedAt).toLocaleString()}</span>
-          </div>
-          <div>
-            <h4 className="text-xs font-semibold text-slate-600 mb-1">Goal</h4>
-            <div className="prose prose-slate prose-sm max-w-none text-slate-800"><ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{frontmatter.plan.goal}</ReactMarkdown></div>
-          </div>
-          {frontmatter.plan.steps.length > 0 && (
-            <div>
-              <h4 className="text-xs font-semibold text-slate-600 mb-1">Steps</h4>
-              <ol className="space-y-2">
-                {frontmatter.plan.steps.map((step: string, i: number) => (
-                  <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
-                    <span className="text-blue-600 font-semibold shrink-0 min-w-[1.5rem] text-right">{i + 1}.</span>
-                    <div className="prose prose-slate prose-sm max-w-none min-w-0 [&>p]:m-0"><ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{step}</ReactMarkdown></div>
-                  </li>
-                ))}
-              </ol>
-            </div>
-          )}
-          {frontmatter.plan.validation.length > 0 && (
-            <div>
-              <h4 className="text-xs font-semibold text-slate-600 mb-1">Validation</h4>
-              <ul className="space-y-1.5">
-                {frontmatter.plan.validation.map((item: string, i: number) => (
-                  <li key={i} className="flex items-start gap-2 text-sm text-slate-700"><span className="text-green-500 shrink-0 mt-0.5">✓</span><div className="prose prose-slate prose-sm max-w-none min-w-0 [&>p]:m-0"><ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{item}</ReactMarkdown></div></li>
-                ))}
-              </ul>
-            </div>
-          )}
-          {frontmatter.plan.cleanup.length > 0 && (
-            <div>
-              <h4 className="text-xs font-semibold text-slate-600 mb-1">Cleanup</h4>
-              <ul className="space-y-1.5">
-                {frontmatter.plan.cleanup.map((item: string, i: number) => (
-                  <li key={i} className="flex items-start gap-2 text-sm text-slate-700"><span className="text-slate-400 shrink-0 mt-0.5 text-xs">—</span><div className="prose prose-slate prose-sm max-w-none min-w-0 [&>p]:m-0"><ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{item}</ReactMarkdown></div></li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Description */}
-      <div>
-        <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Description</h3>
-        {isEditing ? (
-          <MarkdownEditor value={editedContent} onChange={setEditedContent} placeholder="Task description in markdown..." minHeight="400px" />
-        ) : task.content ? (
-          <div className="prose prose-slate prose-sm max-w-none"><ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{task.content}</ReactMarkdown></div>
-        ) : (
-          <p className="text-sm text-slate-400 italic">No description</p>
-        )}
-      </div>
-
-      {/* Acceptance Criteria */}
-      <div className={missingAcceptanceCriteria ? 'rounded-lg border-2 border-red-300 bg-red-50 p-3 -mx-1' : ''}>
-        <div className="mb-2">
-          <h3 className={`text-xs font-semibold uppercase tracking-wide ${missingAcceptanceCriteria ? 'text-red-600' : 'text-slate-500'}`}>
-            {missingAcceptanceCriteria && <span className="mr-1 text-red-500">!</span>}Acceptance Criteria
-          </h3>
-        </div>
-        {isEditing ? (
-          <MarkdownEditor value={editedCriteria} onChange={setEditedCriteria} placeholder="One criterion per line" minHeight="160px" />
-        ) : frontmatter.acceptanceCriteria.length > 0 ? (
-          <ul className="space-y-1.5">
-            {frontmatter.acceptanceCriteria.map((criteria: string, i: number) => (
-              <li key={i} className="flex items-start gap-2 text-sm">
-                <span className="w-5 h-5 rounded border border-slate-300 flex items-center justify-center text-[10px] text-slate-400 shrink-0 mt-0.5">{i + 1}</span>
-                <div className="prose prose-slate prose-sm max-w-none min-w-0 text-slate-700 [&>p]:m-0"><ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{criteria}</ReactMarkdown></div>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className={`text-sm italic ${missingAcceptanceCriteria ? 'text-red-500 font-medium' : 'text-slate-400'}`}>No acceptance criteria defined</p>
-        )}
-      </div>
+      </section>
 
       {/* Edit actions */}
       {isEditing && (
@@ -435,8 +453,21 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
         </div>
       )}
 
-      {/* Attachments */}
-      <AttachmentsSection task={task} workspaceId={workspaceId} />
+      {/* Section 3: Summary + diffs + verified criteria */}
+      <section className="rounded-xl border border-emerald-200 bg-emerald-50/40 overflow-hidden">
+        <div className="px-4 py-2.5 border-b border-emerald-200 bg-emerald-50/70">
+          <h2 className="text-xs font-semibold text-emerald-700 uppercase tracking-wide">3. Summary, Diffs & Verified Criteria</h2>
+        </div>
+        <div className="p-4">
+          {(isCompleted || hasSummary) ? (
+            <PostExecutionSummarySection task={task} workspaceId={workspaceId} />
+          ) : (
+            <p className="text-sm text-slate-500">
+              No execution summary yet. Summary, file diffs, and verified acceptance criteria appear here after task completion.
+            </p>
+          )}
+        </div>
+      </section>
 
       {/* Metadata */}
       <div className="text-xs text-slate-400 pt-4 border-t border-slate-100 space-y-1">
