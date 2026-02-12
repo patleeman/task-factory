@@ -8,7 +8,7 @@
 
 import { join, dirname } from 'path';
 import { homedir } from 'os';
-import { existsSync, mkdirSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import {
   createAgentSession,
@@ -99,6 +99,36 @@ function unregisterShelfCallbacks(workspaceId: string): void {
 }
 
 // =============================================================================
+// Planning message persistence
+// =============================================================================
+
+function messagesPath(workspaceId: string): string | null {
+  const workspace = getWorkspaceById(workspaceId);
+  if (!workspace) return null;
+  const dir = join(workspace.path, '.pi');
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  return join(dir, 'planning-messages.json');
+}
+
+function loadPersistedMessages(workspaceId: string): PlanningMessage[] {
+  const path = messagesPath(workspaceId);
+  if (!path || !existsSync(path)) return [];
+  try {
+    return JSON.parse(readFileSync(path, 'utf-8'));
+  } catch {
+    return [];
+  }
+}
+
+function persistMessages(workspaceId: string, messages: PlanningMessage[]): void {
+  const path = messagesPath(workspaceId);
+  if (!path) return;
+  try {
+    writeFileSync(path, JSON.stringify(messages, null, 2));
+  } catch { /* best-effort */ }
+}
+
+// =============================================================================
 // Per-workspace planning session state
 // =============================================================================
 
@@ -142,7 +172,7 @@ async function getOrCreateSession(
     workspaceId,
     piSession: null,
     status: 'idle',
-    messages: existing?.messages || [],
+    messages: existing?.messages || loadPersistedMessages(workspaceId),
     currentStreamText: '',
     currentThinkingText: '',
     toolCallArgs: new Map(),
@@ -374,6 +404,7 @@ function handlePlanningEvent(
           timestamp: new Date().toISOString(),
         };
         session.messages.push(planningMsg);
+        persistMessages(workspaceId, session.messages);
         broadcast({ type: 'planning:message', workspaceId, message: planningMsg });
       }
 
@@ -466,6 +497,7 @@ export async function sendPlanningMessage(
 
   const session = await getOrCreateSession(workspaceId, broadcast);
   session.messages.push(userMsg);
+  persistMessages(workspaceId, session.messages);
   broadcast({ type: 'planning:message', workspaceId, message: userMsg });
 
   // Send to the agent
@@ -508,7 +540,7 @@ export async function sendPlanningMessage(
  */
 export function getPlanningMessages(workspaceId: string): PlanningMessage[] {
   const session = planningSessions.get(workspaceId);
-  return session?.messages || [];
+  return session?.messages || loadPersistedMessages(workspaceId);
 }
 
 /**
@@ -532,4 +564,5 @@ export async function resetPlanningSession(workspaceId: string): Promise<void> {
   }
   planningSessions.delete(workspaceId);
   unregisterShelfCallbacks(workspaceId);
+  persistMessages(workspaceId, []);
 }
