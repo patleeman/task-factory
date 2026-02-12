@@ -600,7 +600,6 @@ export function WorkspacePage() {
               <TaskDetailPane
                 task={mainPane.task}
                 workspaceId={workspaceId || ''}
-                activity={activity}
                 agentStream={agentStream}
                 moveError={moveError}
                 onClose={() => setMainPane({ type: 'empty' })}
@@ -613,9 +612,6 @@ export function WorkspacePage() {
                     setMainPane({ type: 'empty' })
                   }
                 }}
-                onSendMessage={handleSendMessage}
-                onSteer={handleSteer}
-                onFollowUp={handleFollowUp}
               />
             ) : (
               <EmptyState onCreateTask={() => setMainPane({ type: 'create-task' })} />

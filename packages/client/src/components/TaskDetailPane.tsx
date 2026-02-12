@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import type { Task, Phase, ActivityEntry, ModelConfig } from '@pi-factory/shared'
+import type { Task, Phase, ModelConfig } from '@pi-factory/shared'
 import { PHASES, PHASE_DISPLAY_NAMES, getPromotePhase, getDemotePhase } from '@pi-factory/shared'
 import { MarkdownEditor } from './MarkdownEditor'
 import type { AgentStreamState } from '../hooks/useAgentStreaming'
@@ -12,15 +12,11 @@ import { api } from '../api'
 interface TaskDetailPaneProps {
   task: Task
   workspaceId: string
-  activity: ActivityEntry[]
   agentStream: AgentStreamState
   moveError: string | null
   onClose: () => void
   onMove: (phase: Phase) => void
   onDelete?: () => void
-  onSendMessage: (taskId: string, content: string, attachmentIds?: string[]) => void
-  onSteer: (taskId: string, content: string, attachmentIds?: string[]) => void
-  onFollowUp: (taskId: string, content: string, attachmentIds?: string[]) => void
 }
 
 export function TaskDetailPane({
