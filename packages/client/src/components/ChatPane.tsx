@@ -61,7 +61,7 @@ export function ChatPane({
     : null
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full relative">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-200 bg-slate-50 shrink-0">
         <h2 className="font-semibold text-xs text-slate-500 uppercase tracking-wide">
@@ -85,16 +85,18 @@ export function ChatPane({
       )}
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto min-h-0 relative">
+      {/* Empty state — centered over entire pane */}
+      {messages.length === 0 && !busy && (
+        <div className="flex flex-col items-center justify-center text-slate-400 absolute inset-0 z-0 pointer-events-none">
+          <p className="text-sm font-medium text-slate-500 mb-1">Planning Agent</p>
+          <p className="text-xs">
+            Ask me to research, plan, or decompose work into tasks
+          </p>
+        </div>
+      )}
+
+      <div ref={scrollRef} className="flex-1 overflow-y-auto min-h-0">
         <div className="px-4 py-3 space-y-3 text-[14px] leading-relaxed">
-          {messages.length === 0 && !busy && (
-            <div className="flex flex-col items-center justify-center text-slate-400 absolute inset-0">
-              <p className="text-sm font-medium text-slate-500 mb-1">Planning Agent</p>
-              <p className="text-xs">
-                Ask me to research, plan, or decompose work into tasks
-              </p>
-            </div>
-          )}
 
           {messages.map((msg) => (
             <MessageBubble key={msg.id} message={msg} />
