@@ -479,6 +479,140 @@ function handlePlanningEvent(
 // Public API
 // =============================================================================
 
+// =============================================================================
+// Send message to the Pi SDK agent with retry and context restoration
+// =============================================================================
+
+const MAX_RETRIES = 1;
+
+async function sendToAgent(
+  session: PlanningSession,
+  content: string,
+  workspaceId: string,
+  broadcast: (event: ServerEvent) => void,
+): Promise<void> {
+  if (!session.piSession) {
+    throw new Error('Planning session not initialized');
+  }
+
+  session.status = 'streaming';
+  broadcast({ type: 'planning:status', workspaceId, status: 'streaming' });
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      if (!session.firstMessageSent) {
+        // First message in this Pi session: include system prompt + conversation history
+        const workspace = getWorkspaceById(workspaceId);
+        const systemPrompt = buildPlanningSystemPrompt(
+          workspace?.path || '',
+          workspaceId,
+        );
+
+        // If there are prior messages (restored from disk), include them as context
+        const priorMessages = session.messages.filter(m => m.id !== session.messages[session.messages.length - 1]?.id);
+        const hasHistory = priorMessages.length > 0;
+
+        let fullPrompt = systemPrompt;
+        if (hasHistory) {
+          fullPrompt += '\n\n---\n\n## Conversation History (restored)\n\n';
+          // Only include last ~20 messages to avoid token limits
+          const recentHistory = priorMessages.slice(-20);
+          for (const msg of recentHistory) {
+            const role = msg.role === 'user' ? 'User' : 'Assistant';
+            fullPrompt += `**${role}:** ${msg.content}\n\n`;
+          }
+          fullPrompt += '---\n\n## Current Message\n\n';
+        } else {
+          fullPrompt += '\n\n---\n\n# User Message\n\n';
+        }
+        fullPrompt += content;
+
+        await session.piSession.prompt(fullPrompt);
+        session.firstMessageSent = true;
+      } else {
+        await session.piSession.followUp(content);
+      }
+
+      // Turn complete
+      session.status = 'idle';
+      broadcast({ type: 'planning:status', workspaceId, status: 'idle' });
+      broadcast({ type: 'planning:turn_end', workspaceId });
+      return;
+    } catch (err) {
+      console.error(`[PlanningAgent] Attempt ${attempt + 1} failed:`, err);
+
+      if (attempt < MAX_RETRIES) {
+        // Destroy the broken session and recreate
+        console.log('[PlanningAgent] Retrying with fresh Pi session...');
+        session.unsubscribe?.();
+        try { await session.piSession?.abort(); } catch { /* ignore */ }
+        session.piSession = null;
+        session.firstMessageSent = false;
+
+        // Recreate the Pi SDK session in-place
+        try {
+          const workspace = getWorkspaceById(workspaceId);
+          if (!workspace) throw new Error('Workspace not found');
+
+          const authStorage = new AuthStorage();
+          const modelRegistry = new ModelRegistry(authStorage);
+          const loader = new DefaultResourceLoader({
+            cwd: workspace.path,
+            additionalExtensionPaths: getRepoExtensionPaths(),
+          });
+          await loader.reload();
+          const sessionManager = SessionManager.create(workspace.path);
+          const { session: piSession } = await createAgentSession({
+            cwd: workspace.path,
+            authStorage,
+            modelRegistry,
+            sessionManager,
+            resourceLoader: loader,
+          });
+          session.piSession = piSession;
+          registerShelfCallbacks(workspaceId, broadcast);
+          session.unsubscribe = piSession.subscribe((event: AgentSessionEvent) => {
+            handlePlanningEvent(event, session);
+          });
+
+          broadcast({ type: 'planning:status', workspaceId, status: 'streaming' });
+        } catch (recreateErr) {
+          console.error('[PlanningAgent] Failed to recreate session:', recreateErr);
+          session.status = 'error';
+          broadcast({ type: 'planning:status', workspaceId, status: 'error' });
+          // Add error message to conversation
+          const errMsg: PlanningMessage = {
+            id: crypto.randomUUID(),
+            role: 'assistant',
+            content: 'I encountered an error and could not recover. Please try resetting the conversation.',
+            timestamp: new Date().toISOString(),
+          };
+          session.messages.push(errMsg);
+          persistMessages(workspaceId, session.messages);
+          broadcast({ type: 'planning:message', workspaceId, message: errMsg });
+          throw recreateErr;
+        }
+      } else {
+        // All retries exhausted
+        session.status = 'error';
+        broadcast({ type: 'planning:status', workspaceId, status: 'error' });
+        const errMsg: PlanningMessage = {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: 'Something went wrong. Please try again or reset the conversation.',
+          timestamp: new Date().toISOString(),
+        };
+        session.messages.push(errMsg);
+        persistMessages(workspaceId, session.messages);
+        broadcast({ type: 'planning:message', workspaceId, message: errMsg });
+        broadcast({ type: 'planning:turn_end', workspaceId });
+        // Don't throw — we've gracefully handled it with an error message
+        return;
+      }
+    }
+  }
+}
+
 /**
  * Send a user message to the planning agent and get a streaming response.
  */
@@ -500,39 +634,8 @@ export async function sendPlanningMessage(
   persistMessages(workspaceId, session.messages);
   broadcast({ type: 'planning:message', workspaceId, message: userMsg });
 
-  // Send to the agent
-  if (!session.piSession) {
-    throw new Error('Planning session not initialized');
-  }
-
-  session.status = 'streaming';
-  broadcast({ type: 'planning:status', workspaceId, status: 'streaming' });
-
-  try {
-    if (!session.firstMessageSent) {
-      // First message: use prompt() with system context prepended
-      const workspace = getWorkspaceById(workspaceId);
-      const systemPrompt = buildPlanningSystemPrompt(
-        workspace?.path || '',
-        workspaceId,
-      );
-      const fullPrompt = `${systemPrompt}\n\n---\n\n# User Message\n\n${content}`;
-      await session.piSession.prompt(fullPrompt);
-      session.firstMessageSent = true;
-    } else {
-      await session.piSession.followUp(content);
-    }
-
-    // Turn complete
-    session.status = 'idle';
-    broadcast({ type: 'planning:status', workspaceId, status: 'idle' });
-    broadcast({ type: 'planning:turn_end', workspaceId });
-  } catch (err) {
-    console.error('[PlanningAgent] Message failed:', err);
-    session.status = 'error';
-    broadcast({ type: 'planning:status', workspaceId, status: 'error' });
-    throw err;
-  }
+  // Send to the agent with retry on failure
+  await sendToAgent(session, content, workspaceId, broadcast);
 }
 
 /**
