@@ -437,17 +437,17 @@ pi-factory/
 
 ## Implementation Phases
 
-### Phase 1: Planning Agent & Shelf (Next)
-- [ ] Design planning agent API (chat endpoint, streaming)
-- [ ] Implement shelf data model (draft tasks, artifacts)
-- [ ] Build ChatPane component (replaces ActivityLog)
-- [ ] Build ShelfPane component (draft tasks + artifact list)
-- [ ] Build ArtifactViewer (sandboxed iframe renderer)
-- [ ] Build DraftTaskCard (editable, push-to-backlog action)
-- [ ] Wire up mode switching in WorkspacePage (planning ↔ task)
-- [ ] Planning agent: basic chat capability
-- [ ] Planning agent: create draft tasks → shelf
-- [ ] Planning agent: generate HTML artifacts → shelf
+### Phase 1: Planning Agent & Shelf ✅
+- [x] Design planning agent API (chat endpoint, streaming)
+- [x] Implement shelf data model (draft tasks, artifacts)
+- [x] Build ChatPane component (replaces ActivityLog)
+- [x] Build ShelfPane component (draft tasks + artifact list)
+- [x] Build ArtifactViewer (sandboxed iframe renderer)
+- [x] Build DraftTaskCard (editable, push-to-backlog action)
+- [x] Wire up mode switching in WorkspacePage (planning ↔ task)
+- [x] Planning agent: basic chat capability
+- [x] Planning agent: create draft tasks → shelf
+- [x] Planning agent: generate HTML artifacts → shelf
 
 ### Phase 2: Mode Switching Polish
 - [ ] Visual differentiation between planning and task modes
