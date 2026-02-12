@@ -4,6 +4,11 @@
 
 Pi-Factory is a **lean manufacturing-inspired** task queue system for AI agents. It applies Toyota Production System (TPS) principles to software development workflows, creating a continuous flow of work where agents pull tasks, execute them, and move them to completion with minimal waste and maximum visibility.
 
+The system has two modes of operation:
+
+1. **Planning Mode** — A conversational agent helps the user research, decompose, and stage work before it hits the production line.
+2. **Task Mode** — Focused task agents execute well-defined work items through a kanban pipeline with quality gates.
+
 ## Core Philosophy: TPS Principles Applied to Agent Work
 
 ### 1. **Just-In-Time (JIT) Production**
@@ -12,7 +17,7 @@ Pi-Factory is a **lean manufacturing-inspired** task queue system for AI agents.
 - Tasks flow through the system as needed
 
 ### 2. **Kanban (Visual Signaling)**
-- Visual board showing work in progress
+- Pipeline bar showing work in progress across all phases
 - WIP limits to prevent overload
 - Cards represent units of work moving through stages
 
@@ -31,19 +36,153 @@ Pi-Factory is a **lean manufacturing-inspired** task queue system for AI agents.
 - Prevent batching of similar work
 - Smooth flow through the system
 
+## UI Architecture
+
+### Layout: Two Modes, One Interface
+
+The UI has three permanent regions:
+
+- **Left pane** — Always a chat interface. The agent you're talking to depends on the mode.
+- **Right pane** — Contextual output. What's shown depends on the mode.
+- **Pipeline bar** — Always visible at the bottom. Shows all tasks flowing through phases. Acts as the mode switch.
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│ HEADER                                                       │
+├──────────────────────────┬───────────────────────────────────┤
+│                          │                                   │
+│  CHAT                    │  CONTEXTUAL OUTPUT                │
+│  (left pane)             │  (right pane)                     │
+│                          │                                   │
+│                          │                                   │
+│                          │                                   │
+│  [input...]              │                                   │
+├──────────────────────────┴───────────────────────────────────┤
+│ PIPELINE BAR                                                 │
+│ [backlog] [planning] [ready] [executing] [complete]          │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### Planning Mode (no task selected)
+
+The default state. The user converses with a **planning agent** that has broad context — it knows about all tasks, projects, and can do research, decompose goals, and create work items.
+
+```
+PLANNING MODE
+┌───────────────────────┬──────────────────────────────┐
+│                       │                              │
+│  CHAT                 │  WORKSPACE / SHELF           │
+│  "Pi Factory Agent"   │                              │
+│                       │  ┌────────────────────────┐  │
+│  You: I want to add   │  │ Draft Task 1     [edit]│  │
+│  OAuth to the app     │  │ Set up OAuth provider  │  │
+│                       │  └────────────────────────┘  │
+│  Agent: I'd break     │  ┌────────────────────────┐  │
+│  that into 3 tasks... │  │ Draft Task 2     [edit]│  │
+│                       │  │ Login/callback routes   │  │
+│                       │  └────────────────────────┘  │
+│                       │  ┌────────────────────────┐  │
+│                       │  │ Artifact: Research  [▸]│  │
+│                       │  │ OAuth comparison table  │  │
+│                       │  └────────────────────────┘  │
+│                       │                              │
+│                       │  [Send all to backlog →]     │
+│  [Ask anything...]    │                              │
+└───────────────────────┴──────────────────────────────┘
+```
+
+**Left pane (Chat):**
+- Conversational interface with the planning agent
+- Agent can research, answer questions, help decompose work
+- Agent creates draft tasks and artifacts as side effects of conversation
+
+**Right pane (Workspace / Shelf):**
+- **Draft tasks** — Proposed task cards staged before hitting the backlog. User can review, edit, reorder, remove. Push to backlog individually or in batch.
+- **Artifacts** — Rendered HTML outputs from the agent (research summaries, architecture diagrams, comparison tables, mockups, interactive prototypes). Displayed in a sandboxed iframe when focused.
+- Items listed in creation order. Click to expand/focus an artifact or edit a draft task.
+
+The shelf is a staging area — the agent proposes, the user reviews and approves before work enters the production line.
+
+### Task Mode (task selected from pipeline bar)
+
+Clicking a task in the pipeline bar switches to task mode. The chat swaps to that task's agent conversation and the right pane shows task details.
+
+```
+TASK MODE
+┌───────────────────────┬──────────────────────────────┐
+│                       │                              │
+│  CHAT                 │  TASK DETAIL                 │
+│  "TASK-042"           │                              │
+│  ← Back to general    │  Phase: executing            │
+│                       │  AC: ☐ ☐ ☐                   │
+│  Agent: Installing    │  Quality: 🟡 🔴              │
+│  dependencies...      │  Branch: feat/TASK-042       │
+│                       │                              │
+│  You: Use flexbox     │                              │
+│  for the layout       │                              │
+│                       │                              │
+│  Agent: Updated,      │                              │
+│  pushing now...       │                              │
+│                       │                              │
+│  [Steer TASK-042...]  │                              │
+└───────────────────────┴──────────────────────────────┘
+```
+
+**Left pane (Chat):**
+- Shows the task agent's conversation history (execution log)
+- User can steer/follow-up with the task agent
+- Clear header showing task ID and title
+- "Back to general" button to return to planning mode
+
+**Right pane (Task Detail):**
+- Task metadata: phase, priority, type, timestamps
+- Acceptance criteria with check states
+- Quality gates (tests, lint, review)
+- Branch, PR link, commits
+- Blocker status
+- Phase transition controls
+
+### Mode Switching
+
+- **Pipeline bar** is the mode switch. Deselect all tasks → planning mode. Click a task → task mode.
+- **Conversation histories are independent.** Switching back to planning mode shows the planning conversation where you left off. Switching to a task shows that task's log.
+- **Visual differentiation:**
+  - Header context bar: "Pi Factory Agent" vs "TASK-042: Implement auth"
+  - Input placeholder: "Ask anything..." vs "Steer TASK-042..."
+  - Subtle background tint difference between modes
+
+### Planning Agent vs Task Agent
+
+These are fundamentally different agents with different scopes:
+
+| | Planning Agent | Task Agent |
+|---|---|---|
+| **Scope** | Broad — all tasks, projects, research | Narrow — one task, one workspace |
+| **Purpose** | Decompose, research, plan, create tasks | Execute a specific task |
+| **Capabilities** | Web research, task creation, artifact generation, status overview | Code generation, file editing, testing, git operations |
+| **Context** | All tasks, project history, user goals | Task AC, workspace files, task-specific instructions |
+| **Output** | Draft tasks, HTML artifacts, answers | Code changes, commits, PRs |
+| **Behavior** | Conversational, collaborative | Autonomous worker, steerable |
+
 ## Task Lifecycle (The Flow)
 
 ```
+                    ┌─────────────────────────────────────────┐
+                    │         PLANNING MODE (shelf)           │
+                    │  Draft tasks staged by planning agent   │
+                    └────────────────┬────────────────────────┘
+                                     │ User approves
+                                     ▼
 ┌─────────┐    ┌──────────┐    ┌───────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐
-│ BACKLOG │───→│ PLANNING │───→│  READY    │───→│ EXECUTING│───→│  WRAPUP  │───→│ COMPLETE │
+│ BACKLOG │───→│ PLANNING │───→│  READY    │───→│ EXECUTING│───→│ COMPLETE │───→│ ARCHIVED │
 │         │    │          │    │           │    │          │    │          │    │          │
-│ Ideas   │    │ Define   │    │ Approved  │    │ Agent     │    │ Review   │    │ Done     │
-│ Incoming│    │ AC, Tests│    │ Queued    │    │ Working  │    │ Merge    │    │ Archive  │
+│ Ideas   │    │ Define   │    │ Approved  │    │ Agent    │    │ Done     │    │ History  │
+│ Incoming│    │ AC, Plan │    │ Queued    │    │ Working  │    │ QA       │    │          │
 └─────────┘    └──────────┘    └───────────┘    └──────────┘    └──────────┘    └──────────┘
-     │               │               │                │               │               │
-     │          [WIP: 3]         [WIP: 5]          [WIP: 1]        [WIP: 2]            │
-     │               │               │                │               │               │
-     └───────────────┴───────────────┴────────────────┴───────────────┴───────────────┘
+     │               │               │                │               │
+     │          [WIP: 3]         [WIP: 5]          [WIP: 1]           │
+     │               │               │                │               │
+     └───────────────┴───────────────┴────────────────┴───────────────┘
                                     PULL SYSTEM
 ```
 
@@ -51,12 +190,12 @@ Pi-Factory is a **lean manufacturing-inspired** task queue system for AI agents.
 
 | Phase | Purpose | Entry Criteria | Exit Criteria | WIP Limit |
 |-------|---------|----------------|---------------|-----------|
-| **Backlog** | Capture ideas and requests | Task created | Prioritized, has basic description | ∞ |
+| **Backlog** | Capture ideas and requests | Task created or pushed from shelf | Prioritized, has basic description | ∞ |
 | **Planning** | Define acceptance criteria, testing approach | Has description | AC defined, tests specified, estimated | 3 |
 | **Ready** | Approved work waiting for agent | Planning complete | Agent has capacity | 5 |
 | **Executing** | Active agent work | Agent pulls from Ready | Implementation complete | 1 per agent |
-| **Wrapup** | Review, test, merge | Code complete | AC verified, tests pass, merged | 2 |
-| **Complete** | Archive and metrics | All exit criteria met | - | - |
+| **Complete** | Review and QA | Code complete | AC verified, tests pass, merged | ∞ |
+| **Archived** | History and metrics | All exit criteria met | - | - |
 
 ## Task Structure
 
@@ -71,16 +210,11 @@ type: feature  # feature, bug, refactor, research, spike
 priority: high  # critical, high, medium, low
 created: 2026-02-10T10:00:00Z
 updated: 2026-02-10T14:30:00Z
-assigned: agent-1  # null if unassigned
+assigned: agent-1
 workspace: /Users/patrick/workingdir/myproject
 project: myproject
 
-# TPS-inspired metrics
-cycle_time: null  # calculated on completion
-blocked_count: 0
-blocked_duration: 0  # seconds
-
-# Planning fields (filled in Planning phase)
+# Planning fields
 acceptance_criteria:
   - "User can login with email/password"
   - "Session persists for 24 hours"
@@ -89,9 +223,8 @@ acceptance_criteria:
 testing_instructions:
   - "Run: npm test auth"
   - "Verify login flow manually"
-  - "Check session cookie expiration"
 
-estimated_effort: 4h  # t-shirt sizes or hours
+estimated_effort: 4h
 complexity: medium  # low, medium, high
 
 # Execution fields
@@ -105,25 +238,15 @@ quality_checks:
   lint_pass: false
   review_done: false
 
-# Blocker tracking
-blocked:
-  is_blocked: false
-  reason: null
-  since: null
+# Metrics
+cycle_time: null
+blocked_count: 0
+blocked_duration: 0
 ---
 
 # Description
 
 Implement a secure user authentication system...
-
-## Context
-
-The application needs user authentication before...
-
-## Notes
-
-- Consider using bcrypt for password hashing
-- JWT for session management
 ```
 
 ## System Architecture
@@ -145,197 +268,127 @@ The application needs user authentication before...
 │                    │   SQLite    │                                         │
 │                    │   (State)   │                                         │
 │                    └─────────────┘                                         │
-│                           │                                                │
-│                    ┌──────┴──────┐                                         │
-│                    │  Task Files │                                         │
-│                    │  (Markdown) │                                         │
-│                    └─────────────┘                                         │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Component Details
 
 #### 1. Web UI (React + Vite)
-- **Kanban Board**: Main interface, columns for each phase
-- **Task Detail View**: Full task information, chat interface
-- **Workspace Selector**: Switch between projects
-- **Metrics Dashboard**: Cycle time, throughput, WIP charts
-- **Agent Console**: Real-time agent activity, logs
+- **Chat Pane**: Primary interface, always visible on the left. Switches between planning agent and task agent based on selection.
+- **Workspace/Shelf Pane**: Right pane in planning mode. Shows draft tasks and rendered HTML artifacts.
+- **Task Detail Pane**: Right pane in task mode. Shows task metadata, AC, quality gates.
+- **Pipeline Bar**: Bottom bar showing all tasks across phases. Drag-and-drop. Mode switch.
 
 #### 2. API Server (Express + WebSocket)
 - REST API for CRUD operations
 - WebSocket for real-time updates
+- Planning agent endpoints (chat, create drafts, generate artifacts)
+- Task agent endpoints (execute, steer, follow-up)
 - File system watcher for task files
-- Git integration for branch/PR tracking
 
 #### 3. Job Engine
 - Phase transition logic
 - WIP limit enforcement
 - Quality gate validation
+- Queue processing (pull tasks from ready → executing)
 - Metrics calculation
 
 #### 4. Agent SDK (Pi SDK Integration)
-- Task claiming mechanism
+- Task claiming and execution
 - Progress reporting
 - Chat log persistence
 - Automatic phase transitions
 
+### Planning Agent
+
+The planning agent is a general-purpose conversational agent with these capabilities:
+
+- **Research**: Web search, read documentation, analyze codebases
+- **Decomposition**: Break large goals into factory-ready tasks
+- **Disambiguation**: Ask clarifying questions, explore tradeoffs
+- **Draft task creation**: Propose tasks that land on the shelf for user review
+- **Artifact generation**: Produce rendered HTML outputs (tables, diagrams, summaries, mockups)
+- **Status awareness**: Know about all current tasks, their phases, blockers
+
+#### Shelf / Staging Area
+
+Draft tasks and artifacts created by the planning agent live on a shelf before entering the production line:
+
+- **Draft tasks**: Structured task data (title, description, AC) displayed as editable cards. User can edit, reorder, remove. Push to backlog individually or batch.
+- **Artifacts**: Named HTML blobs rendered in a sandboxed iframe. Research outputs, comparison tables, architecture diagrams, UI mockups, etc.
+
+#### Artifact Rendering
+
+Artifacts are rendered HTML that the planning agent outputs:
+- Displayed in a sandboxed `<iframe>` in the right pane
+- Agent outputs raw HTML — no special format or component system needed
+- Can contain inline CSS, SVG, interactive elements
+- Sandboxed for security (no access to parent app state)
+
 ### Data Model
 
 ```typescript
-// Core entities
 interface Task {
-  id: string;
-  frontmatter: TaskFrontmatter;
-  content: string;  // markdown body
-  chatLog: Message[];
-  history: PhaseTransition[];
+  id: string
+  frontmatter: TaskFrontmatter
+  content: string
+  chatLog: Message[]
+  history: PhaseTransition[]
+}
+
+interface DraftTask {
+  id: string  // temporary ID, replaced on creation
+  title: string
+  content: string
+  acceptance_criteria: string[]
+  type: TaskType
+  priority: Priority
+  complexity: Complexity
+}
+
+interface Artifact {
+  id: string
+  name: string
+  html: string  // raw HTML to render in iframe
+  created: string
+  taskContext?: string  // optional link to related planning discussion
+}
+
+interface Shelf {
+  draftTasks: DraftTask[]
+  artifacts: Artifact[]
 }
 
 interface Workspace {
-  path: string;
-  name: string;
-  config: WorkspaceConfig;
-  agents: Agent[];
+  path: string
+  name: string
+  config: WorkspaceConfig
+  agents: Agent[]
+  shelf: Shelf
 }
 
 interface Agent {
-  id: string;
-  name: string;
-  status: 'idle' | 'working' | 'blocked' | 'offline';
-  currentTask: string | null;
-  capabilities: string[];
+  id: string
+  name: string
+  status: 'idle' | 'working' | 'blocked' | 'offline'
+  currentTask: string | null
+  capabilities: string[]
 }
 
 interface PhaseTransition {
-  from: Phase;
-  to: Phase;
-  timestamp: Date;
-  actor: 'user' | 'agent' | 'system';
-  reason?: string;
+  from: Phase
+  to: Phase
+  timestamp: Date
+  actor: 'user' | 'agent' | 'system'
+  reason?: string
 }
 ```
-
-## UI Design Concept: "Industrial Minimalism"
-
-### Aesthetic Direction
-- **Inspiration**: Factory floor control room, Toyota Andon boards, industrial dashboards
-- **Color palette**: Safety orange, slate grays, status colors (green/yellow/red)
-- **Typography**: Monospace for data, clean sans-serif for UI
-- **Visual language**: Card-based kanban, clear status indicators, WIP limit warnings
-
-### Key Screens
-
-#### 1. Kanban Board (Main View)
-```
-┌────────────────────────────────────────────────────────────────────────────────┐
-│ PI-FACTORY  [Project: myapp]  [Agent: online]              [+ New Task] [⚙️]  │
-├────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                │
-│  BACKLOG        PLANNING [3/3]    READY [4/5]     EXECUTING    WRAPUP [1/2]   │
-│  ───────        ─────────────     ───────────     ─────────    ────────────   │
-│  ┌─────────┐    ┌─────────┐       ┌─────────┐     ┌─────────┐  ┌─────────┐    │
-│  │TASK-003 │    │TASK-001 │       │TASK-005 │     │TASK-002 │  │TASK-004 │    │
-│  │Auth     │    │Database │       │API Docs │     │[AGENT-1]│  │Review   │    │
-│  │medium   │    │schema   │       │low      │     │Login    │  │needed   │    │
-│  │         │    │high     │       │         │     │2h elapsed│ │         │    │
-│  └─────────┘    └─────────┘       └─────────┘     └─────────┘  └─────────┘    │
-│  ┌─────────┐    ┌─────────┐       ┌─────────┐                                  │
-│  │TASK-006 │    │TASK-007 │       │TASK-008 │                                  │
-│  │Email    │    │Tests    │       │Refactor │                                  │
-│  │low      │    │medium   │       │medium   │                                  │
-│  └─────────┘    └─────────┘       └─────────┘                                  │
-│                 ┌─────────┐                                                    │
-│                 │ ⚠️ WIP  │                                                    │
-│                 │ LIMIT   │                                                    │
-│                 └─────────┘                                                    │
-│                                                                                │
-└────────────────────────────────────────────────────────────────────────────────┘
-```
-
-#### 2. Main Layout (Kanban + Unified Activity Log)
-```
-┌─────────────────────────────────────────────────────────────────────────────────────────┐
-│ PI-FACTORY                              [Project: myapp]         [+ New Task] [⚙️]     │
-├─────────────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                         │
-│  ┌──────────────────────────────────────────────────────┐  ┌─────────────────────────┐ │
-│  │ KANBAN BOARD                                         │  │ ACTIVITY LOG            │ │
-│  │                                                      │  │                         │ │
-│  │  BACKLOG   PLANNING[3]  READY[4]  EXECUTING  WRAPUP  │  │ ┌─────────────────────┐ │ │
-│  │  ───────   ───────────  ────────  ─────────  ──────  │  │ │ ▓▓▓ TASK-002 ▓▓▓    │ │ │
-│  │  ┌─────┐   ┌─────┐     ┌─────┐   ┌─────┐            │  │ │ Login page styling  │ │ │
-│  │  │003  │   │001  │     │005  │   │002  │            │  │ ├─────────────────────┤ │ │
-│  │  │Auth │   │DB   │     │Docs │   │[AG1]│            │  │ │ Agent: Starting...  │ │ │
-│  │  │med  │   │high │     │low  │   │Login│            │  │ │                     │ │ │
-│  │  └─────┘   └─────┘     └─────┘   │2h   │            │  │ │ User: Use flexbox   │ │ │
-│  │  ┌─────┐   ┌─────┐               └─────┘            │  │ │                     │ │ │
-│  │  │006  │   │007  │                                  │  │ │ Agent: ✅ Done      │ │ │
-│  │  │Email│   │Test │                                  │  │ │                     │ │ │
-│  │  │low  │   │med  │                                  │  │ ├─────────────────────┤ │ │
-│  │  └─────┘   └─────┘                                  │  │ │ ▓▓▓ TASK-003 ▓▓▓    │ │ │
-│  │                                                      │  │ │ API integration     │ │ │
-│  │                                                      │  │ ├─────────────────────┤ │ │
-│  │                                                      │  │ │ Agent: Starting...  │ │ │
-│  │                                                      │  │ │                     │ │ │
-│  │                                                      │  │ │ [Type message...] ↵ │ │ │
-│  │                                                      │  │ └─────────────────────┘ │ │
-│  └──────────────────────────────────────────────────────┘  └─────────────────────────┘ │
-│                                                                                         │
-└─────────────────────────────────────────────────────────────────────────────────────────┘
-```
-
-#### 3. Task Detail View (Modal/Panel)
-```
-┌────────────────────────────────────────────────────────────────────────────────┐
-│ ← Back to Board                                    [Edit] [Move] [Archive]    │
-├────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                │
-│  TASK-001: Implement user authentication                    [executing]        │
-│  ═══════════════════════════════════════════════════════════════════════       │
-│                                                                                │
-│  ┌─────────────────────────────────┐  ┌─────────────────────────────────┐     │
-│  │ ACCEPTANCE CRITERIA             │  │ TESTING INSTRUCTIONS            │     │
-│  │ ─────────────────────────────   │  │ ─────────────────────────────   │     │
-│  │ ☐ User can login with email     │  │ • Run: npm test auth            │     │
-│  │ ☐ Session persists 24h          │  │ • Verify login flow manually    │     │
-│  │ ☐ Invalid creds show error      │  │ • Check cookie expiration       │     │
-│  │                                 │  │                                 │     │
-│  │ Estimated: 4h | Complexity: med │  │ Branch: feat/TASK-001-auth      │     │
-│  └─────────────────────────────────┘  └─────────────────────────────────┘     │
-│                                                                                │
-│  ┌─────────────────────────────────────────────────────────────────────────┐  │
-│  │ QUALITY GATES                                                           │  │
-│  │ ─────────────────────────────────────────────────────────────────────── │  │
-│  │  🟡 Tests passing    🔴 Lint clean    ⬜ Code review                     │  │
-│  └─────────────────────────────────────────────────────────────────────────┘  │
-│                                                                                │
-│  [View in Activity Log →]                                                      │
-│                                                                                │
-└────────────────────────────────────────────────────────────────────────────────┘
-```
-
-#### 4. Activity Log Detail
-- **Unified Timeline**: All agent interactions across all tasks in chronological order
-- **Task Separators**: Visual headers when agent switches to a new task
-  - Shows task ID, title, and phase
-  - Color-coded by task type (feature=blue, bug=red, etc.)
-  - Timestamp of when work started on that task
-- **Message Types**:
-  - `user`: User messages (right-aligned, different color)
-  - `agent`: Agent responses (left-aligned)
-  - `system`: Phase transitions, completions (center, muted)
-- **Quick Actions**: From any message, can:
-  - Jump to task detail
-  - View task in kanban board
-  - Reply (continues that task's conversation)
 
 ## File Structure
 
 ```
 pi-factory/
 ├── PLAN.md                    # This document
-├── README.md                  # User documentation
 ├── package.json               # Root package, workspaces
 ├── bin/
 │   └── pi-factory.js         # CLI entry point
@@ -344,26 +397,28 @@ pi-factory/
 │   │   ├── src/
 │   │   │   ├── App.tsx
 │   │   │   ├── components/
-│   │   │   │   ├── KanbanBoard.tsx
-│   │   │   │   ├── TaskCard.tsx
-│   │   │   │   ├── TaskDetail.tsx
-│   │   │   │   ├── PhaseColumn.tsx
-│   │   │   │   ├── ChatInterface.tsx
-│   │   │   │   ├── MetricsPanel.tsx
-│   │   │   │   └── WorkspaceSelector.tsx
+│   │   │   │   ├── WorkspacePage.tsx     # Main layout, mode switching
+│   │   │   │   ├── ChatPane.tsx          # Left pane — unified chat
+│   │   │   │   ├── ShelfPane.tsx         # Right pane — planning mode
+│   │   │   │   ├── TaskDetailPane.tsx    # Right pane — task mode
+│   │   │   │   ├── PipelineBar.tsx       # Bottom pipeline bar
+│   │   │   │   ├── DraftTaskCard.tsx     # Editable draft task on shelf
+│   │   │   │   ├── ArtifactViewer.tsx    # Sandboxed HTML artifact renderer
+│   │   │   │   ├── TaskCard.tsx          # Pipeline task card
+│   │   │   │   └── ...
 │   │   │   ├── hooks/
-│   │   │   ├── contexts/
 │   │   │   └── styles/
 │   │   ├── package.json
 │   │   └── vite.config.ts
 │   │
 │   ├── server/               # Express backend
 │   │   ├── src/
-│   │   │   ├── index.ts      # Main server
+│   │   │   ├── index.ts
 │   │   │   ├── task-service.ts
 │   │   │   ├── workspace-service.ts
 │   │   │   ├── agent-service.ts
-│   │   │   ├── metrics-service.ts
+│   │   │   ├── planning-agent.ts    # Planning agent orchestration
+│   │   │   ├── shelf-service.ts     # Draft tasks and artifacts
 │   │   │   ├── kanban-engine.ts
 │   │   │   └── websocket.ts
 │   │   ├── package.json
@@ -376,70 +431,51 @@ pi-factory/
 │       └── package.json
 │
 ├── scripts/
-│   ├── build.js
-│   └── install-service.sh
-│
-└── docs/
-    ├── TPS-PRINCIPLES.md
-    ├── TASK-LIFECYCLE.md
-    └── API.md
+├── docs/
+└── skills/
 ```
 
 ## Implementation Phases
 
-### Phase 1: Foundation (Week 1)
-- [ ] Project setup (monorepo, TypeScript, build system)
-- [ ] Core data models and types
-- [ ] Task file format and parsing
-- [ ] Basic Express server with REST API
-- [ ] SQLite schema for state management
+### Phase 1: Planning Agent & Shelf (Next)
+- [ ] Design planning agent API (chat endpoint, streaming)
+- [ ] Implement shelf data model (draft tasks, artifacts)
+- [ ] Build ChatPane component (replaces ActivityLog)
+- [ ] Build ShelfPane component (draft tasks + artifact list)
+- [ ] Build ArtifactViewer (sandboxed iframe renderer)
+- [ ] Build DraftTaskCard (editable, push-to-backlog action)
+- [ ] Wire up mode switching in WorkspacePage (planning ↔ task)
+- [ ] Planning agent: basic chat capability
+- [ ] Planning agent: create draft tasks → shelf
+- [ ] Planning agent: generate HTML artifacts → shelf
 
-### Phase 2: Kanban Core (Week 2)
-- [ ] React frontend setup
-- [ ] Kanban board UI with drag-and-drop
-- [ ] Task card components
-- [ ] Phase column with WIP limits
-- [ ] WebSocket for real-time updates
+### Phase 2: Mode Switching Polish
+- [ ] Visual differentiation between planning and task modes
+- [ ] Header context bar (agent name / task ID)
+- [ ] Input placeholder changes per mode
+- [ ] Smooth transitions when switching modes
+- [ ] Preserve planning conversation when switching to task and back
+- [ ] Back-to-general navigation from task mode
 
-### Phase 3: Task Management (Week 3)
-- [ ] Task creation and editing
-- [ ] Task detail view
-- [ ] Markdown rendering
-- [ ] File system watcher
-- [ ] Git integration (branches, PRs)
+### Phase 3: Planning Agent Capabilities
+- [ ] Web research integration
+- [ ] Codebase analysis (read workspace files)
+- [ ] Task decomposition prompts and patterns
+- [ ] Batch push from shelf to backlog
+- [ ] Status awareness (summarize current work, blockers)
 
-### Phase 4: Agent Integration (Week 4)
-- [ ] Agent SDK and claiming mechanism
-- [ ] Chat interface in task view
-- [ ] Progress reporting
-- [ ] Automatic phase transitions
-- [ ] Agent console view
-
-### Phase 5: Quality & Metrics (Week 5)
+### Phase 4: Quality & Metrics
 - [ ] Quality gates implementation
 - [ ] Metrics calculation (cycle time, throughput)
-- [ ] Dashboard with charts
+- [ ] Metrics accessible via planning agent ("how are we doing?")
 - [ ] Blocker tracking and escalation
-- [ ] Export/reporting
 
-### Phase 6: Polish & Release (Week 6)
+### Phase 5: Polish & Release
 - [ ] UI refinement and animations
 - [ ] Keyboard shortcuts
 - [ ] CLI improvements
 - [ ] Documentation
 - [ ] npm publishing
-
-## Key Differentiators from pi-deck
-
-| Feature | pi-deck | pi-factory |
-|---------|---------|------------|
-| **Primary UI** | Chat interface | Kanban board |
-| **Work Model** | Reactive (user asks) | Proactive (pull queue) |
-| **Task Structure** | Simple jobs | Rich TPS-inspired tasks |
-| **Quality Focus** | Manual review | Built-in quality gates |
-| **Metrics** | Basic | TPS metrics (cycle time, WIP) |
-| **Agent Model** | Session-based | Continuous work queue |
-| **Inspiration** | Terminal UI | Toyota Production System |
 
 ## Success Metrics
 
@@ -448,12 +484,4 @@ pi-factory/
 3. **Throughput**: Tasks completed per week
 4. **Quality**: % of tasks passing all quality gates on first try
 5. **Agent Utilization**: % of time agents are working vs idle
-
-## Future Enhancements
-
-- **Swimlanes**: Group tasks by project, priority, or agent
-- **Automation Rules**: Auto-assign, auto-transition based on criteria
-- **Multi-Agent**: Multiple agents working from same queue
-- **Sprint Planning**: Time-boxed iterations with capacity planning
-- **Integration**: GitHub Issues, Jira, Linear sync
-- **AI Planning**: Automated task breakdown and estimation
+6. **Planning Efficiency**: Time from goal → factory-ready tasks on shelf
