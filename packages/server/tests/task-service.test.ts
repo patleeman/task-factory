@@ -224,6 +224,13 @@ describe('canMoveToPhase', () => {
     },
   );
 
+  it('allows moving directly from backlog to complete', () => {
+    const task = createTask({ phase: 'backlog' });
+    const result = canMoveToPhase(task, 'complete');
+
+    expect(result).toEqual({ allowed: true });
+  });
+
   it('keeps non-archive constraints (backlog -> executing is rejected)', () => {
     const task = createTask({ phase: 'backlog' });
     const result = canMoveToPhase(task, 'executing');
