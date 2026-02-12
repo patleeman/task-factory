@@ -5,7 +5,7 @@
 // Workspaces are stored as .pi/factory.json files in the workspace directory.
 // A registry at ~/.pi/factory/workspaces.json tracks known workspace paths.
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'fs';
 import { join, basename } from 'path';
 import { homedir } from 'os';
 import type { Workspace, WorkspaceConfig } from '@pi-factory/shared';
@@ -26,11 +26,6 @@ const DEFAULT_CONFIG: WorkspaceConfig = {
     enabled: true,
     defaultBranch: 'main',
     branchPrefix: 'feat/',
-  },
-  requiredQualityChecks: ['testsPass', 'lintPass'],
-  autoTransition: {
-    onTestsPass: false,
-    onReviewDone: false,
   },
 };
 
@@ -213,6 +208,75 @@ export function updateWorkspaceConfig(
   writeWorkspaceConfig(workspace.path, workspace.config);
 
   return workspace;
+}
+
+// =============================================================================
+// Workspace Deletion
+// =============================================================================
+
+/**
+ * Delete a workspace: remove from registry and clean up .pi/factory data.
+ * Does NOT delete the user's project files — only Pi-Factory metadata.
+ */
+export function deleteWorkspace(id: string): boolean {
+  const entries = loadRegistry();
+  const entry = entries.find((e) => e.id === id);
+  if (!entry) return false;
+
+  // Remove factory config file (.pi/factory.json)
+  const configPath = join(entry.path, '.pi', 'factory.json');
+  if (existsSync(configPath)) {
+    try {
+      rmSync(configPath);
+    } catch {
+      // Best-effort cleanup
+    }
+  }
+
+  // Remove factory data directory (.pi/factory/) — activity logs, etc.
+  const factoryDir = join(entry.path, '.pi', 'factory');
+  if (existsSync(factoryDir)) {
+    try {
+      rmSync(factoryDir, { recursive: true });
+    } catch {
+      // Best-effort cleanup
+    }
+  }
+
+  // Remove task files (.pi/tasks/)
+  const tasksDir = join(entry.path, '.pi', 'tasks');
+  if (existsSync(tasksDir)) {
+    try {
+      rmSync(tasksDir, { recursive: true });
+    } catch {
+      // Best-effort cleanup
+    }
+  }
+
+  // Remove shelf data (.pi/shelf.json)
+  const shelfPath = join(entry.path, '.pi', 'shelf.json');
+  if (existsSync(shelfPath)) {
+    try {
+      rmSync(shelfPath);
+    } catch {
+      // Best-effort cleanup
+    }
+  }
+
+  // Remove planning attachments (.pi/planning-attachments/)
+  const planningAttDir = join(entry.path, '.pi', 'planning-attachments');
+  if (existsSync(planningAttDir)) {
+    try {
+      rmSync(planningAttDir, { recursive: true });
+    } catch {
+      // Best-effort cleanup
+    }
+  }
+
+  // Remove from registry
+  removeFromRegistry(id);
+
+  return true;
 }
 
 // =============================================================================

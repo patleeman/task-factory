@@ -6,6 +6,7 @@
 import { readFileSync, existsSync, readdirSync, mkdirSync, writeFileSync } from 'fs';
 import { join, resolve } from 'path';
 import { homedir } from 'os';
+import type { TaskDefaults } from '@pi-factory/shared';
 
 const PI_AGENT_DIR = join(homedir(), '.pi', 'agent');
 const PI_FACTORY_DIR = join(homedir(), '.pi', 'factory');
@@ -23,6 +24,8 @@ export interface PiFactorySettings {
   // Pi-Factory specific settings
   defaultWorkspace?: string;
   theme?: string;
+  // Task creation defaults
+  taskDefaults?: TaskDefaults;
   // Skill configuration
   skills?: {
     enabled: string[];
@@ -39,7 +42,7 @@ export interface PiSettings {
   lastChangelogVersion?: string;
   defaultProvider?: string;
   defaultModel?: string;
-  defaultThinkingLevel?: 'off' | 'low' | 'medium' | 'high';
+  defaultThinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
   theme?: string;
   [key: string]: any;
 }

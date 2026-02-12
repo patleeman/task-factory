@@ -43,16 +43,12 @@ Open [http://localhost:3000](http://localhost:3000).
 | **Planning** | Agent is generating a plan and acceptance criteria. |
 | **Ready** | Planned and approved. Queued for execution. |
 | **Executing** | Agent is actively working on the task. |
-| **Complete** | Done. Quality gates can be checked before archiving. |
+| **Complete** | Done. Ready for archiving. |
 | **Archived** | Out of the pipeline. |
 
 ### Shelf
 
 The planning agent can create **draft tasks** and **HTML artifacts** on the shelf. Draft tasks can be pushed to the backlog with one click. Artifacts are rendered HTML in sandboxed iframes — useful for research summaries, comparison tables, or mockups.
-
-### Quality gates
-
-Each completed task has toggleable quality gates: Tests, Lint, Review. These are manual checkpoints — click to mark as passed.
 
 ### Extensions
 

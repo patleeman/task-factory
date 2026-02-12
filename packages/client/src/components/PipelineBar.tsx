@@ -19,12 +19,11 @@ interface DropTarget {
   index: number // insertion index (0 = before first card, tasks.length = after last)
 }
 
-const VISIBLE_PHASES: Phase[] = ['backlog', 'planning', 'ready', 'executing', 'complete']
+const VISIBLE_PHASES: Phase[] = ['backlog', 'ready', 'executing', 'complete']
 
 // Card background colors per phase
 const PHASE_BG: Record<string, string> = {
   backlog: 'bg-slate-100',
-  planning: 'bg-yellow-100',
   ready: 'bg-blue-100',
   executing: 'bg-orange-100 pipeline-card-executing',
   complete: 'bg-emerald-100',
@@ -33,7 +32,6 @@ const PHASE_BG: Record<string, string> = {
 // Empty placeholder background
 const PHASE_EMPTY_BG: Record<string, string> = {
   backlog: 'bg-slate-50',
-  planning: 'bg-yellow-50',
   ready: 'bg-blue-50',
   executing: 'bg-orange-50',
   complete: 'bg-emerald-50',
@@ -42,7 +40,6 @@ const PHASE_EMPTY_BG: Record<string, string> = {
 // Phase label colors
 const PHASE_LABEL_COLOR: Record<string, string> = {
   backlog: 'text-slate-400',
-  planning: 'text-yellow-600',
   ready: 'text-blue-500',
   executing: 'text-orange-600',
   complete: 'text-emerald-600',
@@ -82,8 +79,7 @@ export function PipelineBar({
 
   const getAdvanceAction = (task: Task): { label: string; toPhase: Phase } | null => {
     switch (task.frontmatter.phase) {
-      case 'backlog': return { label: 'Plan →', toPhase: 'planning' }
-      case 'planning': return { label: 'Ready →', toPhase: 'ready' }
+      case 'backlog': return { label: 'Ready →', toPhase: 'ready' }
       default: return null
     }
   }
@@ -375,9 +371,8 @@ function PipelineCard({
 }) {
   const phase = task.frontmatter.phase
   const isExecuting = phase === 'executing'
-  const isPlanning = phase === 'planning' && !task.frontmatter.plan
   const isComplete = phase === 'complete'
-  const isAgentRunning = isExecuting || isPlanning
+  const isAgentRunning = isExecuting
   const phaseBg = PHASE_BG[phase] || PHASE_BG.backlog
 
   const handleDragStart = (e: React.DragEvent) => {
@@ -409,8 +404,8 @@ function PipelineCard({
         <div className="flex items-center gap-1">
           {isAgentRunning && (
             <span className="w-3.5 h-3.5 shrink-0 relative flex items-center justify-center">
-              <span className={`absolute inset-0 rounded-full animate-ping opacity-40 ${isExecuting ? 'bg-orange-400' : 'bg-yellow-400'}`} />
-              <span className={`relative w-2 h-2 rounded-full ${isExecuting ? 'bg-orange-500' : 'bg-yellow-500'}`} />
+              <span className="absolute inset-0 rounded-full animate-ping opacity-40 bg-orange-400" />
+              <span className="relative w-2 h-2 rounded-full bg-orange-500" />
             </span>
           )}
           <span className="text-xs font-mono text-slate-400 truncate">{task.id}</span>
@@ -422,15 +417,12 @@ function PipelineCard({
       <div className="flex items-center justify-between gap-1.5">
         <span className={`text-[10px] font-semibold uppercase tracking-wider flex items-center gap-1.5 ${
           isExecuting ? 'text-orange-600'
-          : isPlanning ? 'text-yellow-700'
           : isComplete ? 'text-emerald-600'
           : phase === 'ready' ? 'text-blue-600'
           : 'text-slate-400'
         }`}>
           {isAgentRunning && (
-            <span className={`inline-block w-3 h-3 rounded-full border-[1.5px] border-t-transparent animate-spin ${
-              isExecuting ? 'border-orange-500' : 'border-yellow-600'
-            }`} />
+            <span className="inline-block w-3 h-3 rounded-full border-[1.5px] border-t-transparent animate-spin border-orange-500" />
           )}
           {PHASE_DISPLAY_NAMES[phase]}
         </span>

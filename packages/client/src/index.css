@@ -415,3 +415,31 @@ body {
 .skeleton {
   @apply animate-pulse bg-slate-200 rounded;
 }
+
+/* Workspace Rail */
+.animate-fade-in {
+  animation: tooltip-fade-in 0.15s ease-out;
+}
+
+@keyframes tooltip-fade-in {
+  from { opacity: 0; transform: translateX(-4px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(100, 116, 139, 0.3) transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 4px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.3);
+  border-radius: 2px;
+}

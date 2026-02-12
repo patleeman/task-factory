@@ -4,7 +4,7 @@ export interface PiSettings {
   lastChangelogVersion?: string;
   defaultProvider?: string;
   defaultModel?: string;
-  defaultThinkingLevel?: 'off' | 'low' | 'medium' | 'high';
+  defaultThinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
   theme?: string;
   [key: string]: any;
 }

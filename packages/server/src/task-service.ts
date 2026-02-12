@@ -13,12 +13,11 @@ import type {
   CreateTaskRequest,
   UpdateTaskRequest,
   Phase,
-  QualityChecks,
   BlockedState,
   Attachment,
   ReorderTasksRequest,
 } from '@pi-factory/shared';
-import { DEFAULT_POST_EXECUTION_SKILLS } from '@pi-factory/shared';
+import { applyTaskDefaultsToRequest, loadTaskDefaults } from './task-defaults-service.js';
 
 
 // =============================================================================
@@ -71,7 +70,8 @@ export function parseTaskContent(content: string, filePath: string): Task {
   const frontmatter: TaskFrontmatter = {
     id: parsed.id || `TASK-${crypto.randomUUID().slice(0, 8).toUpperCase()}`,
     title: parsed.title || 'Untitled Task',
-    phase: parsed.phase || 'backlog',
+    // Migrate legacy 'planning' phase to 'backlog'
+    phase: (parsed.phase as string) === 'planning' ? 'backlog' : (parsed.phase || 'backlog'),
     created: parsed.created || new Date().toISOString(),
     updated: parsed.updated || new Date().toISOString(),
     assigned: parsed.assigned,
@@ -84,11 +84,6 @@ export function parseTaskContent(content: string, filePath: string): Task {
     testingInstructions: parsed.testingInstructions || [],
     commits: parsed.commits || [],
     attachments: parsed.attachments || [],
-    qualityChecks: parsed.qualityChecks || {
-      testsPass: false,
-      lintPass: false,
-      reviewDone: false,
-    },
     blocked: parsed.blocked || { isBlocked: false },
     ...parsed,
   };
@@ -147,6 +142,9 @@ export function createTask(
   const backlogTasks = existingTasks.filter(t => t.frontmatter.phase === 'backlog');
   const maxOrder = backlogTasks.reduce((max, t) => Math.max(max, t.frontmatter.order ?? 0), 0);
 
+  const taskDefaults = loadTaskDefaults();
+  const resolvedDefaults = applyTaskDefaultsToRequest(request, taskDefaults);
+
   const frontmatter: TaskFrontmatter = {
     id,
     title: title || request.title || 'Untitled Task',
@@ -162,15 +160,8 @@ export function createTask(
     testingInstructions: [],
     commits: [],
     attachments: [],
-    modelConfig: request.modelConfig || undefined,
-    postExecutionSkills: request.postExecutionSkills !== undefined
-      ? request.postExecutionSkills
-      : DEFAULT_POST_EXECUTION_SKILLS,
-    qualityChecks: {
-      testsPass: false,
-      lintPass: false,
-      reviewDone: false,
-    },
+    modelConfig: resolvedDefaults.modelConfig,
+    postExecutionSkills: resolvedDefaults.postExecutionSkills,
     blocked: {
       isBlocked: false,
     },
@@ -220,13 +211,6 @@ export function updateTask(
 
   if (request.modelConfig !== undefined) {
     task.frontmatter.modelConfig = request.modelConfig;
-  }
-
-  if (request.qualityChecks !== undefined) {
-    task.frontmatter.qualityChecks = {
-      ...task.frontmatter.qualityChecks,
-      ...request.qualityChecks,
-    };
   }
 
   if (request.blocked !== undefined) {
@@ -350,6 +334,28 @@ export function getTasksByPhase(tasks: Task[], phase: Phase): Task[] {
   return tasks.filter((t) => t.frontmatter.phase === phase);
 }
 
+/**
+ * Returns true when a task should (re)enter planning after startup.
+ *
+ * Cases:
+ * 1. Explicitly interrupted planning run (planningStatus=running, no plan)
+ * 2. Legacy unplanned backlog task (no status yet, no plan, has content)
+ */
+export function shouldResumeInterruptedPlanning(task: Task): boolean {
+  if (task.frontmatter.plan) return false;
+
+  if (task.frontmatter.planningStatus === 'running') {
+    return true;
+  }
+
+  const isLegacyUnplannedBacklogTask =
+    !task.frontmatter.planningStatus
+    && task.frontmatter.phase === 'backlog'
+    && task.content.trim().length > 0;
+
+  return isLegacyUnplannedBacklogTask;
+}
+
 // =============================================================================
 // Delete Task
 // =============================================================================
@@ -402,13 +408,14 @@ export function canMoveToPhase(task: Task, targetPhase: Phase): {
   const currentPhase = task.frontmatter.phase;
 
   // Define valid transitions
+  // Users can pause executing tasks (move back to backlog/ready) and resume later.
+  // The session file is preserved so the agent picks up where it left off.
   const validTransitions: Record<Phase, Phase[]> = {
-    backlog: ['planning'],
-    planning: ['backlog', 'ready'],
-    ready: ['planning', 'executing'],
-    executing: ['ready', 'complete'],
-    complete: ['ready', 'archived'], // Rework (back to ready) or archive
-    archived: [], // Terminal state — no transitions out
+    backlog: ['ready'],
+    ready: ['backlog', 'executing'],
+    executing: ['backlog', 'ready', 'complete'],
+    complete: ['ready', 'executing', 'archived'],
+    archived: ['backlog'], // Un-archive back to backlog
   };
 
   if (!validTransitions[currentPhase].includes(targetPhase)) {
@@ -424,16 +431,6 @@ export function canMoveToPhase(task: Task, targetPhase: Phase): {
       return {
         allowed: false,
         reason: 'Task must have acceptance criteria before moving to Ready',
-      };
-    }
-  }
-
-  if (targetPhase === 'complete') {
-    const qc = task.frontmatter.qualityChecks;
-    if (!qc.testsPass || !qc.lintPass) {
-      return {
-        allowed: false,
-        reason: 'All quality checks must pass before completing',
       };
     }
   }

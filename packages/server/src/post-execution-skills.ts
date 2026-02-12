@@ -2,7 +2,7 @@
 // Post-Execution Skills
 // =============================================================================
 // Discovers and runs Agent Skills (agentskills.io spec) from the repo-local
-// skills/ directory. These run as follow-up prompts on the same Pi session
+// skills/ directory. These run as additional prompts on the same Pi session
 // after the main task execution completes.
 
 import { existsSync, readFileSync, readdirSync } from 'fs';
@@ -10,7 +10,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import YAML from 'yaml';
 import type { PostExecutionSkill } from '@pi-factory/shared';
-import { createSystemEvent, createChatMessage } from './activity-service.js';
+import { createSystemEvent } from './activity-service.js';
 
 // =============================================================================
 // Skill Discovery
@@ -159,12 +159,19 @@ export interface RunSkillsContext {
   broadcastToWorkspace?: (event: any) => void;
 }
 
+interface SkillSession {
+  prompt: (content: string) => Promise<void>;
+  getLastAssistantText?: () => string | undefined;
+  messages?: any[];
+}
+
 /**
  * Run post-execution skills sequentially on an existing Pi session.
- * Each skill is run as a followUp() call so the agent retains full context.
+ * Each skill runs as a fresh prompt turn so tool output/events are emitted
+ * and visible in the task chat timeline.
  */
 export async function runPostExecutionSkills(
-  piSession: { followUp: (content: string) => Promise<any> },
+  piSession: SkillSession,
   skillIds: string[],
   ctx: RunSkillsContext,
 ): Promise<void> {
@@ -226,24 +233,28 @@ export async function runPostExecutionSkills(
 }
 
 /**
- * Run a single follow-up skill (one followUp call).
+ * Run a single follow-up skill (one prompt turn).
  */
 async function runFollowUpSkill(
-  piSession: { followUp: (content: string) => Promise<any> },
+  piSession: SkillSession,
   skill: PostExecutionSkill,
   _ctx: RunSkillsContext,
 ): Promise<void> {
-  console.log(`[Skills] Running follow-up skill "${skill.id}" — calling followUp()`);
-  const result = await piSession.followUp(skill.promptTemplate);
-  console.log(`[Skills] Follow-up skill "${skill.id}" completed`, result ? '(got result)' : '(no result)');
+  console.log(`[Skills] Running follow-up skill "${skill.id}" — calling prompt()`);
+
+  const startTime = Date.now();
+  await piSession.prompt(skill.promptTemplate);
+  const elapsed = Date.now() - startTime;
+
+  console.log(`[Skills] Follow-up skill "${skill.id}" completed in ${elapsed}ms`);
 }
 
 /**
- * Run a loop skill: call followUp repeatedly until the agent responds with
+ * Run a loop skill: call prompt repeatedly until the agent responds with
  * the done signal or we hit maxIterations.
  */
 async function runLoopSkill(
-  piSession: { followUp: (content: string) => Promise<any> },
+  piSession: SkillSession,
   skill: PostExecutionSkill,
   ctx: RunSkillsContext,
 ): Promise<void> {
@@ -259,11 +270,10 @@ async function runLoopSkill(
     );
     broadcastToWorkspace?.({ type: 'activity:entry', entry: iterEntry });
 
-    const result = await piSession.followUp(skill.promptTemplate);
+    await piSession.prompt(skill.promptTemplate);
 
     // Check if the agent signaled it's done.
-    // The result from followUp may vary — try to extract text content.
-    const responseText = extractResponseText(result);
+    const responseText = getLastAssistantText(piSession);
     if (responseText.includes(skill.doneSignal)) {
       const doneEntry = createSystemEvent(
         workspaceId,
@@ -288,28 +298,37 @@ async function runLoopSkill(
 }
 
 /**
- * Extract text from a Pi SDK followUp result.
- * The shape may vary — handle common cases gracefully.
+ * Best-effort extraction of the latest assistant text from the active session.
  */
-function extractResponseText(result: any): string {
-  if (!result) return '';
-  if (typeof result === 'string') return result;
+function getLastAssistantText(piSession: SkillSession): string {
+  if (typeof piSession.getLastAssistantText === 'function') {
+    return piSession.getLastAssistantText() || '';
+  }
 
-  // Pi SDK may return a message object with content array
-  if (result.content && Array.isArray(result.content)) {
-    return result.content
+  if (Array.isArray(piSession.messages)) {
+    for (let i = piSession.messages.length - 1; i >= 0; i--) {
+      const message = piSession.messages[i];
+      if (message?.role !== 'assistant') continue;
+      return extractTextFromAssistantMessage(message);
+    }
+  }
+
+  return '';
+}
+
+function extractTextFromAssistantMessage(message: any): string {
+  if (!message) return '';
+
+  if (typeof message.content === 'string') {
+    return message.content;
+  }
+
+  if (Array.isArray(message.content)) {
+    return message.content
       .filter((c: any) => c.type === 'text')
       .map((c: any) => c.text)
       .join('\n');
   }
 
-  // Or it may return the last message
-  if (result.message?.content && Array.isArray(result.message.content)) {
-    return result.message.content
-      .filter((c: any) => c.type === 'text')
-      .map((c: any) => c.text)
-      .join('\n');
-  }
-
-  return String(result);
+  return '';
 }

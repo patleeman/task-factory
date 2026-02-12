@@ -21,9 +21,11 @@ const INITIAL_AGENT_STREAM: AgentStreamState = {
 
 /**
  * Convert PlanningMessage[] to ActivityEntry[] so TaskChat renders them identically.
+ * Returns entries in newest-first order to match the activity API convention
+ * (TaskChat applies .reverse() to get chronological rendering order).
  */
 function messagesToEntries(messages: PlanningMessage[]): ActivityEntry[] {
-  return messages.map((msg): ActivityEntry => {
+  const entries = messages.map((msg): ActivityEntry => {
     if (msg.role === 'tool') {
       return {
         type: 'chat-message',
@@ -48,6 +50,9 @@ function messagesToEntries(messages: PlanningMessage[]): ActivityEntry[] {
       timestamp: msg.timestamp,
     }
   })
+  // Reverse to newest-first — TaskChat will .reverse() again for chronological rendering
+  entries.reverse()
+  return entries
 }
 
 /**
@@ -160,13 +165,12 @@ export function usePlanningStreaming(
           break
 
         case 'planning:tool_end':
+          // Remove the completed tool call from the live stream — it's already
+          // persisted as a planning:message entry and will render there instead.
+          // This prevents duplication (same tool showing in entries AND live stream).
           setAgentStream((prev) => ({
             ...prev,
-            toolCalls: prev.toolCalls.map((tc) =>
-              tc.toolCallId === msg.toolCallId
-                ? { ...tc, isComplete: true, isError: msg.isError }
-                : tc
-            ),
+            toolCalls: prev.toolCalls.filter((tc) => tc.toolCallId !== msg.toolCallId),
           }))
           break
 
@@ -175,6 +179,12 @@ export function usePlanningStreaming(
             ...prev,
             toolCalls: [],
           }))
+          break
+
+        case 'planning:session_reset':
+          // Server has reset the session — clear all local state
+          setMessages([])
+          setAgentStream(INITIAL_AGENT_STREAM)
           break
 
         case 'shelf:updated':

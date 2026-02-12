@@ -73,6 +73,11 @@ export interface ModelConfig {
   thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 }
 
+export interface TaskDefaults {
+  modelConfig?: ModelConfig;
+  postExecutionSkills: string[];
+}
+
 // =============================================================================
 // Task Frontmatter (YAML header in markdown files)
 // =============================================================================
@@ -114,9 +119,6 @@ export interface TaskFrontmatter {
   // Ordering (position within a column; lower = closer to top)
   order: number;
 
-  // Quality gates
-  qualityChecks: QualityChecks;
-
   // Post-execution skills (run after main agent execution)
   postExecutionSkills?: string[];
 
@@ -126,6 +128,9 @@ export interface TaskFrontmatter {
   // Plan (auto-generated on task creation)
   plan?: TaskPlan;
 
+  // Planning lifecycle (used to recover interrupted planning after restarts)
+  planningStatus?: 'running' | 'completed' | 'error';
+
   // Attachments (images, files)
   attachments: Attachment[];
 
@@ -134,12 +139,6 @@ export interface TaskFrontmatter {
 
   // Blocker tracking
   blocked: BlockedState;
-}
-
-export interface QualityChecks {
-  testsPass: boolean;
-  lintPass: boolean;
-  reviewDone: boolean;
 }
 
 // =============================================================================
@@ -222,7 +221,7 @@ export interface SystemEventEntry {
   type: 'system-event';
   id: string;
   taskId: string;
-  event: 'phase-change' | 'task-created' | 'task-completed' | 'blocked' | 'unblocked' | 'quality-check';
+  event: 'phase-change' | 'task-created' | 'task-completed' | 'blocked' | 'unblocked';
   message: string;
   timestamp: string; // ISO 8601
   metadata?: Record<string, unknown>;
@@ -254,15 +253,6 @@ export interface WorkspaceConfig {
     enabled: boolean;
     defaultBranch: string;
     branchPrefix: string;
-  };
-
-  // Quality gates
-  requiredQualityChecks?: (keyof QualityChecks)[];
-
-  // Auto-transition rules
-  autoTransition?: {
-    onTestsPass?: boolean;
-    onReviewDone?: boolean;
   };
 
   // Queue processing (auto-pull from ready queue)
@@ -303,7 +293,6 @@ export interface Metrics {
   wipLimitBreaches: number;
 
   // Quality metrics
-  qualityGatePassRate: number;
   reworkRate: number; // tasks that went back to executing
 
   // Agent metrics
@@ -340,7 +329,6 @@ export interface UpdateTaskRequest {
   content?: string;
   acceptanceCriteria?: string[];
   assigned?: string | null;
-  qualityChecks?: Partial<QualityChecks>;
   plan?: TaskPlan;
   blocked?: Partial<BlockedState>;
   postExecutionSkills?: string[];

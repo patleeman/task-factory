@@ -13,6 +13,7 @@ import {
   DefaultResourceLoader,
   ModelRegistry,
   SessionManager,
+  SettingsManager,
   type AgentSession,
   type AgentSessionEvent,
 } from '@mariozechner/pi-coding-agent';
@@ -21,6 +22,7 @@ import { createTaskSeparator, createChatMessage, createSystemEvent } from './act
 import { buildAgentContext, type PiSkill } from './pi-integration.js';
 import { moveTaskToPhase, updateTask, saveTaskFile } from './task-service.js';
 import { runPostExecutionSkills } from './post-execution-skills.js';
+import { withTimeout } from './with-timeout.js';
 
 // =============================================================================
 // Repo-local Extension Discovery
@@ -223,6 +225,12 @@ interface TaskSession {
   currentThinkingText: string;
   /** Track tool call args by toolCallId for persisting structured entries */
   toolCallArgs: Map<string, { toolName: string; args: Record<string, unknown> }>;
+  /** Track latest streamed output per toolCallId so partial updates can be diffed */
+  toolCallOutput: Map<string, string>;
+  /** Last completed tool result text (used to dedupe assistant tool-echo messages) */
+  lastToolResultText: string;
+  /** Timestamp (ms) of the last completed tool result */
+  lastToolResultAt: number;
   /** Whether the agent called task_complete during this session */
   agentSignaledComplete: boolean;
   /** Summary from task_complete call */
@@ -304,9 +312,8 @@ function buildTaskPrompt(task: Task, skills: PiSkill[], attachmentSection: strin
   prompt += `2. Plan your approach before implementing\n`;
   prompt += `3. Use the available skills when appropriate\n`;
   prompt += `4. Run tests to verify your implementation\n`;
-  prompt += `5. Update quality gates as you complete each item\n`;
-  prompt += `6. When you are DONE with the task and all acceptance criteria are met, call the \`task_complete\` tool with this task's ID ("${task.id}") and a brief summary\n`;
-  prompt += `7. If you have questions, need clarification, or hit a blocker, do NOT call task_complete — just explain the situation and stop. The user will respond.\n\n`;
+  prompt += `5. When you are DONE with the task and all acceptance criteria are met, call the \`task_complete\` tool with this task's ID ("${task.id}") and a brief summary\n`;
+  prompt += `6. If you have questions, need clarification, or hit a blocker, do NOT call task_complete — just explain the situation and stop. The user will respond.\n\n`;
 
   return prompt;
 }
@@ -384,6 +391,9 @@ export async function executeTask(options: ExecuteTaskOptions): Promise<TaskSess
     currentStreamText: '',
     currentThinkingText: '',
     toolCallArgs: new Map(),
+    toolCallOutput: new Map(),
+    lastToolResultText: '',
+    lastToolResultAt: 0,
     agentSignaledComplete: false,
     completionSummary: '',
     onComplete,
@@ -484,11 +494,25 @@ export async function executeTask(options: ExecuteTaskOptions): Promise<TaskSess
 
     // Register completion callback so the task_complete extension tool
     // can signal that the agent is actually done (vs. asking a question).
+    //
+    // Race condition: the Pi SDK's prompt() can resolve before retries
+    // finish. If the agent calls task_complete during a background retry,
+    // prompt() has already returned and handleAgentTurnEnd already went
+    // idle. In that case, we re-trigger the completion flow here.
     const completeRegistry = ensureCompleteCallbackRegistry();
 
     completeRegistry.set(task.id, (summary: string) => {
       session.agentSignaledComplete = true;
       session.completionSummary = summary;
+
+      // If the session already went idle (prompt resolved early), kick off
+      // the completion flow now that the agent has actually signaled done.
+      if (session.status === 'idle') {
+        console.log(`[AgentExecution] Late completion signal for ${task.id} — session was idle, triggering completion flow`);
+        handleAgentTurnEnd(session, workspaceId, task).catch((err) => {
+          console.error(`[AgentExecution] Late completion flow error for ${task.id}:`, err);
+        });
+      }
     });
 
     // Load task attachments (images become ImageContent, others become file paths in prompt)
@@ -545,7 +569,8 @@ async function runAgentExecution(
     await session.piSession!.prompt(prompt, promptOpts);
 
     // prompt() resolved — check if the agent signaled completion.
-    handleAgentTurnEnd(session, workspaceId, task);
+    // Must await so post-execution skills actually run (and errors are caught).
+    await handleAgentTurnEnd(session, workspaceId, task);
   } catch (err) {
     console.error('Agent execution error:', err);
     handleAgentError(session, workspaceId, task, err);
@@ -569,15 +594,7 @@ async function handleAgentTurnEnd(
 
     session.status = 'idle';
 
-    const waitEntry = createSystemEvent(
-      workspaceId,
-      task.id,
-      'phase-change',
-      'Agent is waiting for user input',
-      { sessionId: session.id }
-    );
-    session.broadcastToWorkspace?.({ type: 'activity:entry', entry: waitEntry });
-
+    // Keep this as status-only (no timeline spam event).
     session.broadcastToWorkspace?.({
       type: 'agent:execution_status',
       taskId: task.id,
@@ -649,7 +666,15 @@ async function handleAgentTurnEnd(
     status: 'completed',
   });
 
-  session.onComplete?.(session.status === 'completed');
+  const wasSuccess = session.status === 'completed';
+
+  // Clean up: unsubscribe from events and remove from active sessions
+  // so future chat messages can trigger resumeChat() instead of
+  // falling through all branches in the activity handler.
+  session.unsubscribe?.();
+  activeSessions.delete(task.id);
+
+  session.onComplete?.(wasSuccess);
 }
 
 /**
@@ -680,12 +705,52 @@ function handleAgentError(
     status: 'error',
   });
 
+  // Clean up: unsubscribe and remove from active sessions so future
+  // chat messages can trigger resumeChat() instead of being silently dropped.
+  session.unsubscribe?.();
+  activeSessions.delete(task.id);
+
   session.onComplete?.(false);
 }
 
 /** Remove the completion callback for a task (cleanup). */
 function cleanupCompletionCallback(taskId: string): void {
   globalThis.__piFactoryCompleteCallbacks?.delete(taskId);
+}
+
+function extractTextFromContentBlocks(content: any): string {
+  if (!Array.isArray(content)) return '';
+  return content
+    .filter((c: any) => c?.type === 'text' && typeof c.text === 'string')
+    .map((c: any) => c.text)
+    .join('');
+}
+
+function extractToolResultText(result: any): string {
+  if (!result) return '';
+  if (typeof result === 'string') return result;
+
+  // Standard AgentToolResult shape: { content: [{ type: 'text', text }], details }
+  if (Array.isArray(result.content)) {
+    return extractTextFromContentBlocks(result.content);
+  }
+
+  // Backward-compat fallback
+  if (Array.isArray((result as any).partialResult?.content)) {
+    return extractTextFromContentBlocks((result as any).partialResult.content);
+  }
+
+  return '';
+}
+
+function shouldSkipToolEchoMessage(session: TaskSession, content: string): boolean {
+  if (!content) return false;
+  if (!session.lastToolResultText) return false;
+
+  const ageMs = Date.now() - session.lastToolResultAt;
+  if (ageMs > 2500) return false;
+
+  return content.trim() === session.lastToolResultText.trim();
 }
 
 function handlePiEvent(
@@ -718,6 +783,12 @@ function handlePiEvent(
     }
 
     case 'message_start': {
+      // Ignore non-assistant messages (user/tool/custom). We only stream
+      // assistant output to the task chat UI.
+      if ((event.message as any)?.role !== 'assistant') {
+        break;
+      }
+
       session.currentStreamText = '';
       session.currentThinkingText = '';
       broadcast?.({ type: 'agent:streaming_start', taskId });
@@ -725,6 +796,12 @@ function handlePiEvent(
     }
 
     case 'message_update': {
+      // Defensive guard: assistantMessageEvent should only appear for assistant
+      // messages, but skip if we ever get a non-assistant event.
+      if ((event.message as any)?.role !== 'assistant') {
+        break;
+      }
+
       const sub = event.assistantMessageEvent;
       if (sub.type === 'text_delta') {
         const delta = sub.delta;
@@ -745,18 +822,26 @@ function handlePiEvent(
     }
 
     case 'message_end': {
+      // Only persist assistant message output. If we process user message_end
+      // here, the user's own text gets echoed back as an "agent" message.
+      const message = event.message as any;
+      if (message?.role !== 'assistant') {
+        break;
+      }
+
       // Flush streaming text as a final message in the activity log
-      const message = event.message;
       let content = '';
 
-      if ('content' in message && Array.isArray(message.content)) {
+      if (Array.isArray(message.content)) {
         content = message.content
           .filter((c: any) => c.type === 'text')
           .map((c: any) => c.text)
           .join('\n');
+      } else if (typeof message.content === 'string') {
+        content = message.content;
       }
 
-      if (content) {
+      if (content && !shouldSkipToolEchoMessage(session, content)) {
         const entry = createChatMessage(workspaceId, taskId, 'agent', content);
         broadcast?.({ type: 'activity:entry', entry });
       }
@@ -782,6 +867,7 @@ function handlePiEvent(
         toolName: event.toolName,
         args: (event as any).args || {},
       });
+      session.toolCallOutput.set(event.toolCallId, '');
       broadcast?.({
         type: 'agent:execution_status',
         taskId,
@@ -798,12 +884,27 @@ function handlePiEvent(
     }
 
     case 'tool_execution_update': {
-      const delta = (event as any).data || '';
+      const toolCallId = (event as any).toolCallId || '';
+      const partialResult = (event as any).partialResult;
+
+      // Newer SDKs emit structured partialResult; older paths may emit data.
+      const partialText = extractToolResultText(partialResult) || (event as any).data || '';
+      if (!partialText) {
+        break;
+      }
+
+      const previous = session.toolCallOutput.get(toolCallId) || '';
+      const delta = partialText.startsWith(previous)
+        ? partialText.slice(previous.length)
+        : partialText;
+
+      session.toolCallOutput.set(toolCallId, partialText);
+
       if (delta) {
         broadcast?.({
           type: 'agent:tool_update',
           taskId,
-          toolCallId: (event as any).toolCallId || '',
+          toolCallId,
           delta,
         });
       }
@@ -813,12 +914,11 @@ function handlePiEvent(
     case 'tool_execution_end': {
       // Get the stored args for this tool call
       const toolInfo = session.toolCallArgs.get(event.toolCallId);
-      const resultText = typeof event.result === 'string'
-        ? event.result
-        : (event as any).content?.map((c: any) => c.type === 'text' ? c.text : '').join('') || '';
+      const streamedText = session.toolCallOutput.get(event.toolCallId) || '';
+      const finalResultText = extractToolResultText((event as any).result) || streamedText;
 
       // Store as structured activity entry with tool metadata
-      const toolEntry = createChatMessage(workspaceId, taskId, 'agent', resultText, undefined, {
+      const toolEntry = createChatMessage(workspaceId, taskId, 'agent', finalResultText, undefined, {
         toolName: event.toolName,
         toolCallId: event.toolCallId,
         args: toolInfo?.args || {},
@@ -836,7 +936,7 @@ function handlePiEvent(
         toolCallId: event.toolCallId,
         toolName: event.toolName,
         isError: event.isError,
-        result: resultText,
+        result: finalResultText,
       });
       broadcast?.({
         type: 'agent:execution_status',
@@ -844,7 +944,10 @@ function handlePiEvent(
         status: 'streaming',
       });
 
+      session.lastToolResultText = finalResultText;
+      session.lastToolResultAt = Date.now();
       session.toolCallArgs.delete(event.toolCallId);
+      session.toolCallOutput.delete(event.toolCallId);
       break;
     }
 
@@ -897,15 +1000,39 @@ export async function followUpTask(taskId: string, content: string, images?: Ima
   if (!session?.piSession) return false;
 
   try {
-    // Reset the completion signal for this new turn
+    const hasImages = !!(images && images.length > 0);
+
+    // If the agent is currently streaming, queue as follow-up and return.
+    // Do NOT run handleAgentTurnEnd here — followUp() only queues the message.
+    if (session.piSession.isStreaming) {
+      await session.piSession.followUp(content, hasImages ? images : undefined);
+      return true;
+    }
+
+    // Agent is idle: start a new turn with prompt().
+    session.status = 'running';
+    session.broadcastToWorkspace?.({
+      type: 'agent:execution_status',
+      taskId,
+      status: 'streaming',
+    });
+
+    // Reset completion flags for this new turn.
     session.agentSignaledComplete = false;
     session.completionSummary = '';
 
-    await session.piSession.followUp(content, images && images.length > 0 ? images : undefined);
+    await session.piSession.prompt(content, hasImages ? { images: images! } : undefined);
 
-    // followUp() resolved — check completion signal (same logic as initial prompt)
+    // Turn resolved — check completion signal (same logic as initial prompt).
     if (session.task) {
       await handleAgentTurnEnd(session, session.workspaceId, session.task);
+    } else {
+      session.status = 'idle';
+      session.broadcastToWorkspace?.({
+        type: 'agent:execution_status',
+        taskId,
+        status: 'idle',
+      });
     }
 
     return true;
@@ -951,6 +1078,9 @@ export async function resumeChat(
     currentStreamText: '',
     currentThinkingText: '',
     toolCallArgs: new Map(),
+    toolCallOutput: new Map(),
+    lastToolResultText: '',
+    lastToolResultAt: 0,
     agentSignaledComplete: false,
     completionSummary: '',
     task,
@@ -997,10 +1127,11 @@ export async function resumeChat(
       handlePiEvent(event, session, workspaceId, task.id);
     });
 
-    // Send the user's message as a follow-up
-    await piSession.followUp(content, images && images.length > 0 ? images : undefined);
+    // Send the user's message as a new prompt (not followUp — there's no
+    // active agent turn to follow up on since we just reopened the session).
+    await piSession.prompt(content, images && images.length > 0 ? { images } : undefined);
 
-    // Chat follow-up resolved — go idle (no auto-advance for non-executing tasks)
+    // Prompt resolved — go idle (no auto-advance for non-executing tasks)
     session.status = 'idle';
 
     broadcastToWorkspace?.({
@@ -1012,6 +1143,121 @@ export async function resumeChat(
     return true;
   } catch (err) {
     console.error(`[resumeChat] Failed to resume chat for task ${task.id}:`, err);
+    session.status = 'error';
+    activeSessions.delete(task.id);
+
+    broadcastToWorkspace?.({
+      type: 'agent:execution_status',
+      taskId: task.id,
+      status: 'error',
+    });
+
+    return false;
+  }
+}
+
+// =============================================================================
+// Start Chat (for tasks with no active session and no previous conversation)
+// =============================================================================
+// Creates a fresh agent session and sends the user's message as the initial
+// prompt. Used when chatting on tasks that have never had an agent session.
+
+export async function startChat(
+  task: Task,
+  workspaceId: string,
+  workspacePath: string,
+  content: string,
+  broadcastToWorkspace?: (event: any) => void,
+  images?: ImageContent[],
+): Promise<boolean> {
+  const session: TaskSession = {
+    id: crypto.randomUUID(),
+    taskId: task.id,
+    workspaceId,
+    piSession: null,
+    status: 'running',
+    startTime: new Date().toISOString(),
+    output: [],
+    broadcastToWorkspace,
+    currentStreamText: '',
+    currentThinkingText: '',
+    toolCallArgs: new Map(),
+    toolCallOutput: new Map(),
+    lastToolResultText: '',
+    lastToolResultAt: 0,
+    agentSignaledComplete: false,
+    completionSummary: '',
+    task,
+  };
+
+  activeSessions.set(task.id, session);
+
+  broadcastToWorkspace?.({
+    type: 'agent:execution_status',
+    taskId: task.id,
+    status: 'streaming',
+  });
+
+  try {
+    const authStorage = new AuthStorage();
+    const modelRegistry = new ModelRegistry(authStorage);
+    const loader = new DefaultResourceLoader({
+      cwd: workspacePath,
+      additionalExtensionPaths: getRepoExtensionPaths(),
+    });
+    await loader.reload();
+
+    const sessionOpts: Parameters<typeof createAgentSession>[0] = {
+      cwd: workspacePath,
+      authStorage,
+      modelRegistry,
+      sessionManager: SessionManager.create(workspacePath),
+      resourceLoader: loader,
+    };
+
+    const mc = task.frontmatter.modelConfig;
+    if (mc) {
+      const resolved = modelRegistry.find(mc.provider, mc.modelId);
+      if (resolved) sessionOpts.model = resolved;
+      if (mc.thinkingLevel) sessionOpts.thinkingLevel = mc.thinkingLevel;
+    }
+
+    const { session: piSession } = await createAgentSession(sessionOpts);
+    session.piSession = piSession;
+
+    session.unsubscribe = piSession.subscribe((event: AgentSessionEvent) => {
+      handlePiEvent(event, session, workspaceId, task.id);
+    });
+
+    // Build context about the task for the initial prompt
+    const taskContext = `You are chatting about task ${task.id}: "${task.frontmatter.title}"\n` +
+      (task.content ? `Task description: ${task.content}\n` : '') +
+      (task.frontmatter.plan ? `This task has a plan with goal: ${task.frontmatter.plan.goal}\n` : '') +
+      `Current phase: ${task.frontmatter.phase}\n\n` +
+      `User message: ${content}`;
+
+    await piSession.prompt(taskContext, images && images.length > 0 ? { images } : undefined);
+
+    // Save session file so future messages can resume
+    const sessionFilePath = piSession.sessionFile;
+    if (sessionFilePath) {
+      task.frontmatter.sessionFile = sessionFilePath;
+      task.frontmatter.updated = new Date().toISOString();
+      saveTaskFile(task);
+    }
+
+    // Chat resolved — go idle (no auto-advance for non-executing tasks)
+    session.status = 'idle';
+
+    broadcastToWorkspace?.({
+      type: 'agent:execution_status',
+      taskId: task.id,
+      status: 'idle',
+    });
+
+    return true;
+  } catch (err) {
+    console.error(`[startChat] Failed to start chat for task ${task.id}:`, err);
     session.status = 'error';
     activeSessions.delete(task.id);
 
@@ -1069,82 +1315,14 @@ export async function stopTaskExecution(taskId: string): Promise<boolean> {
 }
 
 // =============================================================================
-// Quality Gate Validation
-// =============================================================================
-
-export interface QualityGateResult {
-  testsPass: boolean;
-  lintPass: boolean;
-  reviewDone: boolean;
-  errors: string[];
-}
-
-export async function validateQualityGates(
-  task: Task,
-  workspacePath: string
-): Promise<QualityGateResult> {
-  const result: QualityGateResult = {
-    testsPass: false,
-    lintPass: false,
-    reviewDone: false,
-    errors: [],
-  };
-
-  // Run tests if testing instructions exist
-  if (task.frontmatter.testingInstructions.length > 0) {
-    try {
-      // Look for common test commands
-      const testCmd = task.frontmatter.testingInstructions.find(
-        (i) => i.includes('npm test') || i.includes('pytest') || i.includes('cargo test')
-      );
-
-      if (testCmd) {
-        // In real implementation, run the test command
-        // For now, simulate
-        result.testsPass = true;
-      }
-    } catch (err) {
-      result.errors.push(`Tests failed: ${err}`);
-    }
-  } else {
-    result.testsPass = true; // No tests required
-  }
-
-  // Check lint (simulate)
-  result.lintPass = true;
-
-  // Check review (manual for now)
-  result.reviewDone = task.frontmatter.qualityChecks?.reviewDone || false;
-
-  return result;
-}
-
-// =============================================================================
-// Auto-transition on Quality Gates
-// =============================================================================
-
-export async function checkAndAutoTransition(
-  task: Task,
-  workspacePath: string
-): Promise<void> {
-  const gates = await validateQualityGates(task, workspacePath);
-
-  // Auto-move from executing to complete if all gates pass
-  if (
-    task.frontmatter.phase === 'executing' &&
-    gates.testsPass &&
-    gates.lintPass &&
-    gates.reviewDone
-  ) {
-    moveTaskToPhase(task, 'complete', 'system', 'All quality gates passed');
-  }
-}
-
-// =============================================================================
 // Planning Agent
 // =============================================================================
-// When a task moves to "planning", the agent researches the codebase and
-// generates a structured plan before the task can move to "ready".
+// The planning agent researches the codebase and generates a structured plan.
+// Plans are auto-generated at task creation time using planTask() below.
+// This agent is kept for manual/on-demand planning scenarios.
+
+const PLANNING_TIMEOUT_MS = 3 * 60 * 1000;
+const PLANNING_DEFAULT_THINKING_LEVEL = 'low' as const;
 
 function buildPlanningPrompt(task: Task, attachmentSection: string): string {
   const { frontmatter, content } = task;
@@ -1224,12 +1402,23 @@ export interface PlanTaskOptions {
 export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | null> {
   const { task, workspaceId, workspacePath, broadcastToWorkspace } = options;
 
+  // Mark planning as running so interrupted work can be recovered on restart.
+  task.frontmatter.planningStatus = 'running';
+  task.frontmatter.updated = new Date().toISOString();
+  saveTaskFile(task);
+
+  broadcastToWorkspace?.({
+    type: 'task:updated',
+    task,
+    changes: {},
+  });
+
   // Create task separator in activity log
   createTaskSeparator(
     workspaceId,
     task.id,
     task.frontmatter.title,
-    'planning'
+    task.frontmatter.phase,
   );
 
   const sysEntry = createSystemEvent(
@@ -1253,6 +1442,9 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
     currentStreamText: '',
     currentThinkingText: '',
     toolCallArgs: new Map(),
+    toolCallOutput: new Map(),
+    lastToolResultText: '',
+    lastToolResultAt: 0,
     agentSignaledComplete: false,
     completionSummary: '',
   };
@@ -1265,11 +1457,11 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
     status: 'streaming',
   });
 
+  const registry = ensurePlanCallbackRegistry();
+  let savedPlan: TaskPlan | null = null;
+
   try {
     // Register callback so the save_plan extension tool can persist the plan
-    const registry = ensurePlanCallbackRegistry();
-    let savedPlan: TaskPlan | null = null;
-
     registry.set(task.id, (plan: TaskPlan) => {
       savedPlan = plan;
       finalizePlan(task, plan, workspaceId, broadcastToWorkspace);
@@ -1290,6 +1482,12 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
       mkdirSync(sessionDir, { recursive: true });
     }
 
+    const planningSettings = SettingsManager.create(workspacePath);
+    planningSettings.applyOverrides({
+      retry: { enabled: false },
+      compaction: { enabled: false },
+    });
+
     // Resolve per-task model config if set
     const planSessionOpts: Parameters<typeof createAgentSession>[0] = {
       cwd: workspacePath,
@@ -1297,6 +1495,8 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
       modelRegistry,
       sessionManager: SessionManager.create(workspacePath),
       resourceLoader: loader,
+      settingsManager: planningSettings,
+      thinkingLevel: PLANNING_DEFAULT_THINKING_LEVEL,
     };
 
     const mc = task.frontmatter.modelConfig;
@@ -1328,7 +1528,11 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
     // Send the planning prompt
     const prompt = buildPlanningPrompt(task, planAttachmentSection);
     const planPromptOpts = planImages.length > 0 ? { images: planImages } : undefined;
-    await piSession.prompt(prompt, planPromptOpts);
+    await withTimeout(
+      piSession.prompt(prompt, planPromptOpts),
+      PLANNING_TIMEOUT_MS,
+      `Planning timed out after ${Math.round(PLANNING_TIMEOUT_MS / 1000)} seconds`,
+    );
 
     // Clean up
     session.unsubscribe?.();
@@ -1338,6 +1542,16 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
     registry.delete(task.id);
 
     if (!savedPlan) {
+      task.frontmatter.planningStatus = 'error';
+      task.frontmatter.updated = new Date().toISOString();
+      saveTaskFile(task);
+
+      broadcastToWorkspace?.({
+        type: 'task:updated',
+        task,
+        changes: {},
+      });
+
       const entry = createSystemEvent(
         workspaceId,
         task.id,
@@ -1355,22 +1569,55 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
 
     return savedPlan;
   } catch (err) {
-    console.error('Planning agent failed, using simulation:', err);
+    const errMessage = err instanceof Error ? err.message : String(err);
 
-    // Clean up
+    // If a plan was already persisted via save_plan, treat this as a successful
+    // completion (the failure happened after the important state was saved).
+    if (savedPlan) {
+      session.unsubscribe?.();
+      try {
+        await session.piSession?.abort();
+      } catch {
+        // Ignore — session may already be ended.
+      }
+      session.status = 'completed';
+      session.endTime = new Date().toISOString();
+      activeSessions.delete(task.id);
+      registry.delete(task.id);
+
+      broadcastToWorkspace?.({
+        type: 'agent:execution_status',
+        taskId: task.id,
+        status: 'completed',
+      });
+
+      return savedPlan;
+    }
+
+    console.error(`Planning agent failed for ${task.id}, using fallback planner:`, err);
+
+    // Clean up failed session so no background stream continues.
+    session.unsubscribe?.();
+    try {
+      await session.piSession?.abort();
+    } catch (abortErr) {
+      console.error(`[planTask] abort() failed for ${task.id}:`, abortErr);
+    }
+
     session.status = 'error';
+    session.endTime = new Date().toISOString();
     activeSessions.delete(task.id);
-    ensurePlanCallbackRegistry().delete(task.id);
+    registry.delete(task.id);
 
     const entry = createSystemEvent(
       workspaceId,
       task.id,
       'phase-change',
-      `Pi SDK unavailable, running simulated planning`
+      `Planning agent failed (${errMessage}). Running fallback planning.`
     );
     broadcastToWorkspace?.({ type: 'activity:entry', entry });
 
-    // Fall back to simulation
+    // Fall back to simulation so task planning doesn't get stuck forever.
     return simulatePlanningAgent(task, workspaceId, broadcastToWorkspace);
   }
 }
@@ -1386,6 +1633,7 @@ function finalizePlan(
   broadcastToWorkspace?: (event: any) => void,
 ): void {
   task.frontmatter.plan = plan;
+  task.frontmatter.planningStatus = 'completed';
   task.frontmatter.updated = new Date().toISOString();
   saveTaskFile(task);
 

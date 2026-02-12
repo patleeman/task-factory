@@ -2,7 +2,6 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import type { Task, Phase, ModelConfig } from '@pi-factory/shared'
 import { PHASES, PHASE_DISPLAY_NAMES, getPromotePhase, getDemotePhase } from '@pi-factory/shared'
 import { MarkdownEditor } from './MarkdownEditor'
-import type { AgentStreamState } from '../hooks/useAgentStreaming'
 import type { PostExecutionSkill } from '../types/pi'
 import { SkillSelector } from './SkillSelector'
 import { ModelSelector } from './ModelSelector'
@@ -12,8 +11,8 @@ import { api } from '../api'
 interface TaskDetailPaneProps {
   task: Task
   workspaceId: string
-  agentStream: AgentStreamState
   moveError: string | null
+  isPlanGenerating?: boolean
   onClose: () => void
   onMove: (phase: Phase) => void
   onDelete?: () => void
@@ -22,14 +21,13 @@ interface TaskDetailPaneProps {
 export function TaskDetailPane({
   task,
   workspaceId,
-  agentStream,
   onClose,
   onMove,
   moveError,
+  isPlanGenerating,
   onDelete,
 }: TaskDetailPaneProps) {
   const [showMoveMenu, setShowMoveMenu] = useState(false)
-  const [isExecuting, setIsExecuting] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
   const [editedTitle, setEditedTitle] = useState(task.frontmatter.title)
   const [editedContent, setEditedContent] = useState(task.content)
@@ -70,34 +68,7 @@ export function TaskDetailPane({
     setEditedModelConfig(task.frontmatter.modelConfig)
   }, [task.id])
 
-  const canExecute = frontmatter.phase === 'ready' || frontmatter.phase === 'executing'
-  const isExecutingPhase = frontmatter.phase === 'executing'
-  // The task phase is the source of truth — if the task isn't executing, the agent isn't running,
-  // regardless of what the stream state says (it can be stale)
-  const isAgentRunning = agentStream.isActive && isExecutingPhase
 
-  const handleExecute = async () => {
-    setIsExecuting(true)
-    try {
-      await fetch(`/api/workspaces/${workspaceId}/tasks/${task.id}/execute`, {
-        method: 'POST',
-      })
-    } catch (err) {
-      console.error('Failed to execute task:', err)
-    } finally {
-      setIsExecuting(false)
-    }
-  }
-
-  const handleStop = async () => {
-    try {
-      await fetch(`/api/workspaces/${workspaceId}/tasks/${task.id}/stop`, {
-        method: 'POST',
-      })
-    } catch (err) {
-      console.error('Failed to stop execution:', err)
-    }
-  }
 
   const handleSaveEdit = async () => {
     try {
@@ -148,36 +119,13 @@ export function TaskDetailPane({
   return (
     <div ref={containerRef} className="flex flex-col h-full bg-white">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-200 bg-slate-50 shrink-0">
+      <div className="flex items-center justify-between px-4 h-10 border-b border-slate-200 bg-slate-50 shrink-0">
         <div className="flex items-center gap-2">
-          <button
-            onClick={onClose}
-            className="text-slate-400 hover:text-slate-600 transition-colors text-sm"
-          >
-            ←
-          </button>
-          <span className="font-mono text-xs text-slate-400 truncate max-w-[120px]">{task.id}</span>
           <span className={`phase-badge phase-badge-${frontmatter.phase}`}>
             {PHASE_DISPLAY_NAMES[frontmatter.phase]}
           </span>
         </div>
         <div className="flex items-center gap-1.5">
-          {isAgentRunning ? (
-            <button
-              onClick={handleStop}
-              className="btn text-xs py-1 px-2.5 bg-red-600 text-white hover:bg-red-700"
-            >
-              ⏹ Stop
-            </button>
-          ) : canExecute && !isExecutingPhase ? (
-            <button
-              onClick={handleExecute}
-              disabled={isExecuting}
-              className="btn text-xs py-1 px-2.5 bg-green-600 text-white hover:bg-green-700"
-            >
-              {isExecuting ? '...' : '▶ Run'}
-            </button>
-          ) : null}
           {/* Demote button */}
           {(() => {
             const demoteTo = getDemotePhase(frontmatter.phase);
@@ -262,6 +210,7 @@ export function TaskDetailPane({
           availableSkills={availableSkills}
           missingAcceptanceCriteria={missingAcceptanceCriteria}
           isRegeneratingCriteria={isRegeneratingCriteria}
+          isPlanGenerating={isPlanGenerating}
           onRegenerateCriteria={handleRegenerateCriteria}
           onSaveEdit={handleSaveEdit}
           onDelete={handleDelete}
@@ -275,7 +224,7 @@ export function TaskDetailPane({
 // Details Content — shared between tabbed and side-by-side layouts
 // =============================================================================
 
-function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditing, editedTitle, setEditedTitle, editedContent, setEditedContent, editedCriteria, setEditedCriteria, editedModelConfig, setEditedModelConfig, selectedSkillIds, setSelectedSkillIds, availableSkills, missingAcceptanceCriteria, isRegeneratingCriteria, onRegenerateCriteria, onSaveEdit, onDelete }: any) {
+function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditing, editedTitle, setEditedTitle, editedContent, setEditedContent, editedCriteria, setEditedCriteria, editedModelConfig, setEditedModelConfig, selectedSkillIds, setSelectedSkillIds, availableSkills, missingAcceptanceCriteria, isRegeneratingCriteria, isPlanGenerating, onRegenerateCriteria, onSaveEdit, onDelete }: any) {
   return (
     <div className="p-5 space-y-5">
       {/* Title */}
@@ -343,6 +292,20 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
       )}
 
       {/* Plan */}
+      {!frontmatter.plan && isPlanGenerating && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+          <div className="flex items-center gap-3">
+            <svg className="animate-spin h-4 w-4 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <div>
+              <h3 className="text-xs font-semibold text-blue-700 uppercase tracking-wide">Generating Plan…</h3>
+              <p className="text-xs text-blue-500 mt-0.5">Planning agent is exploring the codebase — follow along in the chat</p>
+            </div>
+          </div>
+        </div>
+      )}
       {frontmatter.plan && (
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-3">
           <div className="flex items-center gap-2">
@@ -386,14 +349,6 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
               </ul>
             </div>
           )}
-        </div>
-      )}
-
-      {/* Planning in progress */}
-      {frontmatter.phase === 'planning' && !frontmatter.plan && (
-        <div className="flex items-center gap-3 py-3 px-4 bg-amber-50 border border-amber-200 rounded-lg">
-          <div className="w-4 h-4 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
-          <span className="text-sm text-amber-700 font-medium">Foreman is researching and generating a plan…</span>
         </div>
       )}
 
@@ -444,13 +399,6 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
           <button onClick={() => { setIsEditing(false); setEditedTitle(task.frontmatter.title); setEditedContent(task.content); setEditedCriteria(task.frontmatter.acceptanceCriteria.join('\n')); setSelectedSkillIds(task.frontmatter.postExecutionSkills || []); setEditedModelConfig(task.frontmatter.modelConfig) }} className="btn btn-secondary text-sm py-1.5 px-4">Discard</button>
         </div>
       )}
-
-      {/* Quality Gates */}
-      <QualityGatesSection
-        qualityChecks={frontmatter.qualityChecks}
-        workspaceId={workspaceId}
-        taskId={task.id}
-      />
 
       {/* Attachments */}
       <AttachmentsSection task={task} workspaceId={workspaceId} />
@@ -580,15 +528,18 @@ function AttachmentsSection({ task, workspaceId }: { task: Task; workspaceId: st
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
+          onClick={() => !isUploading && fileInputRef.current?.click()}
           className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors ${
-            isDragOver
-              ? 'border-blue-400 bg-blue-50'
-              : 'border-slate-200 bg-slate-50 hover:border-slate-300'
+            isUploading
+              ? 'border-slate-200 bg-slate-50 opacity-50 cursor-not-allowed'
+              : 'cursor-pointer ' + (isDragOver
+                ? 'border-blue-400 bg-blue-50'
+                : 'border-slate-200 bg-slate-50 hover:border-slate-300')
           }`}
         >
           <div className="text-slate-300 text-sm font-medium mb-1">No files</div>
           <p className="text-sm text-slate-500">
-            {isDragOver ? 'Drop files here' : 'Drag & drop files or click "Add Files"'}
+            {isDragOver ? 'Drop files here' : 'Drag & drop or click to add files'}
           </p>
           <p className="text-xs text-slate-400 mt-1">Images, PDFs, text files — up to 20 MB each</p>
         </div>
@@ -677,66 +628,6 @@ function AttachmentsSection({ task, workspaceId }: { task: Task; workspaceId: st
           />
         </div>
       )}
-    </div>
-  )
-}
-
-// =============================================================================
-// Quality Gates Section
-// =============================================================================
-
-function QualityGatesSection({
-  qualityChecks,
-  workspaceId,
-  taskId,
-}: {
-  qualityChecks: import('@pi-factory/shared').QualityChecks
-  workspaceId: string
-  taskId: string
-}) {
-  const toggleGate = async (gate: keyof import('@pi-factory/shared').QualityChecks) => {
-    try {
-      const res = await fetch(`/api/workspaces/${workspaceId}/tasks/${taskId}/quality`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ [gate]: !qualityChecks[gate] }),
-      })
-      if (!res.ok) {
-        console.error('Failed to toggle quality gate:', res.status, await res.text())
-      }
-    } catch (err) {
-      console.error('Failed to toggle quality gate:', err)
-    }
-  }
-
-  const gates = [
-    { key: 'testsPass' as const, label: 'Tests' },
-    { key: 'lintPass' as const, label: 'Lint' },
-    { key: 'reviewDone' as const, label: 'Review' },
-  ]
-
-  return (
-    <div>
-      <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Quality Gates</h3>
-      <div className="flex gap-2">
-        {gates.map(({ key, label }) => {
-          const passed = qualityChecks[key]
-          return (
-            <button
-              key={key}
-              onClick={() => toggleGate(key)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
-                passed
-                  ? 'bg-green-50 border-green-200 text-green-700 hover:bg-green-100'
-                  : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'
-              }`}
-            >
-              <span>{label}</span>
-              {passed && <span className="text-green-600 font-semibold">✓</span>}
-            </button>
-          )
-        })}
-      </div>
     </div>
   )
 }

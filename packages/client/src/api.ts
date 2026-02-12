@@ -1,4 +1,4 @@
-import type { Task, Workspace, ActivityEntry, Phase, Attachment, QueueStatus, PlanningMessage, PlanningAgentStatus, Shelf, DraftTask } from '@pi-factory/shared'
+import type { Task, Workspace, ActivityEntry, Phase, Attachment, QueueStatus, PlanningMessage, PlanningAgentStatus, Shelf, DraftTask, TaskDefaults } from '@pi-factory/shared'
 
 export interface AvailableModel {
   provider: string
@@ -139,6 +139,28 @@ export const api = {
     return res.json()
   },
 
+  async getTaskDefaults(): Promise<TaskDefaults> {
+    const res = await fetch('/api/task-defaults')
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to load task defaults' }))
+      throw new Error(err.error || `Failed to load task defaults (${res.status})`)
+    }
+    return res.json()
+  },
+
+  async saveTaskDefaults(defaults: TaskDefaults): Promise<TaskDefaults> {
+    const res = await fetch('/api/task-defaults', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(defaults),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to save task defaults' }))
+      throw new Error(err.error || `Failed to save task defaults (${res.status})`)
+    }
+    return res.json()
+  },
+
   async getQueueStatus(workspaceId: string): Promise<QueueStatus> {
     const res = await fetch(`/api/workspaces/${workspaceId}/queue/status`)
     return res.json()
@@ -158,16 +180,36 @@ export const api = {
   // Planning Agent
   // ─────────────────────────────────────────────────────────────────────────
 
-  async sendPlanningMessage(workspaceId: string, content: string): Promise<void> {
+  async sendPlanningMessage(workspaceId: string, content: string, attachmentIds?: string[]): Promise<void> {
     const res = await fetch(`/api/workspaces/${workspaceId}/planning/message`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, attachmentIds }),
     })
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: 'Send failed' }))
       throw new Error(err.error || `Send failed (${res.status})`)
     }
+  },
+
+  async uploadPlanningAttachments(workspaceId: string, files: File[]): Promise<Attachment[]> {
+    const formData = new FormData()
+    for (const file of files) {
+      formData.append('files', file)
+    }
+    const res = await fetch(`/api/workspaces/${workspaceId}/planning/attachments`, {
+      method: 'POST',
+      body: formData,
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Upload failed' }))
+      throw new Error(err.error || `Upload failed (${res.status})`)
+    }
+    return res.json()
+  },
+
+  getPlanningAttachmentUrl(workspaceId: string, storedName: string): string {
+    return `/api/workspaces/${workspaceId}/planning/attachments/${storedName}`
   },
 
   async getPlanningMessages(workspaceId: string): Promise<PlanningMessage[]> {

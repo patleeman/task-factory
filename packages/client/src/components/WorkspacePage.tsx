@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useMatch } from 'react-router-dom'
 import type { Task, Workspace, ActivityEntry, Phase, QueueStatus, Shelf, PlanningMessage } from '@pi-factory/shared'
 import { api } from '../api'
 import { PipelineBar } from './PipelineBar'
@@ -14,23 +14,22 @@ import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts'
 import { TaskChat } from './TaskChat'
 
 const LEFT_PANE_MIN = 320
-const LEFT_PANE_MAX = 800
-const LEFT_PANE_DEFAULT = 480
-
-type MainPaneMode =
-  | { type: 'empty' }
-  | { type: 'task-detail'; task: Task }
-  | { type: 'create-task' }
+const LEFT_PANE_MAX = 1400
 
 export function WorkspacePage() {
-  const { workspaceId } = useParams<{ workspaceId: string }>()
+  const { workspaceId, taskId } = useParams<{ workspaceId: string; taskId?: string }>()
   const navigate = useNavigate()
+  const isCreateRoute = useMatch('/workspace/:workspaceId/tasks/new') !== null
+
+  const workspaceRootPath = workspaceId ? `/workspace/${workspaceId}` : '/'
+  const workspaceConfigPath = workspaceId ? `/workspace/${workspaceId}/config` : '/'
 
   const [workspace, setWorkspace] = useState<Workspace | null>(null)
   const [tasks, setTasks] = useState<Task[]>([])
   const [activity, setActivity] = useState<ActivityEntry[]>([])
-  const [mainPane, setMainPane] = useState<MainPaneMode>({ type: 'empty' })
-  const [leftPaneWidth, setLeftPaneWidth] = useState(LEFT_PANE_DEFAULT)
+  const [leftPaneWidth, setLeftPaneWidth] = useState(() =>
+    Math.max(LEFT_PANE_MIN, Math.round(window.innerWidth * 0.4))
+  )
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [toast, setToast] = useState<string | null>(null)
@@ -41,18 +40,16 @@ export function WorkspacePage() {
 
   const [shelf, setShelf] = useState<Shelf>({ items: [] })
   const [planningMessages, setPlanningMessages] = useState<PlanningMessage[]>([])
+  const [planGeneratingTaskIds, setPlanGeneratingTaskIds] = useState<Set<string>>(new Set())
 
-  const selectedTask = mainPane.type === 'task-detail' ? mainPane.task : null
-  const selectedTaskRef = useRef(selectedTask)
-  selectedTaskRef.current = selectedTask
-  const tasksRef = useRef(tasks)
-  tasksRef.current = tasks
+  const selectedTask = taskId ? tasks.find((t) => t.id === taskId) || null : null
+  const isTaskRoute = Boolean(taskId)
 
-  // Mode: planning (no task selected) vs task (task selected)
-  const mode = selectedTask ? 'task' : 'planning'
+  // Mode: foreman (no task route) vs task (task route)
+  const mode = isTaskRoute ? 'task' : 'foreman'
 
   const { subscribe, isConnected } = useWebSocket(workspaceId || null)
-  const agentStream = useAgentStreaming(selectedTask?.id || null, subscribe)
+  const agentStream = useAgentStreaming(taskId || null, subscribe)
   const planningStream = usePlanningStreaming(workspaceId || null, subscribe, planningMessages)
 
   // Derived data
@@ -85,6 +82,11 @@ export function WorkspacePage() {
         setQueueStatus(qStatus)
         setShelf(shelfData)
         setPlanningMessages(planningMsgs)
+        setPlanGeneratingTaskIds(new Set(
+          tasksData
+            .filter((t) => t.frontmatter.planningStatus === 'running' && !t.frontmatter.plan)
+            .map((t) => t.id)
+        ))
         setIsLoading(false)
       })
       .catch((err) => {
@@ -93,6 +95,31 @@ export function WorkspacePage() {
         setIsLoading(false)
       })
   }, [workspaceId])
+
+  // Load task-specific activity when opening a task route
+  useEffect(() => {
+    if (!workspaceId || !taskId) return
+
+    api.getTaskActivity(workspaceId, taskId, 200)
+      .then((taskEntries) => {
+        setActivity((prev) => {
+          const existingIds = new Set(prev.map((e) => e.id))
+          const newEntries = taskEntries.filter((e) => !existingIds.has(e.id))
+          if (newEntries.length === 0) return prev
+          const merged = [...newEntries, ...prev]
+          merged.sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+          return merged
+        })
+      })
+      .catch((err) => {
+        console.error('Failed to load task activity:', err)
+      })
+  }, [workspaceId, taskId])
+
+  // Clear move validation banners when switching routes
+  useEffect(() => {
+    setMoveError(null)
+  }, [taskId, isCreateRoute])
 
   // Handle WebSocket messages
   useEffect(() => {
@@ -103,24 +130,37 @@ export function WorkspacePage() {
             if (prev.some((t) => t.id === msg.task.id)) return prev
             return [msg.task, ...prev]
           })
+          // Track plan generation for tasks without a plan
+          if (!msg.task.frontmatter.plan && msg.task.content) {
+            setPlanGeneratingTaskIds((prev) => new Set(prev).add(msg.task.id))
+          }
           break
         case 'task:updated':
           setTasks((prev) =>
             prev.map((t) => (t.id === msg.task.id ? msg.task : t))
           )
-          if (selectedTaskRef.current?.id === msg.task.id) {
-            setMainPane({ type: 'task-detail', task: msg.task })
-          }
+          setPlanGeneratingTaskIds((prev) => {
+            const next = new Set(prev)
+            const isPlanning = msg.task.frontmatter.planningStatus === 'running' && !msg.task.frontmatter.plan
+            if (isPlanning) {
+              next.add(msg.task.id)
+            } else {
+              next.delete(msg.task.id)
+            }
+            return next
+          })
           break
         case 'task:moved':
           setTasks((prev) =>
             prev.map((t) => (t.id === msg.task.id ? msg.task : t))
           )
-          if (selectedTaskRef.current?.id === msg.task.id) {
-            setMainPane({ type: 'task-detail', task: msg.task })
-          }
           break
         case 'task:plan_generated': {
+          setPlanGeneratingTaskIds((prev) => {
+            const next = new Set(prev)
+            next.delete(msg.taskId)
+            return next
+          })
           setTasks((prev) =>
             prev.map((t) =>
               t.id === msg.taskId
@@ -128,20 +168,6 @@ export function WorkspacePage() {
                 : t
             )
           )
-          if (selectedTaskRef.current?.id === msg.taskId) {
-            setMainPane((prev) => {
-              if (prev.type === 'task-detail') {
-                return {
-                  ...prev,
-                  task: {
-                    ...prev.task,
-                    frontmatter: { ...prev.task.frontmatter, plan: msg.plan },
-                  },
-                }
-              }
-              return prev
-            })
-          }
           break
         }
         case 'task:reordered': {
@@ -187,7 +213,11 @@ export function WorkspacePage() {
           console.error('Failed to upload attachments:', uploadErr)
         }
       }
-      setMainPane({ type: 'task-detail', task })
+      // Track that plan is being generated for this task
+      if (!task.frontmatter.plan && task.content) {
+        setPlanGeneratingTaskIds((prev) => new Set(prev).add(task.id))
+      }
+      navigate(`${workspaceRootPath}/tasks/${task.id}`)
     } catch (err) {
       console.error('Failed to create task:', err)
       alert('Failed to create task: ' + String(err))
@@ -196,27 +226,9 @@ export function WorkspacePage() {
 
   const handleSelectTask = useCallback((task: Task) => {
     setMoveError(null)
-    const fullTask = tasksRef.current.find((t) => t.id === task.id)
-    if (fullTask) {
-      setMainPane({ type: 'task-detail', task: fullTask })
-
-      if (workspaceId) {
-        api.getTaskActivity(workspaceId, fullTask.id, 200).then((taskEntries) => {
-          setActivity((prev) => {
-            const existingIds = new Set(prev.map((e) => e.id))
-            const newEntries = taskEntries.filter((e) => !existingIds.has(e.id))
-            if (newEntries.length === 0) return prev
-            // Merge and sort by timestamp descending (newest first) to maintain correct order
-            const merged = [...newEntries, ...prev]
-            merged.sort((a, b) => b.timestamp.localeCompare(a.timestamp))
-            return merged
-          })
-        }).catch((err) => {
-          console.error('Failed to load task activity:', err)
-        })
-      }
-    }
-  }, [workspaceId])
+    if (!workspaceId) return
+    navigate(`${workspaceRootPath}/tasks/${task.id}`)
+  }, [workspaceId, navigate, workspaceRootPath])
 
   const showToast = useCallback((message: string) => {
     setToast(message)
@@ -237,9 +249,6 @@ export function WorkspacePage() {
       },
     }
     setTasks((prev) => prev.map((t) => (t.id === task.id ? updatedTask : t)))
-    if (selectedTask?.id === task.id) {
-      setMainPane({ type: 'task-detail', task: updatedTask })
-    }
 
     try {
       const result = await api.moveTask(workspaceId, task.id, toPhase)
@@ -249,18 +258,8 @@ export function WorkspacePage() {
         if (t.frontmatter.phase !== toPhase) return t
         return result
       }))
-      if (selectedTask?.id === task.id) {
-        setMainPane((prev) => {
-          if (prev.type !== 'task-detail' || prev.task.id !== task.id) return prev
-          if (prev.task.frontmatter.phase !== toPhase) return prev
-          return { type: 'task-detail', task: result }
-        })
-      }
     } catch (err) {
       setTasks((prev) => prev.map((t) => (t.id === task.id ? task : t)))
-      if (selectedTask?.id === task.id) {
-        setMainPane({ type: 'task-detail', task })
-      }
       const message = err instanceof Error ? err.message : 'Failed to move task'
       setMoveError(message)
       showToast(message)
@@ -322,13 +321,18 @@ export function WorkspacePage() {
   }
 
   // Planning agent handlers
-  const handlePlanningMessage = async (content: string) => {
+  const handlePlanningMessage = async (content: string, attachmentIds?: string[]) => {
     if (!workspaceId) return
     try {
-      await api.sendPlanningMessage(workspaceId, content)
+      await api.sendPlanningMessage(workspaceId, content, attachmentIds)
     } catch (err) {
       console.error('Failed to send planning message:', err)
     }
+  }
+
+  const handlePlanningUpload = async (files: File[]) => {
+    if (!workspaceId) throw new Error('No workspace')
+    return api.uploadPlanningAttachments(workspaceId, files)
   }
 
   const handleResetPlanning = async () => {
@@ -415,10 +419,10 @@ export function WorkspacePage() {
   // Keyboard shortcuts
   useKeyboardShortcuts({
     onEscape: useCallback(() => {
-      if (selectedTask) {
-        setMainPane({ type: 'empty' })
+      if (isTaskRoute || isCreateRoute) {
+        navigate(workspaceRootPath)
       }
-    }, [selectedTask]),
+    }, [isTaskRoute, isCreateRoute, navigate, workspaceRootPath]),
     onFocusChat: useCallback(() => {
       const textarea = document.querySelector('[data-chat-input]') as HTMLTextAreaElement | null
       textarea?.focus()
@@ -427,7 +431,7 @@ export function WorkspacePage() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-screen bg-slate-50">
+      <div className="flex items-center justify-center h-full bg-slate-50">
         <div className="text-center">
           <div className="w-12 h-12 border-4 border-slate-300 border-t-safety-orange rounded-full animate-spin mx-auto mb-4" />
           <p className="text-slate-600 font-medium">Loading workspace...</p>
@@ -438,7 +442,7 @@ export function WorkspacePage() {
 
   if (error || !workspace) {
     return (
-      <div className="flex items-center justify-center h-screen bg-slate-50">
+      <div className="flex items-center justify-center h-full bg-slate-50">
         <div className="text-center">
           <p className="text-slate-600 font-medium mb-4">{error || 'Workspace not found'}</p>
           <button
@@ -455,7 +459,7 @@ export function WorkspacePage() {
   const workspaceName = workspace.path.split('/').filter(Boolean).pop() || workspace.name
 
   return (
-    <div className="flex flex-col h-screen bg-slate-50">
+    <div className="flex flex-col h-full bg-slate-50">
       {/* Header */}
       <header className="flex items-center justify-between px-4 py-3 bg-slate-900 text-white shadow-lg shrink-0">
         <div className="flex items-center gap-4">
@@ -526,7 +530,7 @@ export function WorkspacePage() {
             </span>
           )}
           <button
-            onClick={() => navigate(`/workspace/${workspaceId}/config`)}
+            onClick={() => navigate(workspaceConfigPath)}
             className="text-xs text-slate-400 hover:text-white transition-colors font-medium"
             title="Workspace Configuration"
           >
@@ -559,17 +563,21 @@ export function WorkspacePage() {
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Top: two panes */}
         <div className="flex-1 flex overflow-hidden min-h-0">
-          {/* Left pane — Chat (planning or task, depending on mode) */}
+          {/* Left pane — Chat (foreman or task, depending on mode) */}
           <div
             className={`overflow-hidden shrink-0 transition-colors duration-200 ${mode === 'task' ? 'bg-orange-50/30' : 'bg-slate-50'}`}
             style={{ width: leftPaneWidth }}
           >
-            {mode === 'planning' ? (
+            {mode === 'foreman' ? (
               <TaskChat
                 taskId={PLANNING_TASK_ID}
+                workspaceId={workspaceId}
                 entries={planningStream.entries}
+                attachments={[]}
                 agentStream={planningStream.agentStream}
                 onSendMessage={handlePlanningMessage}
+                onUploadFiles={handlePlanningUpload}
+                getAttachmentUrl={(storedName) => api.getPlanningAttachmentUrl(workspaceId!, storedName)}
                 onReset={handleResetPlanning}
                 title="Foreman"
                 emptyState={{ title: 'Foreman', subtitle: 'Ask me to research, plan, or decompose work into tasks' }}
@@ -577,19 +585,21 @@ export function WorkspacePage() {
             ) : (
               /* Task mode: show task chat in left pane */
               <div className="flex flex-col h-full">
-                <div className="flex items-center gap-2 px-4 py-2.5 border-b border-slate-200 bg-slate-50 shrink-0">
+                <div className="flex items-center gap-2 px-4 h-10 border-b border-slate-200 bg-slate-50 shrink-0">
                   <button
-                    onClick={() => setMainPane({ type: 'empty' })}
+                    onClick={() => navigate(workspaceRootPath)}
                     className="text-slate-400 hover:text-slate-600 transition-colors text-xs font-medium"
                   >
-                    ← Planning
+                    ← Foreman
                   </button>
                   <div className="h-4 w-px bg-slate-200" />
-                  <span className="font-mono text-[10px] text-slate-400">{selectedTask?.id}</span>
-                  <span className="text-xs font-medium text-slate-700 truncate">{selectedTask?.frontmatter.title}</span>
+                  <span className="font-mono text-[10px] text-slate-400">{taskId}</span>
+                  <span className="text-xs font-medium text-slate-700 truncate">
+                    {selectedTask ? selectedTask.frontmatter.title : 'Task not found'}
+                  </span>
                 </div>
                 <div className="flex-1 overflow-hidden min-h-0">
-                  {selectedTask && (
+                  {selectedTask ? (
                     <TaskChat
                       taskId={selectedTask.id}
                       taskPhase={selectedTask.frontmatter.phase}
@@ -600,10 +610,9 @@ export function WorkspacePage() {
                       onSendMessage={(content, attachmentIds) => handleSendMessage(selectedTask.id, content, attachmentIds)}
                       onSteer={(content, attachmentIds) => handleSteer(selectedTask.id, content, attachmentIds)}
                       onFollowUp={(content, attachmentIds) => handleFollowUp(selectedTask.id, content, attachmentIds)}
-                      onStop={async () => {
-                        await fetch(`/api/workspaces/${workspaceId}/tasks/${selectedTask.id}/stop`, { method: 'POST' })
-                      }}
                     />
+                  ) : (
+                    <TaskRouteMissingState onBack={() => navigate(workspaceRootPath)} />
                   )}
                 </div>
               </div>
@@ -612,13 +621,13 @@ export function WorkspacePage() {
 
           <ResizeHandle onResize={handleResize} />
 
-          {/* Right pane — contextual (shelf in planning mode, task detail in task mode) */}
+          {/* Right pane — contextual (shelf in foreman mode, task detail in task mode) */}
           <div className="flex-1 bg-white overflow-hidden min-w-0">
-            {mode === 'planning' ? (
-              mainPane.type === 'create-task' ? (
+            {mode === 'foreman' ? (
+              isCreateRoute ? (
                 <CreateTaskPane
                   workspaceId={workspaceId || ''}
-                  onCancel={() => setMainPane({ type: 'empty' })}
+                  onCancel={() => navigate(workspaceRootPath)}
                   onSubmit={handleCreateTask}
                 />
               ) : (
@@ -631,25 +640,21 @@ export function WorkspacePage() {
                   onClearShelf={handleClearShelf}
                 />
               )
-            ) : mainPane.type === 'task-detail' ? (
+            ) : selectedTask ? (
               <TaskDetailPane
-                task={mainPane.task}
+                task={selectedTask}
                 workspaceId={workspaceId || ''}
-                agentStream={agentStream}
                 moveError={moveError}
-                onClose={() => setMainPane({ type: 'empty' })}
-                onMove={(phase) => {
-                  if (selectedTask) handleMoveTask(selectedTask, phase)
-                }}
+                isPlanGenerating={planGeneratingTaskIds.has(selectedTask.id)}
+                onClose={() => navigate(workspaceRootPath)}
+                onMove={(phase) => handleMoveTask(selectedTask, phase)}
                 onDelete={() => {
-                  if (selectedTask) {
-                    setTasks((prev) => prev.filter((t) => t.id !== selectedTask.id))
-                    setMainPane({ type: 'empty' })
-                  }
+                  setTasks((prev) => prev.filter((t) => t.id !== selectedTask.id))
+                  navigate(workspaceRootPath)
                 }}
               />
             ) : (
-              <EmptyState onCreateTask={() => setMainPane({ type: 'create-task' })} />
+              <TaskRouteMissingState onBack={() => navigate(workspaceRootPath)} />
             )}
           </div>
         </div>
@@ -662,7 +667,7 @@ export function WorkspacePage() {
             onTaskClick={handleSelectTask}
             onMoveTask={handleMoveTask}
             onReorderTasks={handleReorderTasks}
-            onCreateTask={() => setMainPane({ type: 'create-task' })}
+            onCreateTask={() => navigate(`${workspaceRootPath}/tasks/new`)}
             archivedTasks={archivedTasks}
           />
         </div>
@@ -672,19 +677,19 @@ export function WorkspacePage() {
 }
 
 // =============================================================================
-// Empty State — shown when no task is selected
+// Task Route Missing State
 // =============================================================================
 
-function EmptyState({ onCreateTask }: { onCreateTask: () => void }) {
+function TaskRouteMissingState({ onBack }: { onBack: () => void }) {
   return (
-    <div className="flex flex-col items-center justify-center h-full text-slate-400">
-      <h3 className="text-base font-medium text-slate-500 mb-1.5">No task selected</h3>
-      <p className="text-sm mb-6">Select a task from the pipeline below</p>
+    <div className="flex flex-col items-center justify-center h-full text-slate-400 p-6 text-center">
+      <h3 className="text-base font-medium text-slate-600 mb-1.5">Task not found</h3>
+      <p className="text-sm mb-6">This task may have been deleted or moved.</p>
       <button
-        onClick={onCreateTask}
-        className="btn btn-primary text-sm"
+        onClick={onBack}
+        className="btn btn-secondary text-sm"
       >
-        + New Task
+        ← Back to foreman
       </button>
     </div>
   )

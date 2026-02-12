@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import type { PiSkill, PiExtension } from '../types/pi'
+import { api } from '../api'
 
 interface WorkspaceConfig {
   skills: {
@@ -27,6 +28,13 @@ export function WorkspaceConfigPage() {
   const [isSaving, setIsSaving] = useState(false)
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'error'>('idle')
 
+  // Workspace deletion state
+  const [workspaceName, setWorkspaceName] = useState('')
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [deleteConfirmText, setDeleteConfirmText] = useState('')
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
+
   useEffect(() => {
     if (!workspaceId) return
 
@@ -34,13 +42,17 @@ export function WorkspaceConfigPage() {
       fetch('/api/pi/skills').then(r => r.json()),
       fetch('/api/pi/extensions').then(r => r.json()),
       fetch(`/api/workspaces/${workspaceId}/pi-config`).then(r => r.json()),
-    ]).then(([skillsData, extensionsData, configData]) => {
+      api.getWorkspace(workspaceId),
+    ]).then(([skillsData, extensionsData, configData, workspace]) => {
       setAllSkills(skillsData)
       setAllExtensions(extensionsData)
       setConfig({
         skills: configData.skills || { enabled: [], config: {} },
         extensions: configData.extensions || { enabled: [], config: {} },
       })
+      // Use folder name from path as the display name
+      const folderName = workspace.path.split('/').filter(Boolean).pop() || workspace.name
+      setWorkspaceName(folderName)
       setIsLoading(false)
     })
   }, [workspaceId])
@@ -133,9 +145,22 @@ export function WorkspaceConfigPage() {
     }
   }
 
+  const handleDeleteWorkspace = async () => {
+    if (!workspaceId || deleteConfirmText !== workspaceName) return
+    setIsDeleting(true)
+    setDeleteError('')
+    try {
+      await api.deleteWorkspace(workspaceId)
+      navigate('/')
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : 'Failed to delete workspace. Please try again.')
+      setIsDeleting(false)
+    }
+  }
+
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-screen bg-slate-50">
+      <div className="flex items-center justify-center h-full bg-slate-50">
         <div className="text-center">
           <div className="w-12 h-12 border-4 border-slate-300 border-t-safety-orange rounded-full animate-spin mx-auto mb-4" />
           <p className="text-slate-600 font-medium">Loading configuration...</p>
@@ -145,7 +170,7 @@ export function WorkspaceConfigPage() {
   }
 
   return (
-    <div className="flex flex-col h-screen bg-slate-50">
+    <div className="flex flex-col h-full bg-slate-50">
       {/* Header */}
       <header className="flex items-center justify-between px-4 py-3 bg-slate-900 text-white shadow-lg shrink-0">
         <div className="flex items-center gap-4">
@@ -323,6 +348,81 @@ export function WorkspaceConfigPage() {
               )}
             </div>
           )}
+
+          {/* Danger Zone */}
+          <div className="mt-12 pt-6 border-t border-red-200">
+            <h3 className="text-sm font-semibold text-red-600 uppercase tracking-wide mb-3">Danger Zone</h3>
+            <div className="border border-red-200 rounded-lg bg-red-50 p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="font-medium text-slate-800">Delete this workspace</div>
+                  <div className="text-sm text-slate-500 mt-0.5">
+                    Permanently remove this workspace and all its task data from Pi-Factory.
+                  </div>
+                </div>
+                {!showDeleteConfirm && (
+                  <button
+                    onClick={() => setShowDeleteConfirm(true)}
+                    className="px-4 py-2 text-sm font-medium text-red-600 border border-red-300 rounded-lg hover:bg-red-100 transition-colors shrink-0 ml-4"
+                  >
+                    Delete Workspace
+                  </button>
+                )}
+              </div>
+
+              {showDeleteConfirm && (
+                <div className="mt-4 pt-4 border-t border-red-200">
+                  <div className="bg-white border border-red-200 rounded-lg p-4">
+                    <p className="text-sm text-slate-700 mb-1">
+                      <strong className="text-red-600">Warning:</strong> This action is irreversible.
+                      All tasks, activity logs, and workspace configuration will be permanently deleted.
+                    </p>
+                    <p className="text-sm text-slate-600 mb-3">
+                      Your project files will <strong>not</strong> be affected — only Pi-Factory data is removed.
+                    </p>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">
+                      Type <span className="font-mono bg-slate-100 px-1.5 py-0.5 rounded text-red-600">{workspaceName}</span> to confirm:
+                    </label>
+                    <input
+                      type="text"
+                      value={deleteConfirmText}
+                      onChange={(e) => setDeleteConfirmText(e.target.value)}
+                      placeholder={workspaceName}
+                      className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-400 focus:border-red-400 mb-3"
+                      autoComplete="off"
+                      spellCheck={false}
+                    />
+
+                    {deleteError && (
+                      <div className="mb-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                        {deleteError}
+                      </div>
+                    )}
+
+                    <div className="flex gap-3 justify-end">
+                      <button
+                        onClick={() => {
+                          setShowDeleteConfirm(false)
+                          setDeleteConfirmText('')
+                          setDeleteError('')
+                        }}
+                        className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={handleDeleteWorkspace}
+                        disabled={deleteConfirmText !== workspaceName || isDeleting}
+                        className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {isDeleting ? 'Deleting...' : 'I understand, delete this workspace'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
 
           {/* Save Bar */}
           <div className="flex items-center justify-between mt-8 pt-6 border-t border-slate-200">

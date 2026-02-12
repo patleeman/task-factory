@@ -9,9 +9,11 @@ interface ModelSelectorProps {
 
 const THINKING_LEVELS = [
   { value: 'off', label: 'Off' },
+  { value: 'minimal', label: 'Minimal' },
   { value: 'low', label: 'Low' },
   { value: 'medium', label: 'Medium' },
   { value: 'high', label: 'High' },
+  { value: 'xhigh', label: 'XHigh' },
 ] as const
 
 export function ModelSelector({ value, onChange }: ModelSelectorProps) {

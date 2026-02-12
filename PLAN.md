@@ -7,7 +7,7 @@ Pi-Factory is a **lean manufacturing-inspired** task queue system for AI agents.
 The system has two modes of operation:
 
 1. **Planning Mode** — A conversational agent helps the user research, decompose, and stage work before it hits the production line.
-2. **Task Mode** — Focused task agents execute well-defined work items through a kanban pipeline with quality gates.
+2. **Task Mode** — Focused task agents execute well-defined work items through a kanban pipeline.
 
 ## Core Philosophy: TPS Principles Applied to Agent Work
 
@@ -137,7 +137,6 @@ TASK MODE
 **Right pane (Task Detail):**
 - Task metadata: phase, priority, type, timestamps
 - Acceptance criteria with check states
-- Quality gates (tests, lint, review)
 - Branch, PR link, commits
 - Blocker status
 - Phase transition controls
@@ -232,12 +231,6 @@ branch: feat/TASK-001-auth
 commits: []
 pr_url: null
 
-# Quality gates
-quality_checks:
-  tests_pass: false
-  lint_pass: false
-  review_done: false
-
 # Metrics
 cycle_time: null
 blocked_count: 0
@@ -276,7 +269,7 @@ Implement a secure user authentication system...
 #### 1. Web UI (React + Vite)
 - **Chat Pane**: Primary interface, always visible on the left. Switches between planning agent and task agent based on selection.
 - **Workspace/Shelf Pane**: Right pane in planning mode. Shows draft tasks and rendered HTML artifacts.
-- **Task Detail Pane**: Right pane in task mode. Shows task metadata, AC, quality gates.
+- **Task Detail Pane**: Right pane in task mode. Shows task metadata, acceptance criteria, and execution details.
 - **Pipeline Bar**: Bottom bar showing all tasks across phases. Drag-and-drop. Mode switch.
 
 #### 2. API Server (Express + WebSocket)
@@ -289,7 +282,6 @@ Implement a secure user authentication system...
 #### 3. Job Engine
 - Phase transition logic
 - WIP limit enforcement
-- Quality gate validation
 - Queue processing (pull tasks from ready → executing)
 - Metrics calculation
 
@@ -465,13 +457,12 @@ pi-factory/
 - [x] Status awareness (system prompt includes current tasks and shelf state)
 
 ### Phase 4: Quality & Metrics ✅
-- [x] Quality gates implementation (interactive toggles in TaskDetailPane)
 - [x] Metrics calculation (cycle time, lead time — calculated on phase transition)
 - [x] Metrics accessible via planning agent (system prompt includes aggregate stats)
 - [x] Blocker tracking and escalation (blocker status shown in system prompt)
 
 ### Phase 5: Polish & Release
-- [x] UI refinement and animations (mode transitions, quality gate styling)
+- [x] UI refinement and animations (mode transitions, styling)
 - [x] Keyboard shortcuts (Esc=deselect, ⌘N=new task, ⌘K=focus chat)
 - [ ] CLI improvements
 - [ ] Documentation
@@ -482,6 +473,6 @@ pi-factory/
 1. **Flow Efficiency**: % of time tasks are actively being worked vs waiting
 2. **Cycle Time**: Average time from Ready → Complete
 3. **Throughput**: Tasks completed per week
-4. **Quality**: % of tasks passing all quality gates on first try
+4. **Quality**: Rework rate — % of tasks that need to go back to executing
 5. **Agent Utilization**: % of time agents are working vs idle
 6. **Planning Efficiency**: Time from goal → factory-ready tasks on shelf

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react'
-import type { ModelConfig, NewTaskFormState } from '@pi-factory/shared'
+import type { ModelConfig, NewTaskFormState, TaskDefaults } from '@pi-factory/shared'
 import { DEFAULT_POST_EXECUTION_SKILLS } from '@pi-factory/shared'
 import { MarkdownEditor } from './MarkdownEditor'
 import { SkillSelector } from './SkillSelector'
@@ -37,6 +37,10 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
   const [availableSkills, setAvailableSkills] = useState<PostExecutionSkill[]>([])
   const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>(initialDraft.selectedSkillIds)
   const [modelConfig, setModelConfig] = useState<ModelConfig | undefined>(initialDraft.modelConfig as ModelConfig | undefined)
+  const [taskDefaults, setTaskDefaults] = useState<TaskDefaults>({
+    modelConfig: undefined,
+    postExecutionSkills: [...DEFAULT_POST_EXECUTION_SKILLS],
+  })
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
   const [isDragOver, setIsDragOver] = useState(false)
   const [isWide, setIsWide] = useState(false)
@@ -49,6 +53,24 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
       .then(setAvailableSkills)
       .catch(err => console.error('Failed to load post-execution skills:', err))
   }, [])
+
+  useEffect(() => {
+    api.getTaskDefaults()
+      .then((defaults) => {
+        setTaskDefaults(defaults)
+
+        // Preserve restored drafts with user-entered content.
+        if (restoredFromDraft) {
+          return
+        }
+
+        setSelectedSkillIds([...defaults.postExecutionSkills])
+        setModelConfig(defaults.modelConfig ? { ...defaults.modelConfig } : undefined)
+      })
+      .catch((err) => {
+        console.error('Failed to load task defaults:', err)
+      })
+  }, [restoredFromDraft])
 
   // Register form with server when pane opens, unregister on close
   useEffect(() => {
@@ -109,11 +131,11 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
 
   const handleClearForm = useCallback(() => {
     setContent('')
-    setSelectedSkillIds([...DEFAULT_POST_EXECUTION_SKILLS])
-    setModelConfig(undefined)
+    setSelectedSkillIds([...taskDefaults.postExecutionSkills])
+    setModelConfig(taskDefaults.modelConfig ? { ...taskDefaults.modelConfig } : undefined)
     setPendingFiles([])
     clearDraft()
-  }, [clearDraft])
+  }, [clearDraft, taskDefaults])
 
   const addFiles = useCallback((files: FileList | File[]) => {
     const newFiles = Array.from(files)
@@ -246,14 +268,15 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
-        className={`border-2 border-dashed rounded-lg p-4 text-center transition-colors ${
+        onClick={() => fileInputRef.current?.click()}
+        className={`border-2 border-dashed rounded-lg p-4 text-center transition-colors cursor-pointer ${
           isDragOver
             ? 'border-blue-400 bg-blue-50'
             : 'border-slate-200 bg-slate-50 hover:border-slate-300'
         }`}
       >
         <p className="text-sm text-slate-500">
-          {isDragOver ? 'Drop files here' : 'Drag & drop files here'}
+          {isDragOver ? 'Drop files here' : 'Drag & drop or click to add files'}
         </p>
         <p className="text-xs text-slate-400 mt-0.5">Images, PDFs, text files</p>
       </div>

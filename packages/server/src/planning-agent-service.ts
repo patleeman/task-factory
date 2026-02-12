@@ -8,7 +8,7 @@
 
 import { join, dirname } from 'path';
 import { homedir } from 'os';
-import { existsSync, mkdirSync, readFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { writeFile } from 'fs/promises';
 import { fileURLToPath } from 'url';
 import {
@@ -148,7 +148,6 @@ function getOrCreateSessionId(workspaceId: string): string {
   }
   const newId = crypto.randomUUID();
   if (path) {
-    const { writeFileSync } = require('fs');
     writeFileSync(path, newId);
   }
   return newId;
@@ -157,7 +156,6 @@ function getOrCreateSessionId(workspaceId: string): string {
 function writeSessionId(workspaceId: string, sessionId: string): void {
   const path = sessionIdPath(workspaceId);
   if (!path) return;
-  const { writeFileSync } = require('fs');
   writeFileSync(path, sessionId);
 }
 
@@ -166,7 +164,6 @@ function archiveSession(workspaceId: string, sessionId: string, messages: Planni
   const dir = sessionsDir(workspaceId);
   if (!dir) return;
   const archivePath = join(dir, `${sessionId}.json`);
-  const { writeFileSync } = require('fs');
   writeFileSync(archivePath, JSON.stringify(messages, null, 2));
 }
 
@@ -217,7 +214,6 @@ function persistMessagesSync(workspaceId: string, messages: PlanningMessage[]): 
   const existing = persistTimers.get(workspaceId);
   if (existing) { clearTimeout(existing); persistTimers.delete(workspaceId); }
   try {
-    const { writeFileSync } = require('fs');
     writeFileSync(path, JSON.stringify(messages, null, 2));
   } catch (err) {
     console.error(`[PlanningAgent] Failed to persist messages for ${workspaceId}:`, err);

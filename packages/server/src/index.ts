@@ -32,6 +32,7 @@ import {
   canMoveToPhase,
   parseTaskFile,
   reorderTasks,
+  shouldResumeInterruptedPlanning,
 } from './task-service.js';
 import {
   createWorkspace,
@@ -39,6 +40,7 @@ import {
   getWorkspaceById,
   listWorkspaces,
   getTasksDir,
+  deleteWorkspace,
 } from './workspace-service.js';
 import {
   createTaskSeparator,
@@ -147,6 +149,50 @@ app.get('/api/workspaces/:id', (req, res) => {
   res.json(workspace);
 });
 
+// Delete workspace
+app.delete('/api/workspaces/:id', async (req, res) => {
+  const workspace = getWorkspaceById(req.params.id);
+
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return;
+  }
+
+  try {
+    // Stop queue processing if running
+    try {
+      stopQueueProcessing(workspace.id);
+    } catch {
+      // Queue may not be running — that's fine
+    }
+
+    // Stop any executing tasks in this workspace
+    const tasksDir = getTasksDir(workspace);
+    const tasks = discoverTasks(tasksDir);
+    for (const task of tasks) {
+      if (task.frontmatter.phase === 'executing') {
+        try {
+          await stopTaskExecution(task.id);
+        } catch {
+          // Best-effort
+        }
+      }
+    }
+
+    // Delete workspace data and remove from registry
+    const deleted = deleteWorkspace(workspace.id);
+
+    if (!deleted) {
+      res.status(500).json({ error: 'Failed to delete workspace' });
+      return;
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
 // Get workspace tasks
 app.get('/api/workspaces/:id/tasks', (req, res) => {
   const workspace = getWorkspaceById(req.params.id);
@@ -201,28 +247,15 @@ app.post('/api/workspaces/:id/tasks', async (req, res) => {
 
     res.json(task);
 
-    // Generate plan asynchronously after responding (don't block task creation)
+    // Generate plan asynchronously using the planning agent (explores codebase)
     if (!task.frontmatter.plan && task.content) {
-      import('./plan-service.js').then(async ({ generatePlan }) => {
-        try {
-          const plan = await generatePlan(task.content, task.frontmatter.acceptanceCriteria);
-          task.frontmatter.plan = plan;
-          task.frontmatter.updated = new Date().toISOString();
-          const { saveTaskFile } = await import('./task-service.js');
-          saveTaskFile(task);
-          broadcastToWorkspace(workspace.id, {
-            type: 'task:plan_generated',
-            taskId: task.id,
-            plan,
-          });
-          broadcastToWorkspace(workspace.id, {
-            type: 'task:updated',
-            task,
-            changes: {},
-          });
-        } catch (err) {
-          console.error('Background plan generation failed:', err);
-        }
+      planTask({
+        task,
+        workspaceId: workspace.id,
+        workspacePath: workspace.path,
+        broadcastToWorkspace: (event: any) => broadcastToWorkspace(workspace.id, event),
+      }).catch((err) => {
+        console.error('Background plan generation failed:', err);
       });
     }
   } catch (err) {
@@ -540,14 +573,7 @@ app.post('/api/workspaces/:workspaceId/activity', async (req, res) => {
         console.error('Failed to steer agent with chat message:', err);
       });
     } else if (activeSession?.piSession && (activeSession.status as string) === 'idle') {
-      // Agent finished without signaling completion (asked a question / flagged blocker).
-      // Send user's reply as a follow-up to resume the conversation.
-      activeSession.status = 'running';
-      broadcastToWorkspace(workspace.id, {
-        type: 'agent:execution_status',
-        taskId,
-        status: 'streaming',
-      });
+      // Agent session is open but currently idle. Send message as a new turn.
       followUpTask(taskId, content, chatImages.length > 0 ? chatImages : undefined).catch((err) => {
         console.error('Failed to follow-up agent with chat message:', err);
       });
@@ -568,6 +594,18 @@ app.post('/api/workspaces/:workspaceId/activity', async (req, res) => {
           chatImages.length > 0 ? chatImages : undefined,
         ).catch((err) => {
           console.error('Failed to resume chat for task:', err);
+        });
+      } else if (task) {
+        // No previous session — start a fresh agent chat
+        startChat(
+          task,
+          workspace.id,
+          workspace.path,
+          content,
+          (event) => broadcastToWorkspace(workspace.id, event),
+          chatImages.length > 0 ? chatImages : undefined,
+        ).catch((err) => {
+          console.error('Failed to start chat for task:', err);
         });
       }
     }
@@ -729,6 +767,13 @@ import {
   type PiFactorySettings,
   type WorkspacePiConfig,
 } from './pi-integration.js';
+import {
+  loadTaskDefaults,
+  saveTaskDefaults,
+  parseTaskDefaultsPayload,
+  validateTaskDefaults,
+  loadAvailableModelsForDefaults,
+} from './task-defaults-service.js';
 
 // Get Pi-Factory settings
 app.get('/api/pi-factory/settings', (_req, res) => {
@@ -745,6 +790,55 @@ app.post('/api/pi-factory/settings', (req, res) => {
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }
+});
+
+// Get task creation defaults
+app.get('/api/task-defaults', (_req, res) => {
+  res.json(loadTaskDefaults());
+});
+
+async function handleSaveTaskDefaults(req: express.Request, res: express.Response): Promise<void> {
+  const parsed = parseTaskDefaultsPayload(req.body);
+  if (!parsed.ok) {
+    res.status(400).json({ error: parsed.error });
+    return;
+  }
+
+  try {
+    const [availableModels, availableSkills] = await Promise.all([
+      loadAvailableModelsForDefaults(),
+      Promise.resolve(discoverPostExecutionSkills()),
+    ]);
+
+    const validation = validateTaskDefaults(
+      parsed.value,
+      availableModels,
+      availableSkills.map((skill) => skill.id),
+    );
+
+    if (!validation.ok) {
+      res.status(400).json({ error: validation.error });
+      return;
+    }
+
+    const saved = saveTaskDefaults(parsed.value);
+    res.json(saved);
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+}
+
+// Save task creation defaults
+app.post('/api/task-defaults', (req, res) => {
+  handleSaveTaskDefaults(req, res).catch((err) => {
+    res.status(500).json({ error: String(err) });
+  });
+});
+
+app.put('/api/task-defaults', (req, res) => {
+  handleSaveTaskDefaults(req, res).catch((err) => {
+    res.status(500).json({ error: String(err) });
+  });
 });
 
 // Get workspace Pi configuration
@@ -790,10 +884,10 @@ import {
   getAllActiveSessions,
   getRepoExtensionPaths,
   reloadRepoExtensions,
-  validateQualityGates,
-  checkAndAutoTransition,
   regenerateAcceptanceCriteriaForTask,
   loadAttachmentsByIds,
+  planTask,
+  startChat,
 } from './agent-execution-service.js';
 
 import {
@@ -994,70 +1088,6 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/regenerate-criteria', async
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }
-});
-
-// Validate quality gates
-app.post('/api/workspaces/:workspaceId/tasks/:taskId/validate', async (req, res) => {
-  const workspace = getWorkspaceById(req.params.workspaceId);
-  
-  if (!workspace) {
-    res.status(404).json({ error: 'Workspace not found' });
-    return;
-  }
-  
-  const tasksDir = getTasksDir(workspace);
-  const tasks = discoverTasks(tasksDir);
-  const task = tasks.find(t => t.id === req.params.taskId);
-  
-  if (!task) {
-    res.status(404).json({ error: 'Task not found' });
-    return;
-  }
-  
-  const result = await validateQualityGates(task, workspace.path);
-  res.json(result);
-});
-
-// Update quality checks
-app.patch('/api/workspaces/:workspaceId/tasks/:taskId/quality', async (req, res) => {
-  const workspace = getWorkspaceById(req.params.workspaceId);
-  
-  if (!workspace) {
-    res.status(404).json({ error: 'Workspace not found' });
-    return;
-  }
-  
-  const tasksDir = getTasksDir(workspace);
-  const tasks = discoverTasks(tasksDir);
-  let task = tasks.find(t => t.id === req.params.taskId);
-  
-  if (!task) {
-    res.status(404).json({ error: 'Task not found' });
-    return;
-  }
-  
-  const { testsPass, lintPass, reviewDone } = req.body;
-  
-  task.frontmatter.qualityChecks = {
-    testsPass: testsPass ?? task.frontmatter.qualityChecks.testsPass,
-    lintPass: lintPass ?? task.frontmatter.qualityChecks.lintPass,
-    reviewDone: reviewDone ?? task.frontmatter.qualityChecks.reviewDone,
-  };
-  
-  // Save task
-  const { saveTaskFile } = await import('./task-service.js');
-  saveTaskFile(task);
-  
-  // Check for auto-transition
-  checkAndAutoTransition(task, workspace.path);
-  
-  broadcastToWorkspace(workspace.id, {
-    type: 'task:updated',
-    task,
-    changes: {},
-  });
-  
-  res.json(task);
 });
 
 // Get all active executions
@@ -1586,28 +1616,15 @@ app.post('/api/workspaces/:workspaceId/shelf/drafts/:draftId/push', async (req, 
 
     res.json(task);
 
-    // Generate plan asynchronously if draft didn't have one
+    // Generate plan asynchronously using the planning agent (explores codebase)
     if (!task.frontmatter.plan && task.content) {
-      import('./plan-service.js').then(async ({ generatePlan }) => {
-        try {
-          const plan = await generatePlan(task.content, task.frontmatter.acceptanceCriteria);
-          task.frontmatter.plan = plan;
-          task.frontmatter.updated = new Date().toISOString();
-          const { saveTaskFile } = await import('./task-service.js');
-          saveTaskFile(task);
-          broadcastToWorkspace(workspace.id, {
-            type: 'task:plan_generated',
-            taskId: task.id,
-            plan,
-          });
-          broadcastToWorkspace(workspace.id, {
-            type: 'task:updated',
-            task,
-            changes: {},
-          });
-        } catch (err) {
-          console.error('Background plan generation failed:', err);
-        }
+      planTask({
+        task,
+        workspaceId: workspace.id,
+        workspacePath: workspace.path,
+        broadcastToWorkspace: (event: any) => broadcastToWorkspace(workspace.id, event),
+      }).catch((err) => {
+        console.error('Background plan generation failed:', err);
       });
     }
   } catch (err) {
@@ -1656,28 +1673,15 @@ app.post('/api/workspaces/:workspaceId/shelf/push-all', async (req, res) => {
       broadcastToWorkspace(workspace.id, { type: 'task:created', task });
       createSystemEvent(workspace.id, task.id, 'task-created', `Task ${task.id} created from draft`);
 
-      // Generate plan asynchronously if draft didn't have one
+      // Generate plan asynchronously using the planning agent (explores codebase)
       if (!task.frontmatter.plan && task.content) {
-        import('./plan-service.js').then(async ({ generatePlan }) => {
-          try {
-            const plan = await generatePlan(task.content, task.frontmatter.acceptanceCriteria);
-            task.frontmatter.plan = plan;
-            task.frontmatter.updated = new Date().toISOString();
-            const { saveTaskFile: sf } = await import('./task-service.js');
-            sf(task);
-            broadcastToWorkspace(workspace.id, {
-              type: 'task:plan_generated',
-              taskId: task.id,
-              plan,
-            });
-            broadcastToWorkspace(workspace.id, {
-              type: 'task:updated',
-              task,
-              changes: {},
-            });
-          } catch (err) {
-            console.error('Background plan generation failed:', err);
-          }
+        planTask({
+          task,
+          workspaceId: workspace.id,
+          workspacePath: workspace.path,
+          broadcastToWorkspace: (event: any) => broadcastToWorkspace(workspace.id, event),
+        }).catch((err) => {
+          console.error('Background plan generation failed:', err);
         });
       }
     } catch (err) {
@@ -1794,6 +1798,46 @@ function broadcastToWorkspace(workspaceId: string, event: ServerEvent) {
 // Startup
 // =============================================================================
 
+async function resumeInterruptedPlanningRuns(): Promise<void> {
+  const workspaces = listWorkspaces();
+
+  for (const workspace of workspaces) {
+    const tasksDir = getTasksDir(workspace);
+    const tasks = discoverTasks(tasksDir);
+    const interrupted = tasks.filter((task) =>
+      shouldResumeInterruptedPlanning(task)
+      && task.frontmatter.phase !== 'complete'
+      && task.frontmatter.phase !== 'archived'
+    );
+
+    if (interrupted.length === 0) {
+      continue;
+    }
+
+    console.log(`[Startup] Resuming ${interrupted.length} interrupted planning task(s) in ${workspace.name}`);
+
+    for (const task of interrupted) {
+      const entry = createSystemEvent(
+        workspace.id,
+        task.id,
+        'phase-change',
+        'Resuming interrupted planning run after server restart',
+      );
+      broadcastToWorkspace(workspace.id, { type: 'activity:entry', entry });
+
+      // Run resumes concurrently so one hung planning run does not block others.
+      void planTask({
+        task,
+        workspaceId: workspace.id,
+        workspacePath: workspace.path,
+        broadcastToWorkspace: (event: ServerEvent) => broadcastToWorkspace(workspace.id, event),
+      }).catch((err) => {
+        console.error(`[Startup] Failed to resume planning for ${task.id}:`, err);
+      });
+    }
+  }
+}
+
 async function main() {
   server.listen(PORT, HOST, () => {
     console.log(`
@@ -1808,6 +1852,11 @@ async function main() {
     // Resume queue processing for workspaces that had it enabled
     initializeQueueManagers((workspaceId, event) => {
       broadcastToWorkspace(workspaceId, event);
+    });
+
+    // Resume planning tasks that were interrupted by shutdown/restart.
+    resumeInterruptedPlanningRuns().catch((err) => {
+      console.error('[Startup] Failed to resume interrupted planning runs:', err);
     });
   });
 }

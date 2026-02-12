@@ -16,8 +16,10 @@ interface TaskChatProps {
   onSendMessage: (content: string, attachmentIds?: string[]) => void
   onSteer?: (content: string, attachmentIds?: string[]) => void
   onFollowUp?: (content: string, attachmentIds?: string[]) => void
-  onStop?: () => void
+
   onReset?: () => void
+  onUploadFiles?: (files: File[]) => Promise<Attachment[]>
+  getAttachmentUrl?: (storedName: string) => string
   title?: string
   emptyState?: { title: string; subtitle: string }
 }
@@ -33,7 +35,6 @@ const STATUS_CONFIG: Record<AgentExecutionStatus, { label: string; color: string
 }
 
 const TOOL_PREVIEW_LINES = 2
-const PROSE_PREVIEW_LINES = 4
 const MAX_LINES = 100
 const MAX_PREVIEW_CHARS = 500
 
@@ -122,10 +123,27 @@ function guessToolInfo(content: string): { prefix: string; detail: string } | nu
     const path = first.match(/^load\("([^"]+)"/)?.[1]
     return { prefix: 'read', detail: path ? `BUILD (${path.split('/').pop()})` : 'BUILD' }
   }
-  // General long output
-  if (content.split('\n').length > 6) {
-    return { prefix: 'output', detail: firstLine.slice(0, 60) }
+
+  // Code-dump fallback (legacy entries where tool metadata was missing).
+  // This avoids markdown mangling of large source snippets.
+  const lines = first.split('\n')
+  if (lines.length >= 8) {
+    let score = 0
+    for (const line of lines.slice(0, 120)) {
+      const t = line.trim()
+      if (!t) continue
+      if (/^(const |let |var |function |class |interface |type |if\b|else\b|for\b|while\b|return\b|import |export |\/\/|\/\*)/.test(t)) score += 2
+      if (/[{};]/.test(t)) score += 1
+      if (t.includes('=>') || t.includes('===') || t.includes('?.') || t.includes('await ')) score += 1
+    }
+    if (score >= 14) {
+      return { prefix: 'read', detail: '(code output)' }
+    }
   }
+
+  // Do not infer generic long assistant prose as a tool call.
+  // Structured tool entries now carry metadata; this heuristic is only for
+  // obvious legacy outputs (code, file lists, git output, etc.).
   return null
 }
 
@@ -200,13 +218,13 @@ const ToolCallBlock = memo(function ToolCallBlock({ toolCall }: { toolCall: Tool
 
   return (
     <div className={`-mx-4 border-l-2 ${
-      toolCall.isError ? 'bg-red-50 border-red-400' : 'bg-slate-50 border-slate-300'
+      toolCall.isError ? 'bg-red-50 border-red-400' : 'bg-emerald-50/60 border-emerald-400'
     }`}>
       <div className="px-4 py-2 flex items-start gap-2 font-mono text-[13px]">
-        <span className="text-amber-600 font-semibold shrink-0">{header.prefix}</span>
-        <span className="text-blue-600 whitespace-pre-wrap break-all flex-1">{header.detail}</span>
+        <span className="text-emerald-700 font-semibold shrink-0">{header.prefix}</span>
+        <span className="text-slate-700 whitespace-pre-wrap break-all flex-1">{header.detail}</span>
         {!toolCall.isComplete && (
-          <span className="text-amber-500 text-[11px] shrink-0 animate-pulse">(running)</span>
+          <span className="text-emerald-500 text-[11px] shrink-0 animate-pulse">(running)</span>
         )}
         {toolCall.isComplete && toolCall.isError && (
           <span className="text-red-500 text-[11px] shrink-0">(error)</span>
@@ -248,11 +266,11 @@ const PersistedToolBlock = memo(function PersistedToolBlock({
 
   return (
     <div className={`-mx-4 border-l-2 ${
-      isError ? 'bg-red-50 border-red-400' : 'bg-slate-50 border-slate-300'
+      isError ? 'bg-red-50 border-red-400' : 'bg-emerald-50/60 border-emerald-400'
     }`}>
       <div className="px-4 py-2 flex items-start gap-2 font-mono text-[13px]">
-        <span className="text-amber-600 font-semibold shrink-0">{header.prefix}</span>
-        <span className="text-blue-600 whitespace-pre-wrap break-all flex-1">{header.detail}</span>
+        <span className="text-emerald-700 font-semibold shrink-0">{header.prefix}</span>
+        <span className="text-slate-700 whitespace-pre-wrap break-all flex-1">{header.detail}</span>
         {isError && <span className="text-red-500 text-[11px] shrink-0">(error)</span>}
       </div>
       {displayText && (
@@ -287,10 +305,10 @@ const InferredToolBlock = memo(function InferredToolBlock({
     : outputInfo.preview
 
   return (
-    <div className="-mx-4 border-l-2 bg-slate-50 border-slate-300">
+    <div className="-mx-4 border-l-2 bg-emerald-50/60 border-emerald-400">
       <div className="px-4 py-2 flex items-start gap-2 font-mono text-[13px]">
-        <span className="text-amber-600 font-semibold shrink-0">{prefix}</span>
-        <span className="text-blue-600 whitespace-pre-wrap break-all flex-1">{detail}</span>
+        <span className="text-emerald-700 font-semibold shrink-0">{prefix}</span>
+        <span className="text-slate-700 whitespace-pre-wrap break-all flex-1">{detail}</span>
       </div>
       <div className="px-4 pb-2.5">
         <LineNumberedOutput content={displayText} />
@@ -308,7 +326,7 @@ const InferredToolBlock = memo(function InferredToolBlock({
 
 const ThinkingBlock = memo(function ThinkingBlock({ text }: { text: string }) {
   return (
-    <div className="-mx-4 px-4 py-2 text-[13px] text-purple-500/80 italic font-mono whitespace-pre-wrap leading-relaxed bg-purple-50/50 border-l-2 border-purple-300">
+    <div className="py-2 text-[13px] text-slate-400 italic font-mono whitespace-pre-wrap leading-relaxed">
       {text}
     </div>
   )
@@ -323,21 +341,9 @@ const CollapsibleAgentMessage = memo(function CollapsibleAgentMessage({
 }: {
   content: string
 }) {
-  const [expanded, setExpanded] = useState(false)
-  const lines = content.split('\n')
-  const needsCollapse = lines.length > PROSE_PREVIEW_LINES
-  const displayContent = !expanded && needsCollapse
-    ? lines.slice(0, PROSE_PREVIEW_LINES).join('\n')
-    : content
-
   return (
-    <div>
-      <div className="chat-prose text-slate-700">
-        <ReactMarkdown>{displayContent}</ReactMarkdown>
-      </div>
-      {needsCollapse && (
-        <ExpandButton expanded={expanded} hiddenCount={lines.length - PROSE_PREVIEW_LINES} onToggle={() => setExpanded(!expanded)} />
-      )}
+    <div className="chat-prose text-slate-700">
+      <ReactMarkdown>{content}</ReactMarkdown>
     </div>
   )
 })
@@ -356,8 +362,9 @@ export function TaskChat({
   onSendMessage,
   onSteer,
   onFollowUp,
-  onStop,
   onReset,
+  onUploadFiles,
+  getAttachmentUrl: getAttachmentUrlProp,
   title,
   emptyState,
 }: TaskChatProps) {
@@ -372,9 +379,12 @@ export function TaskChat({
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // When taskPhase is provided, it's the source of truth for active state.
-  // When not provided (planning mode), just use agentStream.isActive directly.
-  const isActive = taskPhase ? agentStream.isActive && taskPhase === 'executing' : agentStream.isActive
+  // Show agent activity for all phases (including complete), so chat mode
+  // still displays running status while the model responds.
+  const isAgentActive = agentStream.isActive
+
+  // Steering/follow-up controls are only shown for executing tasks.
+  const canSteer = taskPhase === 'executing' && !!onSteer
 
   const isWaitingForInput = taskPhase
     ? !agentStream.isActive && taskPhase === 'executing' && agentStream.status === 'idle'
@@ -390,8 +400,8 @@ export function TaskChat({
   }, [taskEntries.length, agentStream.streamingText.length])
 
   useEffect(() => {
-    setSendMode(isActive && onSteer ? 'steer' : 'message')
-  }, [isActive, onSteer])
+    setSendMode(isAgentActive && canSteer ? 'steer' : 'message')
+  }, [isAgentActive, canSteer])
 
   const addFiles = useCallback((files: FileList | File[]) => {
     const newFiles = Array.from(files)
@@ -403,16 +413,27 @@ export function TaskChat({
     setPendingFiles(prev => prev.filter((_, i) => i !== index))
   }, [])
 
+  // Determine if file upload is supported (either via custom callback or task-specific upload)
+  const canUploadFiles = !!(onUploadFiles || (workspaceId && taskId && attachments))
+
   const handleSend = async () => {
     const trimmed = input.trim()
     if (!trimmed && pendingFiles.length === 0) return
 
     // Upload pending files first (for any send mode)
     let attachmentIds: string[] | undefined
-    if (pendingFiles.length > 0 && workspaceId && taskId) {
+    if (pendingFiles.length > 0) {
       setIsUploading(true)
       try {
-        const uploaded = await api.uploadAttachments(workspaceId, taskId, pendingFiles)
+        let uploaded: Attachment[]
+        if (onUploadFiles) {
+          uploaded = await onUploadFiles(pendingFiles)
+        } else if (workspaceId && taskId) {
+          uploaded = await api.uploadAttachments(workspaceId, taskId, pendingFiles)
+        } else {
+          setIsUploading(false)
+          return
+        }
         attachmentIds = uploaded.map(a => a.id)
         setPendingFiles([])
       } catch (err) {
@@ -464,7 +485,7 @@ export function TaskChat({
     if (e.key === 'Enter' && !e.shiftKey && !e.altKey) {
       e.preventDefault()
       handleSend()
-    } else if (e.key === 'Enter' && e.altKey && isActive && onFollowUp) {
+    } else if (e.key === 'Enter' && e.altKey && isAgentActive && canSteer && onFollowUp) {
       e.preventDefault()
       const trimmed = input.trim()
       if (trimmed) { onFollowUp(trimmed); setInput('') }
@@ -496,7 +517,7 @@ export function TaskChat({
       )}
 
       {/* Status bar */}
-      {isActive && (
+      {isAgentActive && (
         <div className="flex items-center gap-2 px-4 py-1.5 bg-slate-50 border-b border-slate-200 shrink-0">
           <span className={`w-2 h-2 rounded-full ${statusConfig.color} ${statusConfig.pulse ? 'animate-pulse' : ''}`} />
           <span className="text-xs font-mono text-slate-500">{statusConfig.label}</span>
@@ -505,19 +526,12 @@ export function TaskChat({
               {agentStream.toolCalls[agentStream.toolCalls.length - 1].toolName}
             </span>
           )}
-          {onStop && (
-            <button
-              onClick={onStop}
-              className="ml-auto text-xs font-mono text-red-500 hover:text-red-600 bg-red-50 hover:bg-red-100 px-2 py-0.5 rounded transition-colors"
-            >
-              ⏹ stop
-            </button>
-          )}
+
         </div>
       )}
 
       {/* Empty state */}
-      {taskEntries.length === 0 && !isActive && emptyState && (
+      {taskEntries.length === 0 && !isAgentActive && emptyState && (
         <div className="flex flex-col items-center justify-center text-slate-400 absolute inset-0 z-0 pointer-events-none">
           <p className="text-sm font-medium text-slate-500 mb-1">{emptyState.title}</p>
           <p className="text-xs">{emptyState.subtitle}</p>
@@ -540,7 +554,7 @@ export function TaskChat({
           </div>
         )}
         <div className="px-4 py-3 space-y-1 text-[14px] leading-relaxed">
-          {taskEntries.length === 0 && !isActive && !emptyState && (
+          {taskEntries.length === 0 && !isAgentActive && !emptyState && (
             <div className="text-center py-16 text-slate-400">
               <p className="text-sm font-mono">no messages yet</p>
               <p className="text-xs mt-1">send a message or execute the task</p>
@@ -549,6 +563,11 @@ export function TaskChat({
 
           {taskEntries.map((entry) => {
             if (entry.type === 'system-event') {
+              // Hide low-signal idle spam from historical logs.
+              if (entry.message === 'Agent is waiting for user input') {
+                return null
+              }
+
               return (
                 <div key={entry.id} className="text-center py-1">
                   <span className="text-[11px] font-mono text-slate-400">
@@ -586,7 +605,9 @@ export function TaskChat({
                     {msgAttachments.length > 0 && (
                       <div className="flex flex-wrap gap-2 mt-2">
                         {msgAttachments.map(att => {
-                          const url = workspaceId && taskId ? api.getAttachmentUrl(workspaceId, taskId, att.storedName) : ''
+                          const url = getAttachmentUrlProp
+                            ? getAttachmentUrlProp(att.storedName)
+                            : workspaceId && taskId ? api.getAttachmentUrl(workspaceId, taskId, att.storedName) : ''
                           const isImage = att.mimeType.startsWith('image/')
                           return isImage ? (
                             <a key={att.id} href={url} target="_blank" rel="noopener noreferrer" className="block">
@@ -642,15 +663,15 @@ export function TaskChat({
           })}
 
           {/* Live thinking — only show when agent is actually running */}
-          {isActive && agentStream.thinkingText && <ThinkingBlock text={agentStream.thinkingText} />}
+          {isAgentActive && agentStream.thinkingText && <ThinkingBlock text={agentStream.thinkingText} />}
 
           {/* Live tool calls — only show when agent is actually running */}
-          {isActive && agentStream.toolCalls.map((tc) => (
+          {isAgentActive && agentStream.toolCalls.map((tc) => (
             <ToolCallBlock key={tc.toolCallId} toolCall={tc} />
           ))}
 
           {/* Live streaming text — only show when agent is actually running */}
-          {isActive && agentStream.streamingText && (
+          {isAgentActive && agentStream.streamingText && (
             <div>
               <div className="chat-prose text-slate-700">
                 <ReactMarkdown>{agentStream.streamingText}</ReactMarkdown>
@@ -665,7 +686,7 @@ export function TaskChat({
 
       {/* Input */}
       <div className="shrink-0 border-t border-slate-200 bg-white">
-        {isActive && onSteer && (
+        {isAgentActive && canSteer && (
           <div className="flex items-center gap-1 px-3 pt-2 pb-0">
             <button
               onClick={() => setSendMode('steer')}
@@ -729,8 +750,8 @@ export function TaskChat({
         )}
 
         <div className="flex gap-2 items-end p-3">
-          {/* Attach file button — only for execution tasks with real file upload support */}
-          {workspaceId && taskId && attachments && (
+          {/* Attach file button — shown when file upload is supported */}
+          {canUploadFiles && (
             <>
             <button
               onClick={() => fileInputRef.current?.click()}
@@ -762,20 +783,22 @@ export function TaskChat({
             onCompositionStart={() => setIsComposing(true)}
             onCompositionEnd={() => setIsComposing(false)}
             placeholder={
-              isActive
+              isAgentActive && canSteer
                 ? sendMode === 'steer'
                   ? 'steer the agent… (enter to send)'
                   : 'queue follow-up… (enter to send)'
                 : isWaitingForInput
                   ? 'reply to the agent… (enter to send)'
-                  : pendingFiles.length > 0
-                    ? 'add a note… (enter to send with files)'
-                    : 'message the agent… (enter to send)'
+                  : isAgentActive
+                    ? 'agent is running… (enter to send)'
+                    : pendingFiles.length > 0
+                      ? 'add a note… (enter to send with files)'
+                      : 'message the agent… (enter to send)'
             }
             className={`flex-1 resize-none rounded-lg border bg-white text-slate-800 placeholder-slate-400 px-3 py-2 text-sm focus:outline-none focus:ring-1 min-h-[40px] max-h-[120px] transition-colors ${
-              isActive && sendMode === 'steer'
+              isAgentActive && canSteer && sendMode === 'steer'
                 ? 'border-amber-300 focus:border-amber-400 focus:ring-amber-200'
-                : isActive && sendMode === 'followUp'
+                : isAgentActive && canSteer && sendMode === 'followUp'
                 ? 'border-blue-300 focus:border-blue-400 focus:ring-blue-200'
                 : 'border-slate-200 focus:border-slate-400 focus:ring-slate-200'
             }`}
@@ -790,12 +813,12 @@ export function TaskChat({
             onClick={handleSend}
             disabled={!input.trim() && pendingFiles.length === 0}
             className={`text-sm font-mono py-2 px-3 rounded-lg shrink-0 disabled:opacity-30 transition-colors ${
-              isActive && sendMode === 'steer'
+              isAgentActive && canSteer && sendMode === 'steer'
                 ? 'bg-amber-500 text-white hover:bg-amber-600'
                 : 'bg-slate-700 text-white hover:bg-slate-600'
             }`}
           >
-            {isUploading ? '…' : isActive && sendMode === 'steer' ? '⚡' : '↩'}
+            {isUploading ? '…' : isAgentActive && canSteer && sendMode === 'steer' ? '⚡' : '↩'}
           </button>
         </div>
       </div>
