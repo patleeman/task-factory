@@ -1,14 +1,17 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import type { Task, Workspace, ActivityEntry, Phase, QueueStatus } from '@pi-factory/shared'
+import type { Task, Workspace, ActivityEntry, Phase, QueueStatus, Shelf } from '@pi-factory/shared'
 import { api } from '../api'
 import { PipelineBar } from './PipelineBar'
 import { TaskDetailPane } from './TaskDetailPane'
 import { CreateTaskPane } from './CreateTaskPane'
-import { ActivityLog } from './ActivityLog'
+import { ChatPane } from './ChatPane'
+import { ShelfPane } from './ShelfPane'
 import { ResizeHandle } from './ResizeHandle'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { useAgentStreaming } from '../hooks/useAgentStreaming'
+import { usePlanningStreaming } from '../hooks/usePlanningStreaming'
+import { TaskChat } from './TaskChat'
 
 const RIGHT_PANE_MIN = 280
 const RIGHT_PANE_MAX = 700
@@ -36,14 +39,20 @@ export function WorkspacePage() {
   const [queueToggling, setQueueToggling] = useState(false)
   const toastTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
 
+  const [shelf, setShelf] = useState<Shelf>({ items: [] })
+
   const selectedTask = mainPane.type === 'task-detail' ? mainPane.task : null
   const selectedTaskRef = useRef(selectedTask)
   selectedTaskRef.current = selectedTask
   const tasksRef = useRef(tasks)
   tasksRef.current = tasks
 
+  // Mode: planning (no task selected) vs task (task selected)
+  const mode = selectedTask ? 'task' : 'planning'
+
   const { subscribe, isConnected } = useWebSocket(workspaceId || null)
   const agentStream = useAgentStreaming(selectedTask?.id || null, subscribe)
+  const planningStream = usePlanningStreaming(workspaceId || null, subscribe)
 
   // Derived data
   const archivedTasks = tasks
@@ -65,12 +74,14 @@ export function WorkspacePage() {
       api.getTasks(workspaceId),
       api.getActivity(workspaceId, 100),
       api.getQueueStatus(workspaceId),
+      api.getShelf(workspaceId),
     ])
-      .then(([ws, tasksData, activityData, qStatus]) => {
+      .then(([ws, tasksData, activityData, qStatus, shelfData]) => {
         setWorkspace(ws)
         setTasks(tasksData)
         setActivity(activityData)
         setQueueStatus(qStatus)
+        setShelf(shelfData)
         setIsLoading(false)
       })
       .catch((err) => {
@@ -152,6 +163,9 @@ export function WorkspacePage() {
           break
         case 'queue:status':
           setQueueStatus(msg.status)
+          break
+        case 'shelf:updated':
+          setShelf(msg.shelf)
           break
       }
     })
@@ -304,6 +318,75 @@ export function WorkspacePage() {
     })
   }
 
+  // Planning agent handlers
+  const handlePlanningMessage = async (content: string) => {
+    if (!workspaceId) return
+    try {
+      await api.sendPlanningMessage(workspaceId, content)
+    } catch (err) {
+      console.error('Failed to send planning message:', err)
+    }
+  }
+
+  const handleResetPlanning = async () => {
+    if (!workspaceId) return
+    try {
+      await api.resetPlanningSession(workspaceId)
+    } catch (err) {
+      console.error('Failed to reset planning session:', err)
+    }
+  }
+
+  // Shelf handlers
+  const handlePushDraft = async (draftId: string) => {
+    if (!workspaceId) return
+    try {
+      await api.pushDraftToBacklog(workspaceId, draftId)
+    } catch (err) {
+      console.error('Failed to push draft:', err)
+      showToast('Failed to push draft to backlog')
+    }
+  }
+
+  const handlePushAllDrafts = async () => {
+    if (!workspaceId) return
+    try {
+      const result = await api.pushAllDraftsToBacklog(workspaceId)
+      showToast(`Created ${result.count} task${result.count !== 1 ? 's' : ''} from drafts`)
+    } catch (err) {
+      console.error('Failed to push all drafts:', err)
+      showToast('Failed to push drafts to backlog')
+    }
+  }
+
+  const handleRemoveShelfItem = async (itemId: string) => {
+    if (!workspaceId) return
+    try {
+      await api.removeShelfItem(workspaceId, itemId)
+    } catch (err) {
+      console.error('Failed to remove shelf item:', err)
+    }
+  }
+
+  const handleUpdateDraft = async (draftId: string, updates: Partial<import('@pi-factory/shared').DraftTask>) => {
+    if (!workspaceId) return
+    try {
+      await api.updateDraftTask(workspaceId, draftId, updates)
+    } catch (err) {
+      console.error('Failed to update draft:', err)
+    }
+  }
+
+  const handleClearShelf = async () => {
+    if (!workspaceId) return
+    if (!confirm('Clear all items from the shelf?')) return
+    try {
+      await api.clearShelf(workspaceId)
+    } catch (err) {
+      console.error('Failed to clear shelf:', err)
+    }
+  }
+
   const handleToggleQueue = async () => {
     if (!workspaceId || queueToggling) return
     setQueueToggling(true)
@@ -445,23 +528,75 @@ export function WorkspacePage() {
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Top: two panes */}
         <div className="flex-1 flex overflow-hidden min-h-0">
-          {/* Activity Feed — left */}
+          {/* Left pane — Chat (planning or task, depending on mode) */}
           <div
             className="bg-slate-50 overflow-hidden shrink-0"
             style={{ width: rightPaneWidth }}
           >
-            <ActivityLog
-              entries={activity}
-              tasks={tasks}
-              onTaskClick={handleSelectTask}
-            />
+            {mode === 'planning' ? (
+              <ChatPane
+                workspaceId={workspaceId || ''}
+                planningStream={planningStream}
+                onSendMessage={handlePlanningMessage}
+                onReset={handleResetPlanning}
+              />
+            ) : (
+              /* Task mode: show task chat in left pane */
+              <div className="flex flex-col h-full">
+                <div className="flex items-center gap-2 px-4 py-2.5 border-b border-slate-100 bg-slate-50 shrink-0">
+                  <button
+                    onClick={() => setMainPane({ type: 'empty' })}
+                    className="text-slate-400 hover:text-slate-600 transition-colors text-sm"
+                  >
+                    ← General
+                  </button>
+                  <div className="h-4 w-px bg-slate-200" />
+                  <span className="font-mono text-[10px] text-slate-400">{selectedTask?.id}</span>
+                  <span className="text-xs font-medium text-slate-700 truncate">{selectedTask?.frontmatter.title}</span>
+                </div>
+                <div className="flex-1 overflow-hidden min-h-0">
+                  {selectedTask && (
+                    <TaskChat
+                      taskId={selectedTask.id}
+                      taskPhase={selectedTask.frontmatter.phase}
+                      workspaceId={workspaceId || ''}
+                      entries={activity}
+                      attachments={selectedTask.frontmatter.attachments || []}
+                      agentStream={agentStream}
+                      onSendMessage={(content, attachmentIds) => handleSendMessage(selectedTask.id, content, attachmentIds)}
+                      onSteer={(content, attachmentIds) => handleSteer(selectedTask.id, content, attachmentIds)}
+                      onFollowUp={(content, attachmentIds) => handleFollowUp(selectedTask.id, content, attachmentIds)}
+                      onStop={async () => {
+                        await fetch(`/api/workspaces/${workspaceId}/tasks/${selectedTask.id}/stop`, { method: 'POST' })
+                      }}
+                    />
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
           <ResizeHandle onResize={handleResize} />
 
-          {/* Task Detail / Create / Empty State — right (white, fills remaining) */}
+          {/* Right pane — contextual (shelf in planning mode, task detail in task mode) */}
           <div className="flex-1 bg-white overflow-hidden min-w-0">
-            {mainPane.type === 'task-detail' ? (
+            {mode === 'planning' ? (
+              mainPane.type === 'create-task' ? (
+                <CreateTaskPane
+                  onCancel={() => setMainPane({ type: 'empty' })}
+                  onSubmit={handleCreateTask}
+                />
+              ) : (
+                <ShelfPane
+                  shelf={planningStream.shelf || shelf}
+                  onPushDraft={handlePushDraft}
+                  onPushAll={handlePushAllDrafts}
+                  onRemoveItem={handleRemoveShelfItem}
+                  onUpdateDraft={handleUpdateDraft}
+                  onClearShelf={handleClearShelf}
+                />
+              )
+            ) : mainPane.type === 'task-detail' ? (
               <TaskDetailPane
                 task={mainPane.task}
                 workspaceId={workspaceId || ''}
@@ -481,11 +616,6 @@ export function WorkspacePage() {
                 onSendMessage={handleSendMessage}
                 onSteer={handleSteer}
                 onFollowUp={handleFollowUp}
-              />
-            ) : mainPane.type === 'create-task' ? (
-              <CreateTaskPane
-                onCancel={() => setMainPane({ type: 'empty' })}
-                onSubmit={handleCreateTask}
               />
             ) : (
               <EmptyState onCreateTask={() => setMainPane({ type: 'create-task' })} />

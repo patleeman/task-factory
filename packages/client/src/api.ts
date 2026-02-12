@@ -1,4 +1,4 @@
-import type { Task, Workspace, ActivityEntry, Phase, Attachment, QueueStatus } from '@pi-factory/shared'
+import type { Task, Workspace, ActivityEntry, Phase, Attachment, QueueStatus, PlanningMessage, PlanningAgentStatus, Shelf, DraftTask } from '@pi-factory/shared'
 
 export interface AvailableModel {
   provider: string
@@ -151,6 +151,87 @@ export const api = {
 
   async stopQueue(workspaceId: string): Promise<QueueStatus> {
     const res = await fetch(`/api/workspaces/${workspaceId}/queue/stop`, { method: 'POST' })
+    return res.json()
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Planning Agent
+  // ─────────────────────────────────────────────────────────────────────────
+
+  async sendPlanningMessage(workspaceId: string, content: string): Promise<void> {
+    const res = await fetch(`/api/workspaces/${workspaceId}/planning/message`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content }),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Send failed' }))
+      throw new Error(err.error || `Send failed (${res.status})`)
+    }
+  },
+
+  async getPlanningMessages(workspaceId: string): Promise<PlanningMessage[]> {
+    const res = await fetch(`/api/workspaces/${workspaceId}/planning/messages`)
+    return res.json()
+  },
+
+  async getPlanningStatus(workspaceId: string): Promise<PlanningAgentStatus> {
+    const res = await fetch(`/api/workspaces/${workspaceId}/planning/status`)
+    const data = await res.json()
+    return data.status
+  },
+
+  async resetPlanningSession(workspaceId: string): Promise<void> {
+    await fetch(`/api/workspaces/${workspaceId}/planning/reset`, { method: 'POST' })
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Shelf
+  // ─────────────────────────────────────────────────────────────────────────
+
+  async getShelf(workspaceId: string): Promise<Shelf> {
+    const res = await fetch(`/api/workspaces/${workspaceId}/shelf`)
+    return res.json()
+  },
+
+  async updateDraftTask(workspaceId: string, draftId: string, updates: Partial<DraftTask>): Promise<Shelf> {
+    const res = await fetch(`/api/workspaces/${workspaceId}/shelf/drafts/${draftId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    })
+    return res.json()
+  },
+
+  async removeShelfItem(workspaceId: string, itemId: string): Promise<Shelf> {
+    const res = await fetch(`/api/workspaces/${workspaceId}/shelf/items/${itemId}`, {
+      method: 'DELETE',
+    })
+    return res.json()
+  },
+
+  async pushDraftToBacklog(workspaceId: string, draftId: string): Promise<Task> {
+    const res = await fetch(`/api/workspaces/${workspaceId}/shelf/drafts/${draftId}/push`, {
+      method: 'POST',
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Push failed' }))
+      throw new Error(err.error || `Push failed (${res.status})`)
+    }
+    return res.json()
+  },
+
+  async pushAllDraftsToBacklog(workspaceId: string): Promise<{ tasks: Task[]; count: number }> {
+    const res = await fetch(`/api/workspaces/${workspaceId}/shelf/push-all`, {
+      method: 'POST',
+    })
+    return res.json()
+  },
+
+  async clearShelf(workspaceId: string): Promise<Shelf> {
+    const res = await fetch(`/api/workspaces/${workspaceId}/shelf`, {
+      method: 'DELETE',
+    })
     return res.json()
   },
 }

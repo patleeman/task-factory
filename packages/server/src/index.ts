@@ -1245,6 +1245,230 @@ app.delete('/api/workspaces/:workspaceId/tasks/:taskId/attachments/:attachmentId
   res.json({ success: true });
 });
 
+// =============================================================================
+// Planning Agent & Shelf API
+// =============================================================================
+
+import {
+  sendPlanningMessage,
+  getPlanningMessages,
+  getPlanningStatus,
+  resetPlanningSession,
+} from './planning-agent-service.js';
+
+import {
+  getShelf,
+  addDraftTask,
+  updateDraftTask,
+  removeDraftTask,
+  addArtifact,
+  removeArtifact,
+  removeShelfItem,
+  clearShelf,
+} from './shelf-service.js';
+
+// Send message to planning agent
+app.post('/api/workspaces/:workspaceId/planning/message', async (req, res) => {
+  const workspace = getWorkspaceById(req.params.workspaceId);
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return;
+  }
+
+  const { content } = req.body as { content: string };
+  if (!content) {
+    res.status(400).json({ error: 'Content is required' });
+    return;
+  }
+
+  try {
+    // Fire and forget — response streams via WebSocket
+    sendPlanningMessage(
+      workspace.id,
+      content,
+      (event) => broadcastToWorkspace(workspace.id, event),
+    ).catch((err) => {
+      console.error('Planning agent error:', err);
+    });
+
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// Get planning conversation history
+app.get('/api/workspaces/:workspaceId/planning/messages', (req, res) => {
+  const workspace = getWorkspaceById(req.params.workspaceId);
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return;
+  }
+  res.json(getPlanningMessages(workspace.id));
+});
+
+// Get planning agent status
+app.get('/api/workspaces/:workspaceId/planning/status', (req, res) => {
+  const workspace = getWorkspaceById(req.params.workspaceId);
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return;
+  }
+  res.json({ status: getPlanningStatus(workspace.id) });
+});
+
+// Reset planning session
+app.post('/api/workspaces/:workspaceId/planning/reset', async (req, res) => {
+  const workspace = getWorkspaceById(req.params.workspaceId);
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return;
+  }
+  await resetPlanningSession(workspace.id);
+  res.json({ ok: true });
+});
+
+// Get shelf
+app.get('/api/workspaces/:workspaceId/shelf', (req, res) => {
+  const workspace = getWorkspaceById(req.params.workspaceId);
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return;
+  }
+  res.json(getShelf(workspace.id));
+});
+
+// Update draft task on shelf
+app.patch('/api/workspaces/:workspaceId/shelf/drafts/:draftId', (req, res) => {
+  const workspace = getWorkspaceById(req.params.workspaceId);
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return;
+  }
+
+  try {
+    const shelf = updateDraftTask(workspace.id, req.params.draftId, req.body);
+    broadcastToWorkspace(workspace.id, { type: 'shelf:updated', workspaceId: workspace.id, shelf });
+    res.json(shelf);
+  } catch (err) {
+    res.status(404).json({ error: String(err) });
+  }
+});
+
+// Remove item from shelf
+app.delete('/api/workspaces/:workspaceId/shelf/items/:itemId', (req, res) => {
+  const workspace = getWorkspaceById(req.params.workspaceId);
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return;
+  }
+
+  const shelf = removeShelfItem(workspace.id, req.params.itemId);
+  broadcastToWorkspace(workspace.id, { type: 'shelf:updated', workspaceId: workspace.id, shelf });
+  res.json(shelf);
+});
+
+// Clear entire shelf
+app.delete('/api/workspaces/:workspaceId/shelf', (req, res) => {
+  const workspace = getWorkspaceById(req.params.workspaceId);
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return;
+  }
+
+  const shelf = clearShelf(workspace.id);
+  broadcastToWorkspace(workspace.id, { type: 'shelf:updated', workspaceId: workspace.id, shelf });
+  res.json(shelf);
+});
+
+// Push draft task to backlog (creates a real task)
+app.post('/api/workspaces/:workspaceId/shelf/drafts/:draftId/push', async (req, res) => {
+  const workspace = getWorkspaceById(req.params.workspaceId);
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return;
+  }
+
+  const { getDraftTask } = await import('./shelf-service.js');
+  const draft = getDraftTask(workspace.id, req.params.draftId);
+  if (!draft) {
+    res.status(404).json({ error: 'Draft task not found' });
+    return;
+  }
+
+  // Create a real task from the draft
+  const tasksDir = getTasksDir(workspace);
+  const createReq: CreateTaskRequest = {
+    title: draft.title,
+    content: draft.content,
+    acceptanceCriteria: draft.acceptanceCriteria,
+  };
+
+  try {
+    const task = createTask(workspace.path, tasksDir, createReq, draft.title);
+
+    // Remove from shelf
+    const shelf = removeDraftTask(workspace.id, draft.id);
+    broadcastToWorkspace(workspace.id, { type: 'shelf:updated', workspaceId: workspace.id, shelf });
+
+    // Broadcast task created
+    broadcastToWorkspace(workspace.id, { type: 'task:created', task });
+
+    createSystemEvent(workspace.id, task.id, 'task-created', `Task ${task.id} created from draft`);
+
+    res.json(task);
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// Push all draft tasks to backlog
+app.post('/api/workspaces/:workspaceId/shelf/push-all', async (req, res) => {
+  const workspace = getWorkspaceById(req.params.workspaceId);
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return;
+  }
+
+  const shelf = getShelf(workspace.id);
+  const drafts = shelf.items
+    .filter((si) => si.type === 'draft-task')
+    .map((si) => si.item as import('@pi-factory/shared').DraftTask);
+
+  if (drafts.length === 0) {
+    res.json({ tasks: [], count: 0 });
+    return;
+  }
+
+  const tasksDir = getTasksDir(workspace);
+  const createdTasks: Task[] = [];
+
+  for (const draft of drafts) {
+    try {
+      const task = createTask(workspace.path, tasksDir, {
+        title: draft.title,
+        content: draft.content,
+        acceptanceCriteria: draft.acceptanceCriteria,
+      }, draft.title);
+
+      createdTasks.push(task);
+      broadcastToWorkspace(workspace.id, { type: 'task:created', task });
+      createSystemEvent(workspace.id, task.id, 'task-created', `Task ${task.id} created from draft`);
+    } catch (err) {
+      console.error(`Failed to create task from draft ${draft.id}:`, err);
+    }
+  }
+
+  // Remove all drafts from shelf (keep artifacts)
+  for (const draft of drafts) {
+    removeDraftTask(workspace.id, draft.id);
+  }
+  const updatedShelf = getShelf(workspace.id);
+  broadcastToWorkspace(workspace.id, { type: 'shelf:updated', workspaceId: workspace.id, shelf: updatedShelf });
+
+  res.json({ tasks: createdTasks, count: createdTasks.length });
+});
+
 // Catch-all for SPA
 app.get('*', (_req, res) => {
   res.sendFile(join(clientDistPath, 'index.html'));

@@ -1,16 +1,13 @@
-import { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import type { Task, Phase, ActivityEntry, ModelConfig } from '@pi-factory/shared'
 import { PHASES, PHASE_DISPLAY_NAMES, getPromotePhase, getDemotePhase } from '@pi-factory/shared'
 import { MarkdownEditor } from './MarkdownEditor'
-import { TaskChat } from './TaskChat'
 import type { AgentStreamState } from '../hooks/useAgentStreaming'
 import type { PostExecutionSkill } from '../types/pi'
 import { SkillSelector } from './SkillSelector'
 import { ModelSelector } from './ModelSelector'
 import ReactMarkdown from 'react-markdown'
 import { api } from '../api'
-
-type Tab = 'details' | 'chat'
 
 interface TaskDetailPaneProps {
   task: Task
@@ -29,20 +26,15 @@ interface TaskDetailPaneProps {
 export function TaskDetailPane({
   task,
   workspaceId,
-  activity,
   agentStream,
   onClose,
   onMove,
   moveError,
   onDelete,
-  onSendMessage,
-  onSteer,
-  onFollowUp,
 }: TaskDetailPaneProps) {
   const [showMoveMenu, setShowMoveMenu] = useState(false)
   const [isExecuting, setIsExecuting] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
-  const [activeTab, setActiveTab] = useState<Tab>('chat')
   const [editedTitle, setEditedTitle] = useState(task.frontmatter.title)
   const [editedContent, setEditedContent] = useState(task.content)
   const [editedCriteria, setEditedCriteria] = useState(
@@ -56,31 +48,13 @@ export function TaskDetailPane({
     task.frontmatter.modelConfig
   )
   const [isRegeneratingCriteria, setIsRegeneratingCriteria] = useState(false)
-  const [isWide, setIsWide] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const { frontmatter } = task
-
-  // Measure container width to decide split vs tabbed layout
-  useLayoutEffect(() => {
-    const el = containerRef.current
-    if (!el) return
-    const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        setIsWide(entry.contentRect.width >= 800)
-      }
-    })
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [])
 
   // Determine which fields to highlight based on move error
   const missingAcceptanceCriteria =
     moveError?.toLowerCase().includes('acceptance criteria') &&
     frontmatter.acceptanceCriteria.length === 0
-  // Count unread-ish: messages for this task
-  const taskMessageCount = activity.filter(
-    (e) => e.taskId === task.id && e.type === 'chat-message'
-  ).length
 
   // Fetch available post-execution skills
   useEffect(() => {
@@ -90,7 +64,7 @@ export function TaskDetailPane({
       .catch(err => console.error('Failed to load post-execution skills:', err))
   }, [])
 
-  // Reset edit state when task changes and set default tab based on chat content
+  // Reset edit state when task changes
   useEffect(() => {
     setIsEditing(false)
     setEditedTitle(task.frontmatter.title)
@@ -98,18 +72,7 @@ export function TaskDetailPane({
     setEditedCriteria(task.frontmatter.acceptanceCriteria.join('\n'))
     setSelectedSkillIds(task.frontmatter.postExecutionSkills || [])
     setEditedModelConfig(task.frontmatter.modelConfig)
-
-    // Default to chat tab if there are messages, otherwise details tab
-    const hasChatMessages = activity.some(
-      (e) => e.taskId === task.id && e.type === 'chat-message'
-    )
-    setActiveTab(hasChatMessages ? 'chat' : 'details')
   }, [task.id])
-
-  // Switch to details tab when a move error occurs so user sees highlighted fields
-  useEffect(() => {
-    if (moveError) setActiveTab('details')
-  }, [moveError])
 
   const canExecute = frontmatter.phase === 'ready' || frontmatter.phase === 'executing'
   const isExecutingPhase = frontmatter.phase === 'executing'
@@ -282,119 +245,32 @@ export function TaskDetailPane({
         </div>
       )}
 
-      {isWide ? (
-        /* ── Wide: side-by-side Chat | Details ── */
-        <div className="flex flex-1 min-h-0 overflow-hidden">
-          <div className="flex-1 min-w-0 border-r border-slate-200">
-            <TaskChat
-              taskId={task.id}
-              taskPhase={frontmatter.phase}
-              workspaceId={workspaceId}
-              entries={activity}
-              attachments={frontmatter.attachments || []}
-              agentStream={agentStream}
-              onSendMessage={(content, attachmentIds) => onSendMessage(task.id, content, attachmentIds)}
-              onSteer={(content, attachmentIds) => onSteer(task.id, content, attachmentIds)}
-              onFollowUp={(content, attachmentIds) => onFollowUp(task.id, content, attachmentIds)}
-              onStop={handleStop}
-            />
-          </div>
-          <div className="flex-1 min-w-0 overflow-y-auto min-h-0">
-            <DetailsContent
-              task={task}
-              workspaceId={workspaceId}
-              frontmatter={frontmatter}
-              isEditing={isEditing}
-              setIsEditing={setIsEditing}
-              editedTitle={editedTitle}
-              setEditedTitle={setEditedTitle}
-              editedContent={editedContent}
-              setEditedContent={setEditedContent}
-              editedCriteria={editedCriteria}
-              setEditedCriteria={setEditedCriteria}
-              editedModelConfig={editedModelConfig}
-              setEditedModelConfig={setEditedModelConfig}
-              selectedSkillIds={selectedSkillIds}
-              setSelectedSkillIds={setSelectedSkillIds}
-              availableSkills={availableSkills}
-              missingAcceptanceCriteria={missingAcceptanceCriteria}
-              isRegeneratingCriteria={isRegeneratingCriteria}
-              onRegenerateCriteria={handleRegenerateCriteria}
-              onSaveEdit={handleSaveEdit}
-              onDelete={handleDelete}
-            />
-          </div>
-        </div>
-      ) : (
-        /* ── Narrow: tabbed Chat / Details ── */
-        <>
-          <div className="flex border-b border-slate-200 shrink-0">
-            <button
-              onClick={() => setActiveTab('chat')}
-              className={`flex-1 text-center py-2 text-sm font-medium transition-colors relative ${
-                activeTab === 'chat' ? 'text-blue-600' : 'text-slate-500 hover:text-slate-700'
-              }`}
-            >
-              Chat
-              {taskMessageCount > 0 && (
-                <span className={`ml-1.5 text-xs px-1.5 py-0.5 rounded-full ${
-                  activeTab === 'chat' ? 'bg-blue-100 text-blue-600' : 'bg-slate-200 text-slate-500'
-                }`}>{taskMessageCount}</span>
-              )}
-              {activeTab === 'chat' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
-            </button>
-            <button
-              onClick={() => setActiveTab('details')}
-              className={`flex-1 text-center py-2 text-sm font-medium transition-colors relative ${
-                activeTab === 'details' ? 'text-blue-600' : 'text-slate-500 hover:text-slate-700'
-              }`}
-            >
-              Details
-              {activeTab === 'details' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}
-            </button>
-          </div>
-          {activeTab === 'chat' ? (
-            <TaskChat
-              taskId={task.id}
-              taskPhase={frontmatter.phase}
-              workspaceId={workspaceId}
-              entries={activity}
-              attachments={frontmatter.attachments || []}
-              agentStream={agentStream}
-              onSendMessage={(content, attachmentIds) => onSendMessage(task.id, content, attachmentIds)}
-              onSteer={(content, attachmentIds) => onSteer(task.id, content, attachmentIds)}
-              onFollowUp={(content, attachmentIds) => onFollowUp(task.id, content, attachmentIds)}
-              onStop={handleStop}
-            />
-          ) : (
-            <div className="flex-1 overflow-y-auto min-h-0">
-              <DetailsContent
-                task={task}
-                workspaceId={workspaceId}
-                frontmatter={frontmatter}
-                isEditing={isEditing}
-                setIsEditing={setIsEditing}
-                editedTitle={editedTitle}
-                setEditedTitle={setEditedTitle}
-                editedContent={editedContent}
-                setEditedContent={setEditedContent}
-                editedCriteria={editedCriteria}
-                setEditedCriteria={setEditedCriteria}
-                editedModelConfig={editedModelConfig}
-                setEditedModelConfig={setEditedModelConfig}
-                selectedSkillIds={selectedSkillIds}
-                setSelectedSkillIds={setSelectedSkillIds}
-                availableSkills={availableSkills}
-                missingAcceptanceCriteria={missingAcceptanceCriteria}
-                isRegeneratingCriteria={isRegeneratingCriteria}
-                onRegenerateCriteria={handleRegenerateCriteria}
-                onSaveEdit={handleSaveEdit}
-                onDelete={handleDelete}
-              />
-            </div>
-          )}
-        </>
-      )}
+      {/* Details content — chat is now in the left pane */}
+      <div className="flex-1 overflow-y-auto min-h-0">
+        <DetailsContent
+          task={task}
+          workspaceId={workspaceId}
+          frontmatter={frontmatter}
+          isEditing={isEditing}
+          setIsEditing={setIsEditing}
+          editedTitle={editedTitle}
+          setEditedTitle={setEditedTitle}
+          editedContent={editedContent}
+          setEditedContent={setEditedContent}
+          editedCriteria={editedCriteria}
+          setEditedCriteria={setEditedCriteria}
+          editedModelConfig={editedModelConfig}
+          setEditedModelConfig={setEditedModelConfig}
+          selectedSkillIds={selectedSkillIds}
+          setSelectedSkillIds={setSelectedSkillIds}
+          availableSkills={availableSkills}
+          missingAcceptanceCriteria={missingAcceptanceCriteria}
+          isRegeneratingCriteria={isRegeneratingCriteria}
+          onRegenerateCriteria={handleRegenerateCriteria}
+          onSaveEdit={handleSaveEdit}
+          onDelete={handleDelete}
+        />
+      </div>
     </div>
   )
 }

@@ -391,7 +391,9 @@ export type ServerEvent =
   | { type: 'agent:turn_end'; taskId: string }
   | { type: 'agent:execution_status'; taskId: string; status: AgentExecutionStatus }
   | { type: 'task:plan_generated'; taskId: string; plan: TaskPlan }
-  | { type: 'queue:status'; status: QueueStatus };
+  | { type: 'queue:status'; status: QueueStatus }
+  // Planning agent events
+  | PlanningEvent;
 
 export type AgentExecutionStatus = 'idle' | 'streaming' | 'tool_use' | 'thinking' | 'completed' | 'error' | 'post-hooks';
 
@@ -427,6 +429,60 @@ export interface QueueStatus {
   tasksInReady: number;
   tasksInExecuting: number;
 }
+
+// =============================================================================
+// Planning Agent: Draft Tasks & Artifacts (Shelf)
+// =============================================================================
+
+export interface DraftTask {
+  id: string;              // temporary ID (e.g. "draft-abc123")
+  title: string;
+  content: string;         // markdown description
+  acceptanceCriteria: string[];
+  type: 'feature' | 'bug' | 'refactor' | 'research' | 'spike';
+  priority: 'critical' | 'high' | 'medium' | 'low';
+  complexity: 'low' | 'medium' | 'high';
+  createdAt: string;       // ISO 8601
+}
+
+export interface Artifact {
+  id: string;
+  name: string;
+  html: string;            // raw HTML to render in sandboxed iframe
+  createdAt: string;       // ISO 8601
+}
+
+export type ShelfItem =
+  | { type: 'draft-task'; item: DraftTask }
+  | { type: 'artifact'; item: Artifact };
+
+export interface Shelf {
+  items: ShelfItem[];
+}
+
+// Planning agent chat message
+export interface PlanningMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: string;       // ISO 8601
+}
+
+// Planning agent WebSocket events
+export type PlanningEvent =
+  | { type: 'planning:message'; workspaceId: string; message: PlanningMessage }
+  | { type: 'planning:streaming_text'; workspaceId: string; delta: string }
+  | { type: 'planning:streaming_end'; workspaceId: string; fullText: string; messageId: string }
+  | { type: 'planning:tool_start'; workspaceId: string; toolName: string; toolCallId: string }
+  | { type: 'planning:tool_update'; workspaceId: string; toolCallId: string; delta: string }
+  | { type: 'planning:tool_end'; workspaceId: string; toolCallId: string; toolName: string; isError: boolean; result?: string }
+  | { type: 'planning:thinking_delta'; workspaceId: string; delta: string }
+  | { type: 'planning:thinking_end'; workspaceId: string }
+  | { type: 'planning:turn_end'; workspaceId: string }
+  | { type: 'planning:status'; workspaceId: string; status: PlanningAgentStatus }
+  | { type: 'shelf:updated'; workspaceId: string; shelf: Shelf };
+
+export type PlanningAgentStatus = 'idle' | 'streaming' | 'tool_use' | 'thinking' | 'error';
 
 // =============================================================================
 // Utility Types
