@@ -646,14 +646,32 @@ async function handleAgentTurnEnd(
     }
   }
 
-  // Generate post-execution summary before marking complete
+  // Generate post-execution summary — prompt the same agent session
+  // so it can provide a real summary and validate criteria from context
   try {
-    const postSummary = generateAndPersistSummary(task, summary);
+    session.broadcastToWorkspace?.({
+      type: 'agent:execution_status',
+      taskId: task.id,
+      status: 'post-hooks',
+    });
+
+    const summaryStartEntry = createSystemEvent(
+      workspaceId,
+      task.id,
+      'phase-change',
+      'Generating post-execution summary…',
+    );
+    session.broadcastToWorkspace?.({ type: 'activity:entry', entry: summaryStartEntry });
+
+    const postSummary = await generateAndPersistSummary(task, session.piSession, summary);
+
+    const passCount = postSummary.criteriaValidation.filter(c => c.status === 'pass').length;
+    const totalCount = postSummary.criteriaValidation.length;
     const summaryEntry = createSystemEvent(
       workspaceId,
       task.id,
       'phase-change',
-      `Post-execution summary generated (${postSummary.fileDiffs.length} file diffs, ${postSummary.criteriaValidation.length} criteria)`,
+      `Post-execution summary generated (${postSummary.fileDiffs.length} files changed, ${passCount}/${totalCount} criteria passing)`,
     );
     session.broadcastToWorkspace?.({ type: 'activity:entry', entry: summaryEntry });
   } catch (summaryErr) {

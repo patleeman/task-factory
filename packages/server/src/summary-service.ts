@@ -1,7 +1,8 @@
 // =============================================================================
 // Summary Service
 // =============================================================================
-// Generates post-execution summaries with word-level diffs and criteria status.
+// Generates post-execution summaries with word-level diffs and agent-driven
+// summary text + criteria validation.
 
 import { execSync } from 'child_process';
 import type {
@@ -20,6 +21,7 @@ import { saveTaskFile } from './task-service.js';
 
 const MAX_FILES = 50;
 const MAX_LINES_PER_FILE = 500;
+const SUMMARY_PROMPT_TIMEOUT_MS = 90_000; // 90s
 
 // Binary and lock file patterns to exclude from diffs
 const EXCLUDE_PATTERNS = [
@@ -48,12 +50,35 @@ const EXCLUDE_PATTERNS = [
 ];
 
 // =============================================================================
+// Summary Callback Registry
+// =============================================================================
+
+interface SummaryCallbackData {
+  summary: string;
+  criteriaValidation: Array<{
+    criterion: string;
+    status: 'pass' | 'fail' | 'pending';
+    evidence: string;
+  }>;
+}
+
+declare global {
+  var __piFactorySummaryCallbacks: Map<string, (data: SummaryCallbackData) => void> | undefined;
+}
+
+function ensureSummaryCallbackRegistry(): Map<string, (data: SummaryCallbackData) => void> {
+  if (!globalThis.__piFactorySummaryCallbacks) {
+    globalThis.__piFactorySummaryCallbacks = new Map();
+  }
+  return globalThis.__piFactorySummaryCallbacks;
+}
+
+// =============================================================================
 // Word-Level Diff Generation
 // =============================================================================
 
 /**
  * Escape a string for safe inclusion inside single quotes in a shell command.
- * Replaces ' with '\'' (end quote, escaped quote, start quote).
  */
 function shellEscape(s: string): string {
   return s.replace(/'/g, "'\\''");
@@ -67,10 +92,8 @@ export function generateWordDiffs(workspacePath: string): FileDiff[] {
   if (!workspacePath) return [];
 
   try {
-    // Build exclude args
     const excludeArgs = EXCLUDE_PATTERNS.map(p => `':(exclude)${p}'`).join(' ');
 
-    // Get list of changed files (staged + unstaged vs HEAD)
     const filesCmd = `git diff HEAD --name-only --diff-filter=ACDMR -- . ${excludeArgs}`;
     let changedFiles: string[];
     try {
@@ -81,13 +104,11 @@ export function generateWordDiffs(workspacePath: string): FileDiff[] {
       }).trim();
       changedFiles = filesOutput ? filesOutput.split('\n').filter(Boolean) : [];
     } catch {
-      // No git repo or no changes — return empty
       return [];
     }
 
     if (changedFiles.length === 0) return [];
 
-    // Limit number of files
     const filesToDiff = changedFiles.slice(0, MAX_FILES);
     const diffs: FileDiff[] = [];
 
@@ -106,7 +127,6 @@ export function generateWordDiffs(workspacePath: string): FileDiff[] {
           diffs.push({ filePath, hunks });
         }
       } catch {
-        // Skip files that fail to diff (e.g., binary)
         continue;
       }
     }
@@ -120,13 +140,6 @@ export function generateWordDiffs(workspacePath: string): FileDiff[] {
 
 /**
  * Parse `git diff --word-diff=porcelain` output into structured hunks.
- *
- * Porcelain format:
- *   Lines starting with '+' = additions
- *   Lines starting with '-' = deletions
- *   Lines starting with ' ' = context (unchanged)
- *   Lines starting with '~' = newline markers
- *   Lines starting with '@@' = hunk headers
  */
 function parseWordDiffPorcelain(raw: string, maxLines: number): DiffHunk[] {
   const lines = raw.split('\n');
@@ -136,20 +149,13 @@ function parseWordDiffPorcelain(raw: string, maxLines: number): DiffHunk[] {
   for (const line of lines) {
     if (lineCount >= maxLines) break;
 
-    if (line.startsWith('@@')) {
-      // Skip hunk headers
-      continue;
-    }
-
-    if (line.startsWith('diff ') || line.startsWith('index ') ||
-        line.startsWith('---') || line.startsWith('+++') ||
-        line.startsWith('\\')) {
-      // Skip diff metadata lines
+    if (line.startsWith('@@') || line.startsWith('diff ') ||
+        line.startsWith('index ') || line.startsWith('---') ||
+        line.startsWith('+++') || line.startsWith('\\')) {
       continue;
     }
 
     if (line === '~') {
-      // Newline marker — add as context
       hunks.push({ type: 'ctx', content: '\n' });
       lineCount++;
       continue;
@@ -171,50 +177,120 @@ function parseWordDiffPorcelain(raw: string, maxLines: number): DiffHunk[] {
 }
 
 // =============================================================================
-// Summary Generation
+// Agent-Driven Summary Generation
 // =============================================================================
 
 /**
- * Generate a post-execution summary for a completed task.
- * Populates the summary, diffs, and acceptance criteria (set to 'pending').
+ * Build the prompt that asks the agent to summarize and validate criteria.
  */
-export function generatePostExecutionSummary(
+function buildSummaryPrompt(task: Task): string {
+  let prompt = `# Post-Execution Summary\n\n`;
+  prompt += `You just completed task **${task.id}**: "${task.frontmatter.title}"\n\n`;
+  prompt += `Now provide a post-execution summary by calling the \`save_summary\` tool.\n\n`;
+
+  prompt += `## What to include in the summary\n`;
+  prompt += `Write a concise but informative description of what you actually did:\n`;
+  prompt += `- What files were changed and why\n`;
+  prompt += `- Key implementation decisions\n`;
+  prompt += `- Any notable challenges or trade-offs\n`;
+  prompt += `- Keep it to 2-4 sentences\n\n`;
+
+  if (task.frontmatter.acceptanceCriteria.length > 0) {
+    prompt += `## Acceptance Criteria to Validate\n`;
+    prompt += `For each criterion, set status to "pass", "fail", or "pending" with specific evidence:\n\n`;
+    task.frontmatter.acceptanceCriteria.forEach((c, i) => {
+      prompt += `${i + 1}. ${c}\n`;
+    });
+    prompt += `\nCopy each criterion text exactly, then provide your assessment.\n\n`;
+  }
+
+  prompt += `Call \`save_summary\` with taskId "${task.id}" now.\n`;
+
+  return prompt;
+}
+
+/**
+ * Prompt the agent session to generate a summary and validate criteria.
+ * Returns the agent-provided data, or null if the agent didn't respond.
+ */
+export async function promptAgentForSummary(
+  piSession: { prompt: (content: string) => Promise<void> },
   task: Task,
-  completionSummary?: string,
-): PostExecutionSummary {
+): Promise<SummaryCallbackData | null> {
+  const registry = ensureSummaryCallbackRegistry();
+  let savedData: SummaryCallbackData | null = null;
+
+  registry.set(task.id, (data) => {
+    savedData = data;
+  });
+
+  try {
+    const prompt = buildSummaryPrompt(task);
+
+    const timeoutPromise = new Promise<void>((_, reject) => {
+      setTimeout(() => reject(new Error('Summary prompt timed out')), SUMMARY_PROMPT_TIMEOUT_MS);
+    });
+
+    await Promise.race([
+      piSession.prompt(prompt),
+      timeoutPromise,
+    ]);
+  } catch (err) {
+    console.error('[SummaryService] Agent summary prompt failed:', err);
+  } finally {
+    registry.delete(task.id);
+  }
+
+  return savedData;
+}
+
+// =============================================================================
+// Summary Assembly & Persistence
+// =============================================================================
+
+/**
+ * Generate and persist a post-execution summary using the agent session.
+ * Combines mechanical git diffs with agent-provided summary + criteria validation.
+ */
+export async function generateAndPersistSummary(
+  task: Task,
+  piSession: { prompt: (content: string) => Promise<void> } | null,
+  fallbackSummary?: string,
+): Promise<PostExecutionSummary> {
   const now = new Date().toISOString();
 
-  // Generate word-level diffs from git
+  // Generate word-level diffs mechanically
   const fileDiffs = generateWordDiffs(task.frontmatter.workspace);
 
-  // Build criteria validation entries (all 'pending' initially)
-  const criteriaValidation: CriterionValidation[] =
-    task.frontmatter.acceptanceCriteria.map((criterion) => ({
+  // Try to get agent-driven summary + criteria validation
+  let agentData: SummaryCallbackData | null = null;
+  if (piSession) {
+    agentData = await promptAgentForSummary(piSession, task);
+  }
+
+  // Build criteria validation — agent data or fallback to 'pending'
+  let criteriaValidation: CriterionValidation[];
+  if (agentData?.criteriaValidation && agentData.criteriaValidation.length > 0) {
+    criteriaValidation = agentData.criteriaValidation.map((cv) => ({
+      criterion: cv.criterion,
+      status: cv.status as CriterionStatus,
+      evidence: cv.evidence || '',
+    }));
+  } else {
+    criteriaValidation = task.frontmatter.acceptanceCriteria.map((criterion) => ({
       criterion,
       status: 'pending' as CriterionStatus,
       evidence: '',
     }));
+  }
 
   const summary: PostExecutionSummary = {
-    summary: completionSummary || `Task ${task.id} completed.`,
+    summary: agentData?.summary || fallbackSummary || `Task ${task.id} completed.`,
     completedAt: now,
     fileDiffs,
     criteriaValidation,
     artifacts: [],
   };
-
-  return summary;
-}
-
-/**
- * Generate and persist a post-execution summary on a task.
- * Returns the generated summary.
- */
-export function generateAndPersistSummary(
-  task: Task,
-  completionSummary?: string,
-): PostExecutionSummary {
-  const summary = generatePostExecutionSummary(task, completionSummary);
 
   task.frontmatter.postExecutionSummary = summary;
   task.frontmatter.updated = new Date().toISOString();

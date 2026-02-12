@@ -1184,7 +1184,7 @@ app.patch('/api/workspaces/:workspaceId/tasks/:taskId/summary/criteria/:index', 
 });
 
 // Generate (or regenerate) post-execution summary
-app.post('/api/workspaces/:workspaceId/tasks/:taskId/summary/generate', (req, res) => {
+app.post('/api/workspaces/:workspaceId/tasks/:taskId/summary/generate', async (req, res) => {
   const workspace = getWorkspaceById(req.params.workspaceId);
   if (!workspace) {
     res.status(404).json({ error: 'Workspace not found' });
@@ -1201,7 +1201,52 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/summary/generate', (req, re
   }
 
   try {
-    const summary = generateAndPersistSummary(task);
+    // Try to resume the agent session for a real summary
+    let piSession: { prompt: (content: string) => Promise<void> } | null = null;
+
+    if (task.frontmatter.sessionFile) {
+      try {
+        const {
+          createAgentSession,
+          AuthStorage,
+          DefaultResourceLoader,
+          ModelRegistry,
+          SessionManager,
+        } = await import('@mariozechner/pi-coding-agent');
+
+        const authStorage = new AuthStorage();
+        const modelRegistry = new ModelRegistry(authStorage);
+        const loader = new DefaultResourceLoader({
+          cwd: workspace.path,
+          additionalExtensionPaths: getRepoExtensionPaths(),
+        });
+        await loader.reload();
+
+        const sessionManager = SessionManager.open(task.frontmatter.sessionFile);
+
+        const sessionOpts: any = {
+          cwd: workspace.path,
+          authStorage,
+          modelRegistry,
+          sessionManager,
+          resourceLoader: loader,
+        };
+
+        const mc = task.frontmatter.modelConfig;
+        if (mc) {
+          const resolved = modelRegistry.find(mc.provider, mc.modelId);
+          if (resolved) sessionOpts.model = resolved;
+          if (mc.thinkingLevel) sessionOpts.thinkingLevel = mc.thinkingLevel;
+        }
+
+        const { session: resumed } = await createAgentSession(sessionOpts);
+        piSession = resumed;
+      } catch (err) {
+        console.error('[SummaryGenerate] Failed to resume session, falling back:', err);
+      }
+    }
+
+    const summary = await generateAndPersistSummary(task, piSession);
 
     broadcastToWorkspace(workspace.id, {
       type: 'task:updated',
