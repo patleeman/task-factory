@@ -445,30 +445,7 @@ function PipelineCard({
             {advanceAction.label}
           </button>
         )}
-        {isComplete && (
-          <div className="flex gap-0.5">
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                onMoveTask(task, 'archived')
-              }}
-              className="text-[10px] px-1.5 py-0.5 rounded hover:bg-white/60 text-slate-400 transition-colors font-medium"
-              title="Archive"
-            >
-              Archive
-            </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                onMoveTask(task, 'ready')
-              }}
-              className="text-[11px] px-1.5 py-0.5 rounded hover:bg-white/60 text-amber-500 transition-colors"
-              title="Send back for rework"
-            >
-              ↩
-            </button>
-          </div>
-        )}
+
       </div>
     </div>
   )
