@@ -149,9 +149,9 @@ export interface TaskFrontmatter {
 // =============================================================================
 
 export interface TaskPlan {
-  goal: string;          // What the agent is trying to achieve
-  steps: string[];       // What it needs to do to achieve that goal
-  validation: string[];  // How to validate the goal has been achieved
+  goal: string;          // High-level summary of what the agent is trying to achieve
+  steps: string[];       // High-level, outcome-focused steps (not line-level implementation details)
+  validation: string[];  // High-level checks for verifying the outcome
   cleanup: string[];     // Post-completion cleanup actions
   generatedAt: string;   // ISO 8601 timestamp
 }

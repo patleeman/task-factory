@@ -34,9 +34,9 @@ export async function generatePlan(
 {"goal":"...","steps":["..."],"validation":["..."],"cleanup":["..."]}
 
 Rules:
-- goal: A single sentence describing the objective
-- steps: 3-8 concrete implementation steps
-- validation: 2-5 ways to verify the work is correct
+- goal: A single concise sentence describing the objective
+- steps: 3-6 high-level implementation summaries (avoid file-by-file detail)
+- validation: 2-5 high-level checks to verify the work is correct
 - cleanup: 0-3 post-completion cleanup items (empty array if none)
 
 Task Description:

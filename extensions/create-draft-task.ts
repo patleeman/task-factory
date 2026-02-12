@@ -34,11 +34,25 @@ export default function (pi: ExtensionAPI) {
         minItems: 1,
       }),
       plan: Type.Object({
-        goal: Type.String({ description: 'What the agent is trying to achieve' }),
-        steps: Type.Array(Type.String(), { description: 'Concrete implementation steps' }),
-        validation: Type.Array(Type.String(), { description: 'How to verify the goal was achieved' }),
-        cleanup: Type.Array(Type.String(), { description: 'Post-completion cleanup actions (empty array if none)' }),
-      }, { description: 'Execution plan — tasks with a plan skip the planning phase and go straight to ready' }),
+        goal: Type.String({
+          description: 'Concise summary of what the task is trying to achieve',
+          maxLength: 220,
+        }),
+        steps: Type.Array(Type.String({ maxLength: 180 }), {
+          description: 'High-level implementation summaries (short, outcome-focused steps)',
+          minItems: 1,
+          maxItems: 6,
+        }),
+        validation: Type.Array(Type.String({ maxLength: 180 }), {
+          description: 'High-level checks to verify the goal was achieved',
+          minItems: 1,
+          maxItems: 5,
+        }),
+        cleanup: Type.Array(Type.String({ maxLength: 180 }), {
+          description: 'Post-completion cleanup actions (empty array if none)',
+          maxItems: 3,
+        }),
+      }, { description: 'Execution plan summary — tasks with a plan skip the planning phase and go straight to ready' }),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
       const { title, content, acceptance_criteria, plan } = params;

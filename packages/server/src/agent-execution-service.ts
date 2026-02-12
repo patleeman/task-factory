@@ -1401,18 +1401,22 @@ export async function stopTaskExecution(taskId: string): Promise<boolean> {
 // =============================================================================
 // Planning Agent
 // =============================================================================
-// The planning agent researches the codebase and generates a structured plan.
+// The planning agent researches the codebase, generates acceptance criteria, and produces a structured plan.
 // Plans are auto-generated at task creation time using planTask() below.
 // This agent is kept for manual/on-demand planning scenarios.
 
 const PLANNING_TIMEOUT_MS = 3 * 60 * 1000;
 const PLANNING_DEFAULT_THINKING_LEVEL = 'low' as const;
 
-function buildPlanningPrompt(task: Task, attachmentSection: string): string {
+export function buildPlanningPrompt(
+  task: Task,
+  attachmentSection: string,
+  workspaceSharedContext: string | null,
+): string {
   const { frontmatter, content } = task;
 
   let prompt = `# Planning Task: ${frontmatter.title}\n\n`;
-  prompt += `You are a planning agent. Your job is to research the codebase, understand the task, and produce a structured plan.\n\n`;
+  prompt += `You are a planning agent. Your job is to research the codebase, generate strong acceptance criteria, and then produce a structured plan that is easy for humans to scan quickly.\n\n`;
   prompt += `**Task ID:** ${task.id}\n\n`;
 
   if (frontmatter.acceptanceCriteria.length > 0) {
@@ -1427,18 +1431,25 @@ function buildPlanningPrompt(task: Task, attachmentSection: string): string {
     prompt += `## Task Description\n${content}\n\n`;
   }
 
+  const sharedContextSection = buildWorkspaceSharedContextSection(workspaceSharedContext);
+  if (sharedContextSection) {
+    prompt += sharedContextSection;
+  }
+
   // Add attachments section (images are sent separately as ImageContent)
   if (attachmentSection) {
     prompt += attachmentSection;
   }
 
   prompt += `## Instructions\n\n`;
-  prompt += `1. Research the codebase to understand the current state. Read relevant files, understand the architecture, and figure out what needs to happen to complete this task.\n`;
-  prompt += `2. Be thorough — read files, understand dependencies, trace call sites.\n`;
-  prompt += `3. When you have a clear picture, call the \`save_plan\` tool **exactly once** with your plan. Pass taskId "${task.id}".\n`;
-  prompt += `4. Each step should be concrete enough that an agent can execute it without ambiguity.\n`;
-  prompt += `5. Validation items should describe how to confirm each step and the overall goal succeeded.\n`;
-  prompt += `6. Cleanup items are post-completion tasks (pass an empty array if none needed).\n`;
+  prompt += `1. Research the codebase to understand the current state. Read relevant files, understand architecture, and trace call sites.\n`;
+  prompt += `2. From your investigation, produce 3-7 specific, testable acceptance criteria for this task.\n`;
+  prompt += `3. Then produce a plan that directly satisfies those acceptance criteria.\n`;
+  prompt += `4. The plan is a high-level task summary for humans. Keep it concise and easy to parse.\n`;
+  prompt += `5. Steps should be short outcome-focused summaries (usually 3-6 steps). Avoid line-level implementation details, exact file paths, and low-level function-by-function instructions.\n`;
+  prompt += `6. Validation items must verify the acceptance criteria and overall outcome without turning into a detailed test script.\n`;
+  prompt += `7. Call the \`save_plan\` tool **exactly once** with taskId "${task.id}", acceptanceCriteria, goal, steps, validation, and cleanup.\n`;
+  prompt += `8. Cleanup items are post-completion tasks (pass an empty array if none needed).\n`;
 
   return prompt;
 }
@@ -1450,7 +1461,12 @@ function buildPlanningPrompt(task: Task, attachmentSection: string): string {
 // We register a per-task callback before starting the planning session,
 // and the extension looks it up by taskId.
 
-function ensurePlanCallbackRegistry(): Map<string, (plan: TaskPlan) => void> {
+interface SavedPlanningData {
+  acceptanceCriteria: string[];
+  plan: TaskPlan;
+}
+
+function ensurePlanCallbackRegistry(): Map<string, (data: SavedPlanningData) => void> {
   if (!globalThis.__piFactoryPlanCallbacks) {
     globalThis.__piFactoryPlanCallbacks = new Map();
   }
@@ -1458,7 +1474,7 @@ function ensurePlanCallbackRegistry(): Map<string, (plan: TaskPlan) => void> {
 }
 
 declare global {
-  var __piFactoryPlanCallbacks: Map<string, (plan: TaskPlan) => void> | undefined;
+  var __piFactoryPlanCallbacks: Map<string, (data: SavedPlanningData) => void> | undefined;
   var __piFactoryCompleteCallbacks: Map<string, (summary: string) => void> | undefined;
 }
 
@@ -1545,10 +1561,10 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
   let savedPlan: TaskPlan | null = null;
 
   try {
-    // Register callback so the save_plan extension tool can persist the plan
-    registry.set(task.id, (plan: TaskPlan) => {
+    // Register callback so the save_plan extension tool can persist criteria + plan
+    registry.set(task.id, ({ acceptanceCriteria, plan }: SavedPlanningData) => {
       savedPlan = plan;
-      finalizePlan(task, plan, workspaceId, broadcastToWorkspace);
+      finalizePlan(task, acceptanceCriteria, plan, workspaceId, broadcastToWorkspace);
     });
 
     // Initialize Pi SDK
@@ -1610,7 +1626,8 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
     );
 
     // Send the planning prompt
-    const prompt = buildPlanningPrompt(task, planAttachmentSection);
+    const workspaceSharedContext = loadWorkspaceSharedContext(workspacePath);
+    const prompt = buildPlanningPrompt(task, planAttachmentSection, workspaceSharedContext);
     const planPromptOpts = planImages.length > 0 ? { images: planImages } : undefined;
     await withTimeout(
       piSession.prompt(prompt, planPromptOpts),
@@ -1707,15 +1724,20 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
 }
 
 /**
- * Save a generated plan to the task and broadcast updates.
- * Also regenerates acceptance criteria using the plan context.
+ * Save acceptance criteria + a generated plan to the task and broadcast updates.
  */
 function finalizePlan(
   task: Task,
+  acceptanceCriteria: string[],
   plan: TaskPlan,
   workspaceId: string,
   broadcastToWorkspace?: (event: any) => void,
 ): void {
+  const normalizedCriteria = acceptanceCriteria
+    .map((criterion) => criterion.trim())
+    .filter(Boolean);
+
+  task.frontmatter.acceptanceCriteria = normalizedCriteria;
   task.frontmatter.plan = plan;
   task.frontmatter.planningStatus = 'completed';
   task.frontmatter.updated = new Date().toISOString();
@@ -1725,7 +1747,7 @@ function finalizePlan(
     workspaceId,
     task.id,
     'phase-change',
-    'Plan generated successfully'
+    `Planning complete: ${normalizedCriteria.length} acceptance criteria and plan generated successfully`,
   );
   broadcastToWorkspace?.({ type: 'activity:entry', entry });
 
@@ -1738,16 +1760,13 @@ function finalizePlan(
   broadcastToWorkspace?.({
     type: 'task:updated',
     task,
-    changes: { plan },
+    changes: { acceptanceCriteria: normalizedCriteria, plan },
   });
-
-  // Auto-regenerate acceptance criteria now that we have a plan
-  regenerateAcceptanceCriteriaForTask(task, workspaceId, broadcastToWorkspace);
 }
 
 /**
  * Regenerate acceptance criteria for a task using its description and plan.
- * Called automatically after planning, or manually via the API.
+ * Called manually via the API.
  */
 export async function regenerateAcceptanceCriteriaForTask(
   task: Task,
@@ -1823,24 +1842,19 @@ function simulatePlanningAgent(
       if (stepIndex >= steps.length) {
         clearInterval(interval);
 
-        // Generate a plan from task metadata
+        // Generate acceptance criteria + plan from task metadata
+        const acceptanceCriteria = frontmatter.acceptanceCriteria.length > 0
+          ? frontmatter.acceptanceCriteria
+          : [
+              'Implementation matches the task description and expected behavior.',
+              'Relevant tests are added or updated and pass.',
+              'No regressions are introduced in existing behavior.',
+            ];
+
         const plan: TaskPlan = {
           goal: frontmatter.title + (content ? ` — ${content.slice(0, 200)}` : ''),
-          steps: frontmatter.acceptanceCriteria.length > 0
-            ? frontmatter.acceptanceCriteria.map((c, i) => `Step ${i + 1}: Implement "${c}"`)
-            : [
-                'Understand the current codebase structure',
-                'Implement the required changes',
-                'Write tests for the new functionality',
-                'Verify all tests pass',
-              ],
-          validation: frontmatter.acceptanceCriteria.length > 0
-            ? frontmatter.acceptanceCriteria.map(c => `Verify: ${c}`)
-            : [
-                'All new tests pass',
-                'No existing tests broken',
-                'Code lints cleanly',
-              ],
+          steps: acceptanceCriteria.map((c, i) => `Step ${i + 1}: Implement "${c}"`),
+          validation: acceptanceCriteria.map(c => `Verify: ${c}`),
           cleanup: [
             'Remove any temporary debug code',
             'Update documentation if needed',
@@ -1863,7 +1877,7 @@ function simulatePlanningAgent(
         );
         broadcastToWorkspace?.({ type: 'activity:entry', entry: agentMsg });
 
-        finalizePlan(task, plan, workspaceId, broadcastToWorkspace);
+        finalizePlan(task, acceptanceCriteria, plan, workspaceId, broadcastToWorkspace);
 
         broadcastToWorkspace?.({
           type: 'agent:execution_status',

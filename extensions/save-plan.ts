@@ -2,7 +2,8 @@
  * Save Plan Extension
  *
  * Registers a `save_plan` tool that the planning agent calls to persist
- * a structured task plan. The tool receives typed arguments (goal, steps,
+ * acceptance criteria and a structured task plan.
+ * The tool receives typed arguments (acceptance criteria, goal, steps,
  * validation, cleanup) — no JSON parsing or regex extraction needed.
  *
  * Communication with the server: the agent-execution-service registers a
@@ -12,9 +13,20 @@
 import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
 
+interface SavedPlanningData {
+  acceptanceCriteria: string[];
+  plan: {
+    goal: string;
+    steps: string[];
+    validation: string[];
+    cleanup: string[];
+    generatedAt: string;
+  };
+}
+
 // Shared callback registry (set by agent-execution-service.ts)
 declare global {
-  var __piFactoryPlanCallbacks: Map<string, (plan: any) => void> | undefined;
+  var __piFactoryPlanCallbacks: Map<string, (data: SavedPlanningData) => void> | undefined;
 }
 
 export default function (pi: ExtensionAPI) {
@@ -22,26 +34,36 @@ export default function (pi: ExtensionAPI) {
     name: 'save_plan',
     label: 'Save Plan',
     description:
-      'Save a structured task plan. Call this exactly once after you have finished ' +
-      'researching the codebase and are ready to commit your plan. ' +
-      'Every field is required.',
+      'Save investigated acceptance criteria and a structured task plan. ' +
+      'Call this exactly once after investigation is complete and criteria are finalized. ' +
+      'Plans are user-facing summaries, not file-by-file implementation checklists.',
     parameters: Type.Object({
       taskId: Type.String({ description: 'The task ID this plan is for (e.g. "PIFA-3")' }),
-      goal: Type.String({ description: 'Clear description of what the task achieves' }),
-      steps: Type.Array(Type.String(), {
-        description: 'Ordered implementation steps — concrete and actionable',
+      acceptanceCriteria: Type.Array(Type.String(), {
+        description: 'Specific, testable acceptance criteria derived from investigation',
         minItems: 1,
       }),
-      validation: Type.Array(Type.String(), {
-        description: 'How to verify each step and the overall goal succeeded',
-        minItems: 1,
+      goal: Type.String({
+        description: 'Concise single-sentence summary of what the task achieves',
+        maxLength: 220,
       }),
-      cleanup: Type.Array(Type.String(), {
+      steps: Type.Array(Type.String({ maxLength: 180 }), {
+        description: 'High-level implementation summaries (short, outcome-focused steps)',
+        minItems: 1,
+        maxItems: 6,
+      }),
+      validation: Type.Array(Type.String({ maxLength: 180 }), {
+        description: 'High-level checks that verify acceptance criteria and overall outcome',
+        minItems: 1,
+        maxItems: 5,
+      }),
+      cleanup: Type.Array(Type.String({ maxLength: 180 }), {
         description: 'Post-completion cleanup actions (can be empty)',
+        maxItems: 3,
       }),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      const { taskId, goal, steps, validation, cleanup } = params;
+      const { taskId, acceptanceCriteria, goal, steps, validation, cleanup } = params;
 
       const callbacks = globalThis.__piFactoryPlanCallbacks;
       const cb = callbacks?.get(taskId);
@@ -51,12 +73,16 @@ export default function (pi: ExtensionAPI) {
           content: [
             {
               type: 'text' as const,
-              text: `Note: save_plan is only available during the planning phase. The plan was not persisted, but your work is captured in the conversation. Continue with your current task.`,
+              text: `Note: save_plan is only available during the planning phase. The criteria/plan package was not persisted, but your work is captured in the conversation. Continue with your current task.`,
             },
           ],
           details: {} as Record<string, unknown>,
         };
       }
+
+      const normalizedAcceptanceCriteria = acceptanceCriteria
+        .map((criterion: string) => criterion.trim())
+        .filter(Boolean);
 
       const plan = {
         goal,
@@ -66,13 +92,16 @@ export default function (pi: ExtensionAPI) {
         generatedAt: new Date().toISOString(),
       };
 
-      cb(plan);
+      cb({
+        acceptanceCriteria: normalizedAcceptanceCriteria,
+        plan,
+      });
 
       return {
         content: [
           {
             type: 'text' as const,
-            text: `Plan saved for task ${taskId}.\n\nGoal: ${goal}\nSteps: ${steps.length}\nValidation checks: ${validation.length}\nCleanup items: ${cleanup.length}`,
+            text: `Planning package saved for task ${taskId}.\n\nAcceptance criteria: ${normalizedAcceptanceCriteria.length}\nGoal: ${goal}\nSteps: ${steps.length}\nValidation checks: ${validation.length}\nCleanup items: ${cleanup.length}`,
           },
         ],
         details: {} as Record<string, unknown>,

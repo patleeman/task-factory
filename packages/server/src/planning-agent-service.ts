@@ -506,7 +506,7 @@ async function getOrCreateSession(
 // System prompt for the planning agent
 // =============================================================================
 
-function buildPlanningSystemPrompt(workspacePath: string, workspaceId: string): string {
+export function buildPlanningSystemPrompt(workspacePath: string, workspaceId: string): string {
   // Get current tasks for context
   const workspace = getWorkspaceById(workspaceId);
   let taskSummary = '';
@@ -610,9 +610,9 @@ Parameters:
 - content (string): Markdown description of what needs to be done
 - acceptance_criteria (string[]): List of specific, testable criteria
 - plan (object): Execution plan for the task. **Always include a plan.** Tasks with plans skip the planning phase and go straight to ready for execution.
-  - goal (string): What the agent is trying to achieve
-  - steps (string[]): Concrete implementation steps — specific enough that an agent can execute without ambiguity
-  - validation (string[]): How to verify the goal was achieved
+  - goal (string): Concise summary of what the task achieves
+  - steps (string[]): High-level implementation summaries (usually 3-6 short steps)
+  - validation (string[]): High-level checks that confirm the outcome
   - cleanup (string[]): Post-completion cleanup actions (empty array if none)
 
 ### manage_shelf
@@ -630,10 +630,10 @@ Parameters:
 ## Guidelines
 - **If the user's request is ambiguous, use \`ask_questions\` first** to disambiguate before creating tasks. Present concrete multiple-choice options so the user can quickly clarify intent.
 - When the user describes work, **always create draft tasks immediately** — don't ask for permission, just do it
-- **Always include a plan** with every draft task. Research the codebase first, then create tasks with concrete implementation steps. This lets tasks skip the planning phase entirely.
+- **Always include a plan** with every draft task. Research first, then provide a high-level summary plan so users can understand the approach quickly.
 - Keep tasks small and focused — each should be completable in a single agent session
 - Write clear acceptance criteria that are specific and testable
-- Plan steps should be concrete: reference specific files, functions, and components
+- Plan steps should be concise and outcome-focused. Avoid line-level implementation details, exact file paths, and low-level function-by-function instructions.
 - When in doubt, ask the user for clarification using \`ask_questions\`
 - Be conversational and helpful — you're a collaborator, not just a task creator`;
 }
