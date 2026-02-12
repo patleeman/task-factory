@@ -660,6 +660,7 @@ function PostExecutionSummarySection({ task, workspaceId }: { task: Task; worksp
   if (summary) {
     return (
       <PostExecutionSummary
+        key={task.id}
         summary={summary}
         workspaceId={workspaceId}
         taskId={task.id}
@@ -670,6 +671,7 @@ function PostExecutionSummarySection({ task, workspaceId }: { task: Task; worksp
 
   return (
     <GenerateSummaryButton
+      key={task.id}
       workspaceId={workspaceId}
       taskId={task.id}
       onGenerated={setSummary}

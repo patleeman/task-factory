@@ -52,10 +52,20 @@ const EXCLUDE_PATTERNS = [
 // =============================================================================
 
 /**
+ * Escape a string for safe inclusion inside single quotes in a shell command.
+ * Replaces ' with '\'' (end quote, escaped quote, start quote).
+ */
+function shellEscape(s: string): string {
+  return s.replace(/'/g, "'\\''");
+}
+
+/**
  * Generate word-level diffs for all changed files in the workspace.
  * Uses `git --word-diff=porcelain` and limits output.
  */
 export function generateWordDiffs(workspacePath: string): FileDiff[] {
+  if (!workspacePath) return [];
+
   try {
     // Build exclude args
     const excludeArgs = EXCLUDE_PATTERNS.map(p => `':(exclude)${p}'`).join(' ');
@@ -83,7 +93,8 @@ export function generateWordDiffs(workspacePath: string): FileDiff[] {
 
     for (const filePath of filesToDiff) {
       try {
-        const diffCmd = `git diff HEAD --word-diff=porcelain -- '${filePath}'`;
+        const safeFilePath = shellEscape(filePath);
+        const diffCmd = `git diff HEAD --word-diff=porcelain -- '${safeFilePath}'`;
         const rawDiff = execSync(diffCmd, {
           cwd: workspacePath,
           encoding: 'utf-8',
