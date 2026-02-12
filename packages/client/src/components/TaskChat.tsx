@@ -5,6 +5,8 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { api } from '../api'
 
+const REMARK_PLUGINS = [remarkGfm]
+
 type SendMode = 'message' | 'steer' | 'followUp'
 
 interface TaskChatProps {
@@ -344,7 +346,7 @@ const CollapsibleAgentMessage = memo(function CollapsibleAgentMessage({
 }) {
   return (
     <div className="chat-prose text-slate-700">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+      <ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{content}</ReactMarkdown>
     </div>
   )
 })
@@ -675,7 +677,7 @@ export function TaskChat({
           {isAgentActive && agentStream.streamingText && (
             <div>
               <div className="chat-prose text-slate-700">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{agentStream.streamingText}</ReactMarkdown>
+                <ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{agentStream.streamingText}</ReactMarkdown>
               </div>
               <span className="inline-block w-[2px] h-[14px] bg-slate-400 animate-pulse align-middle ml-0.5" />
             </div>

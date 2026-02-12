@@ -10,6 +10,8 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { api } from '../api'
 
+const REMARK_PLUGINS = [remarkGfm]
+
 interface TaskDetailPaneProps {
   task: Task
   workspaceId: string
@@ -312,7 +314,7 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
           </div>
           <div>
             <h4 className="text-xs font-semibold text-slate-600 mb-1">Goal</h4>
-            <div className="prose prose-slate prose-sm max-w-none text-slate-800"><ReactMarkdown remarkPlugins={[remarkGfm]}>{frontmatter.plan.goal}</ReactMarkdown></div>
+            <div className="prose prose-slate prose-sm max-w-none text-slate-800"><ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{frontmatter.plan.goal}</ReactMarkdown></div>
           </div>
           {frontmatter.plan.steps.length > 0 && (
             <div>
@@ -321,7 +323,7 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
                 {frontmatter.plan.steps.map((step: string, i: number) => (
                   <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
                     <span className="text-blue-600 font-semibold shrink-0 min-w-[1.5rem] text-right">{i + 1}.</span>
-                    <div className="prose prose-slate prose-sm max-w-none min-w-0 [&>p]:m-0"><ReactMarkdown remarkPlugins={[remarkGfm]}>{step}</ReactMarkdown></div>
+                    <div className="prose prose-slate prose-sm max-w-none min-w-0 [&>p]:m-0"><ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{step}</ReactMarkdown></div>
                   </li>
                 ))}
               </ol>
@@ -332,7 +334,7 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
               <h4 className="text-xs font-semibold text-slate-600 mb-1">Validation</h4>
               <ul className="space-y-1.5">
                 {frontmatter.plan.validation.map((item: string, i: number) => (
-                  <li key={i} className="flex items-start gap-2 text-sm text-slate-700"><span className="text-green-500 shrink-0 mt-0.5">✓</span><div className="prose prose-slate prose-sm max-w-none min-w-0 [&>p]:m-0"><ReactMarkdown remarkPlugins={[remarkGfm]}>{item}</ReactMarkdown></div></li>
+                  <li key={i} className="flex items-start gap-2 text-sm text-slate-700"><span className="text-green-500 shrink-0 mt-0.5">✓</span><div className="prose prose-slate prose-sm max-w-none min-w-0 [&>p]:m-0"><ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{item}</ReactMarkdown></div></li>
                 ))}
               </ul>
             </div>
@@ -342,7 +344,7 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
               <h4 className="text-xs font-semibold text-slate-600 mb-1">Cleanup</h4>
               <ul className="space-y-1.5">
                 {frontmatter.plan.cleanup.map((item: string, i: number) => (
-                  <li key={i} className="flex items-start gap-2 text-sm text-slate-700"><span className="text-slate-400 shrink-0 mt-0.5 text-xs">—</span><div className="prose prose-slate prose-sm max-w-none min-w-0 [&>p]:m-0"><ReactMarkdown remarkPlugins={[remarkGfm]}>{item}</ReactMarkdown></div></li>
+                  <li key={i} className="flex items-start gap-2 text-sm text-slate-700"><span className="text-slate-400 shrink-0 mt-0.5 text-xs">—</span><div className="prose prose-slate prose-sm max-w-none min-w-0 [&>p]:m-0"><ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{item}</ReactMarkdown></div></li>
                 ))}
               </ul>
             </div>
@@ -356,7 +358,7 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
         {isEditing ? (
           <MarkdownEditor value={editedContent} onChange={setEditedContent} placeholder="Task description in markdown..." minHeight="400px" />
         ) : task.content ? (
-          <div className="prose prose-slate prose-sm max-w-none"><ReactMarkdown remarkPlugins={[remarkGfm]}>{task.content}</ReactMarkdown></div>
+          <div className="prose prose-slate prose-sm max-w-none"><ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{task.content}</ReactMarkdown></div>
         ) : (
           <p className="text-sm text-slate-400 italic">No description</p>
         )}
@@ -376,7 +378,7 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
             {frontmatter.acceptanceCriteria.map((criteria: string, i: number) => (
               <li key={i} className="flex items-start gap-2 text-sm">
                 <span className="w-5 h-5 rounded border border-slate-300 flex items-center justify-center text-[10px] text-slate-400 shrink-0 mt-0.5">{i + 1}</span>
-                <div className="prose prose-slate prose-sm max-w-none min-w-0 text-slate-700 [&>p]:m-0"><ReactMarkdown remarkPlugins={[remarkGfm]}>{criteria}</ReactMarkdown></div>
+                <div className="prose prose-slate prose-sm max-w-none min-w-0 text-slate-700 [&>p]:m-0"><ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{criteria}</ReactMarkdown></div>
               </li>
             ))}
           </ul>
