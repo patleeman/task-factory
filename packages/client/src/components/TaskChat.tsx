@@ -721,6 +721,7 @@ export function TaskChat({
           />
           <textarea
             ref={textareaRef}
+            data-chat-input
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}

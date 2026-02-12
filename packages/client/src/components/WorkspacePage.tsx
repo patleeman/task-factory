@@ -11,6 +11,7 @@ import { ResizeHandle } from './ResizeHandle'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { useAgentStreaming } from '../hooks/useAgentStreaming'
 import { usePlanningStreaming } from '../hooks/usePlanningStreaming'
+import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts'
 import { TaskChat } from './TaskChat'
 
 const LEFT_PANE_MIN = 320
@@ -412,6 +413,24 @@ export function WorkspacePage() {
     setLeftPaneWidth((prev) => Math.min(LEFT_PANE_MAX, Math.max(LEFT_PANE_MIN, prev - delta)))
   }, [])
 
+  // Keyboard shortcuts
+  useKeyboardShortcuts({
+    onEscape: useCallback(() => {
+      // Deselect task → return to planning mode
+      if (selectedTask) {
+        setMainPane({ type: 'empty' })
+      }
+    }, [selectedTask]),
+    onNewTask: useCallback(() => {
+      setMainPane({ type: 'create-task' })
+    }, []),
+    onFocusChat: useCallback(() => {
+      // Focus the chat input in the left pane
+      const textarea = document.querySelector('[data-chat-input]') as HTMLTextAreaElement | null
+      textarea?.focus()
+    }, []),
+  })
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-screen bg-slate-50">
@@ -454,6 +473,19 @@ export function WorkspacePage() {
           </button>
           <div className="h-6 w-px bg-slate-700" />
           <span className="text-sm font-medium text-slate-300">{workspaceName}</span>
+          {nonArchivedTasks.length > 0 && (
+            <span className="text-xs text-slate-500 font-mono">
+              {nonArchivedTasks.filter(t => t.frontmatter.phase === 'executing').length > 0 && (
+                <span className="text-orange-400">{nonArchivedTasks.filter(t => t.frontmatter.phase === 'executing').length} running</span>
+              )}
+              {nonArchivedTasks.filter(t => t.frontmatter.phase === 'ready').length > 0 && (
+                <span className="text-blue-400 ml-2">{nonArchivedTasks.filter(t => t.frontmatter.phase === 'ready').length} ready</span>
+              )}
+              {nonArchivedTasks.filter(t => t.frontmatter.phase === 'complete').length > 0 && (
+                <span className="text-emerald-400 ml-2">{nonArchivedTasks.filter(t => t.frontmatter.phase === 'complete').length} done</span>
+              )}
+            </span>
+          )}
           <div className="h-6 w-px bg-slate-700" />
           <button
             onClick={handleToggleQueue}

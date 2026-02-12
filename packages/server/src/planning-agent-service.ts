@@ -214,7 +214,23 @@ function buildPlanningSystemPrompt(workspacePath: string, workspaceId: string): 
       const tasksDir = getTasksDir(workspace);
       const tasks = discoverTasks(tasksDir);
       if (tasks.length > 0) {
+        // Aggregate metrics
+        const completedTasks = tasks.filter(t => t.frontmatter.phase === 'complete' || t.frontmatter.phase === 'archived');
+        const cycleTimes = completedTasks
+          .map(t => t.frontmatter.cycleTime)
+          .filter((ct): ct is number => ct != null && ct > 0);
+        const avgCycleTime = cycleTimes.length > 0
+          ? Math.round(cycleTimes.reduce((a, b) => a + b, 0) / cycleTimes.length)
+          : null;
+
         taskSummary = '\n## Current Tasks\n';
+        taskSummary += `Total: ${tasks.length} tasks\n`;
+        if (avgCycleTime !== null) {
+          const mins = Math.round(avgCycleTime / 60);
+          taskSummary += `Average cycle time (ready→complete): ${mins < 60 ? `${mins}m` : `${Math.round(mins / 60 * 10) / 10}h`}\n`;
+        }
+        taskSummary += `Completed: ${completedTasks.length}\n\n`;
+
         const byPhase = new Map<string, Task[]>();
         for (const t of tasks) {
           const phase = t.frontmatter.phase;
@@ -222,13 +238,18 @@ function buildPlanningSystemPrompt(workspacePath: string, workspaceId: string): 
           byPhase.get(phase)!.push(t);
         }
         for (const [phase, phaseTasks] of byPhase) {
-          taskSummary += `\n### ${phase} (${phaseTasks.length})\n`;
+          taskSummary += `### ${phase} (${phaseTasks.length})\n`;
           for (const t of phaseTasks.slice(0, 10)) {
-            taskSummary += `- **${t.id}**: ${t.frontmatter.title}\n`;
+            const extras: string[] = [];
+            if (t.frontmatter.blocked?.isBlocked) extras.push('⛔ BLOCKED');
+            if (t.frontmatter.cycleTime) extras.push(`${Math.round(t.frontmatter.cycleTime / 60)}m`);
+            const suffix = extras.length > 0 ? ` (${extras.join(', ')})` : '';
+            taskSummary += `- **${t.id}**: ${t.frontmatter.title}${suffix}\n`;
           }
           if (phaseTasks.length > 10) {
             taskSummary += `- ... and ${phaseTasks.length - 10} more\n`;
           }
+          taskSummary += '\n';
         }
       }
     } catch { /* ignore */ }

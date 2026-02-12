@@ -446,6 +446,13 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
         </div>
       )}
 
+      {/* Quality Gates */}
+      <QualityGatesSection
+        qualityChecks={frontmatter.qualityChecks}
+        workspaceId={workspaceId}
+        taskId={task.id}
+      />
+
       {/* Attachments */}
       <AttachmentsSection task={task} workspaceId={workspaceId} />
 
@@ -453,6 +460,20 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
       <div className="text-xs text-slate-400 pt-4 border-t border-slate-100 space-y-1">
         <div className="flex justify-between"><span>Created</span><span>{new Date(frontmatter.created).toLocaleString()}</span></div>
         <div className="flex justify-between"><span>Updated</span><span>{new Date(frontmatter.updated).toLocaleString()}</span></div>
+        {frontmatter.started && <div className="flex justify-between"><span>Started</span><span>{new Date(frontmatter.started).toLocaleString()}</span></div>}
+        {frontmatter.completed && <div className="flex justify-between"><span>Completed</span><span>{new Date(frontmatter.completed).toLocaleString()}</span></div>}
+        {frontmatter.cycleTime != null && (
+          <div className="flex justify-between">
+            <span>Cycle Time</span>
+            <span className="font-mono">{formatDuration(frontmatter.cycleTime)}</span>
+          </div>
+        )}
+        {frontmatter.leadTime != null && (
+          <div className="flex justify-between">
+            <span>Lead Time</span>
+            <span className="font-mono">{formatDuration(frontmatter.leadTime)}</span>
+          </div>
+        )}
         {frontmatter.branch && <div className="flex justify-between"><span>Branch</span><span className="font-mono">{frontmatter.branch}</span></div>}
         {frontmatter.prUrl && <div className="flex justify-between"><span>PR</span><a href={frontmatter.prUrl} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">View PR →</a></div>}
       </div>
@@ -659,4 +680,74 @@ function AttachmentsSection({ task, workspaceId }: { task: Task; workspaceId: st
       )}
     </div>
   )
+}
+
+// =============================================================================
+// Quality Gates Section
+// =============================================================================
+
+function QualityGatesSection({
+  qualityChecks,
+  workspaceId,
+  taskId,
+}: {
+  qualityChecks: import('@pi-factory/shared').QualityChecks
+  workspaceId: string
+  taskId: string
+}) {
+  const toggleGate = async (gate: keyof import('@pi-factory/shared').QualityChecks) => {
+    try {
+      await fetch(`/api/workspaces/${workspaceId}/tasks/${taskId}/quality`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [gate]: !qualityChecks[gate] }),
+      })
+    } catch (err) {
+      console.error('Failed to toggle quality gate:', err)
+    }
+  }
+
+  const gates = [
+    { key: 'testsPass' as const, label: 'Tests Pass', icon: '🧪' },
+    { key: 'lintPass' as const, label: 'Lint Clean', icon: '✨' },
+    { key: 'reviewDone' as const, label: 'Reviewed', icon: '👁️' },
+  ]
+
+  return (
+    <div>
+      <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Quality Gates</h3>
+      <div className="flex gap-2">
+        {gates.map(({ key, label, icon }) => {
+          const passed = qualityChecks[key]
+          return (
+            <button
+              key={key}
+              onClick={() => toggleGate(key)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                passed
+                  ? 'bg-green-50 border-green-200 text-green-700 hover:bg-green-100'
+                  : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'
+              }`}
+            >
+              <span>{icon}</span>
+              <span>{label}</span>
+              {passed && <span className="text-green-500">✓</span>}
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+function formatDuration(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`
+  if (seconds < 3600) return `${Math.round(seconds / 60)}m`
+  const hours = Math.floor(seconds / 3600)
+  const mins = Math.round((seconds % 3600) / 60)
+  return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`
 }

@@ -135,12 +135,13 @@ export function ChatPane({
         <div className="flex gap-2 items-end p-3">
           <textarea
             ref={textareaRef}
+            data-chat-input
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             onCompositionStart={() => setIsComposing(true)}
             onCompositionEnd={() => setIsComposing(false)}
-            placeholder={busy ? 'Agent is working...' : 'Ask anything...'}
+            placeholder={busy ? 'Agent is working...' : 'Ask anything... (⌘K to focus)'}
             disabled={busy}
             className="flex-1 resize-none rounded-lg border border-slate-200 bg-white text-slate-800 placeholder-slate-400 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:border-slate-400 focus:ring-slate-200 min-h-[40px] max-h-[120px] disabled:opacity-50 disabled:cursor-not-allowed"
             rows={1}
