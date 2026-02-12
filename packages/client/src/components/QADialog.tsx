@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import type { QARequest, QAAnswer } from '@pi-factory/shared'
 
 interface QADialogProps {
@@ -9,6 +9,12 @@ interface QADialogProps {
 export function QADialog({ request, onSubmit }: QADialogProps) {
   const [selections, setSelections] = useState<Record<string, string>>({})
   const [submitting, setSubmitting] = useState(false)
+
+  // Reset state when the request changes (new QA round)
+  useEffect(() => {
+    setSelections({})
+    setSubmitting(false)
+  }, [request.requestId])
 
   const allAnswered = request.questions.every((q) => selections[q.id])
 

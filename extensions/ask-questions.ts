@@ -53,7 +53,7 @@ export default function (pi: ExtensionAPI) {
         },
       ),
     }),
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+    async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
       const { questions } = params;
       const requestId = crypto.randomUUID();
 
@@ -72,11 +72,27 @@ export default function (pi: ExtensionAPI) {
       const [, cb] = callbacks.entries().next().value!;
 
       try {
-        const answers = await cb.askQuestions(requestId, questions);
+        // Race the QA promise against the abort signal so we don't hang
+        // if the agent session is cancelled while waiting for user answers.
+        const qaPromise = cb.askQuestions(requestId, questions);
+
+        const abortPromise = signal
+          ? new Promise<never>((_resolve, reject) => {
+              if (signal.aborted) {
+                reject(new Error('Aborted'));
+                return;
+              }
+              signal.addEventListener('abort', () => reject(new Error('Aborted')), { once: true });
+            })
+          : null;
+
+        const answers = abortPromise
+          ? await Promise.race([qaPromise, abortPromise])
+          : await qaPromise;
 
         const lines = answers.map((a) => {
-          const q = questions.find((q) => q.id === a.questionId);
-          return `**${q?.text || a.questionId}**: ${a.selectedOption}`;
+          const question = questions.find((item) => item.id === a.questionId);
+          return `**${question?.text || a.questionId}**: ${a.selectedOption}`;
         });
 
         return {

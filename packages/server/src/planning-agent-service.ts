@@ -206,6 +206,11 @@ function registerQACallbacks(
 
 function unregisterQACallbacks(workspaceId: string): void {
   globalThis.__piFactoryQACallbacks?.delete(workspaceId);
+  // Reject any pending QA requests for this workspace so Promises don't hang
+  for (const [requestId, pending] of pendingQARequests) {
+    pending.reject(new Error('Planning session reset'));
+    pendingQARequests.delete(requestId);
+  }
 }
 
 /**
@@ -227,10 +232,20 @@ export function resolveQARequest(
   const session = planningSessions.get(workspaceId);
   if (session) {
     const qaResponse: QAResponse = { requestId, answers };
+
+    // Look up the original request to get human-readable question text
+    const requestMsg = session.messages.find(
+      (m) => m.role === 'qa' && m.metadata?.qaRequest?.requestId === requestId,
+    );
+    const questions = requestMsg?.metadata?.qaRequest?.questions || [];
+
     const responseMsg: PlanningMessage = {
       id: crypto.randomUUID(),
       role: 'qa',
-      content: answers.map((a) => `**${a.questionId}**: ${a.selectedOption}`).join('\n'),
+      content: answers.map((a) => {
+        const q = questions.find((q: any) => q.id === a.questionId);
+        return `**${q?.text || a.questionId}**: ${a.selectedOption}`;
+      }).join('\n'),
       timestamp: new Date().toISOString(),
       sessionId: session.sessionId,
       metadata: { qaResponse },

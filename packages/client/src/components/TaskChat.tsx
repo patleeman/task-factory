@@ -524,7 +524,7 @@ export function TaskChat({
       )}
 
       {/* Status bar */}
-      {isAgentActive && (
+      {(isAgentActive || (agentStream.status as string) === 'awaiting_qa') && statusConfig && (
         <div className="flex items-center gap-2 px-4 py-1.5 bg-slate-50 border-b border-slate-200 shrink-0">
           <span className={`w-2 h-2 rounded-full ${statusConfig.color} ${statusConfig.pulse ? 'animate-pulse' : ''}`} />
           <span className="text-xs font-mono text-slate-500">{statusConfig.label}</span>
@@ -538,7 +538,7 @@ export function TaskChat({
       )}
 
       {/* Empty state */}
-      {taskEntries.length === 0 && !isAgentActive && emptyState && (
+      {taskEntries.length === 0 && !isAgentActive && (agentStream.status as string) !== 'awaiting_qa' && emptyState && (
         <div className="flex flex-col items-center justify-center text-slate-400 absolute inset-0 z-0 pointer-events-none">
           <p className="text-sm font-medium text-slate-500 mb-1">{emptyState.title}</p>
           <p className="text-xs">{emptyState.subtitle}</p>
