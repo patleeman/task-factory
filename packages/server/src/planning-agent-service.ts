@@ -214,6 +214,40 @@ function unregisterQACallbacks(workspaceId: string): void {
 }
 
 /**
+ * Abort a pending QA request. The agent tool receives an error and
+ * continues with its best judgement.
+ */
+export function abortQARequest(
+  workspaceId: string,
+  requestId: string,
+  broadcast: (event: ServerEvent) => void,
+): boolean {
+  const pending = pendingQARequests.get(requestId);
+  if (!pending) return false;
+
+  pendingQARequests.delete(requestId);
+
+  // Persist abort as a QA message
+  const session = planningSessions.get(workspaceId);
+  if (session) {
+    const abortMsg: PlanningMessage = {
+      id: crypto.randomUUID(),
+      role: 'qa',
+      content: '*Skipped — user chose to answer directly instead.*',
+      timestamp: new Date().toISOString(),
+      sessionId: session.sessionId,
+      metadata: { qaResponse: { requestId, answers: [] } },
+    };
+    session.messages.push(abortMsg);
+    persistMessages(workspaceId, session.messages);
+    broadcast({ type: 'planning:message', workspaceId, message: abortMsg });
+  }
+
+  pending.reject(new Error('User skipped Q&A'));
+  return true;
+}
+
+/**
  * Resolve a pending QA request with user answers.
  * Called from the HTTP endpoint when the user submits the QADialog.
  */

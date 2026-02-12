@@ -1270,7 +1270,7 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/summary/generate', async (r
 // Get all active executions (debug/admin)
 app.get('/api/executions', (_req, res) => {
   const sessions = getAllActiveSessions();
-  res.json(buildExecutionSnapshots(sessions));
+  res.json(sessions);
 });
 
 // Get active executions for a specific workspace
@@ -1479,6 +1479,7 @@ import {
   registerTaskFormCallbacks,
   unregisterTaskFormCallbacks,
   resolveQARequest,
+  abortQARequest,
 } from './planning-agent-service.js';
 
 import {
@@ -1666,6 +1667,34 @@ app.post('/api/workspaces/:workspaceId/qa/respond', (req, res) => {
   );
 
   if (!resolved) {
+    res.status(404).json({ error: 'No pending Q&A request found for this requestId' });
+    return;
+  }
+
+  res.json({ ok: true });
+});
+
+// Abort a pending Q&A request (user wants to skip and type directly)
+app.post('/api/workspaces/:workspaceId/qa/abort', (req, res) => {
+  const workspace = getWorkspaceById(req.params.workspaceId);
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return;
+  }
+
+  const { requestId } = req.body as { requestId: string };
+  if (!requestId) {
+    res.status(400).json({ error: 'requestId is required' });
+    return;
+  }
+
+  const aborted = abortQARequest(
+    workspace.id,
+    requestId,
+    (event) => broadcastToWorkspace(workspace.id, event),
+  );
+
+  if (!aborted) {
     res.status(404).json({ error: 'No pending Q&A request found for this requestId' });
     return;
   }

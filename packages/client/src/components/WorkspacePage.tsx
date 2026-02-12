@@ -94,7 +94,10 @@ export function WorkspacePage() {
       api.getQueueStatus(workspaceId),
       api.getShelf(workspaceId),
       api.getPlanningMessages(workspaceId),
-      api.getActiveExecutions(workspaceId),
+      api.getActiveExecutions(workspaceId).catch((err) => {
+        console.warn('Failed to load active execution snapshots:', err)
+        return []
+      }),
     ])
       .then(([ws, tasksData, activityData, qStatus, shelfData, planningMsgs, activeExecutions]) => {
         setWorkspace(ws)
@@ -382,7 +385,7 @@ export function WorkspacePage() {
     }
   }
 
-  // Q&A disambiguation handler
+  // Q&A disambiguation handlers
   const handleQASubmit = async (answers: QAAnswer[]) => {
     if (!workspaceId || !planningStream.activeQARequest) return
     try {
@@ -390,6 +393,15 @@ export function WorkspacePage() {
     } catch (err) {
       console.error('Failed to submit Q&A response:', err)
       showToast('Failed to submit answers')
+    }
+  }
+
+  const handleQAAbort = async () => {
+    if (!workspaceId || !planningStream.activeQARequest) return
+    try {
+      await api.abortQA(workspaceId, planningStream.activeQARequest.requestId)
+    } catch (err) {
+      console.error('Failed to abort Q&A:', err)
     }
   }
 
@@ -634,6 +646,7 @@ export function WorkspacePage() {
                     <QADialog
                       request={planningStream.activeQARequest}
                       onSubmit={handleQASubmit}
+                      onAbort={handleQAAbort}
                     />
                   ) : undefined
                 }

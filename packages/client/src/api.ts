@@ -175,7 +175,12 @@ export const api = {
 
   async getActiveExecutions(workspaceId: string): Promise<ExecutionSnapshot[]> {
     const res = await fetch(`/api/workspaces/${workspaceId}/executions`)
-    return res.json()
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to load active executions' }))
+      throw new Error(err.error || `Failed to load active executions (${res.status})`)
+    }
+    const data = await res.json()
+    return Array.isArray(data) ? data : []
   },
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -362,6 +367,18 @@ export const api = {
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: 'Submit failed' }))
       throw new Error(err.error || `Submit failed (${res.status})`)
+    }
+  },
+
+  async abortQA(workspaceId: string, requestId: string): Promise<void> {
+    const res = await fetch(`/api/workspaces/${workspaceId}/qa/abort`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requestId }),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Abort failed' }))
+      throw new Error(err.error || `Abort failed (${res.status})`)
     }
   },
 }
