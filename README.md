@@ -63,7 +63,6 @@ Drop `.ts` files in the `extensions/` directory to add custom tools to the agent
 | Key | Action |
 |-----|--------|
 | `Esc` | Deselect task (return to planning mode) |
-| `⌘/Ctrl+N` | Create new task |
 | `⌘/Ctrl+K` | Focus chat input |
 
 ## Project structure

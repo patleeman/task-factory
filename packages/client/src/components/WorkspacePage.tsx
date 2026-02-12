@@ -416,16 +416,11 @@ export function WorkspacePage() {
   // Keyboard shortcuts
   useKeyboardShortcuts({
     onEscape: useCallback(() => {
-      // Deselect task → return to planning mode
       if (selectedTask) {
         setMainPane({ type: 'empty' })
       }
     }, [selectedTask]),
-    onNewTask: useCallback(() => {
-      setMainPane({ type: 'create-task' })
-    }, []),
     onFocusChat: useCallback(() => {
-      // Focus the chat input in the left pane
       const textarea = document.querySelector('[data-chat-input]') as HTMLTextAreaElement | null
       textarea?.focus()
     }, []),
@@ -473,19 +468,20 @@ export function WorkspacePage() {
           </button>
           <div className="h-6 w-px bg-slate-700" />
           <span className="text-sm font-medium text-slate-300">{workspaceName}</span>
-          {nonArchivedTasks.length > 0 && (
-            <span className="text-xs text-slate-500 font-mono">
-              {nonArchivedTasks.filter(t => t.frontmatter.phase === 'executing').length > 0 && (
-                <span className="text-orange-400">{nonArchivedTasks.filter(t => t.frontmatter.phase === 'executing').length} running</span>
-              )}
-              {nonArchivedTasks.filter(t => t.frontmatter.phase === 'ready').length > 0 && (
-                <span className="text-blue-400 ml-2">{nonArchivedTasks.filter(t => t.frontmatter.phase === 'ready').length} ready</span>
-              )}
-              {nonArchivedTasks.filter(t => t.frontmatter.phase === 'complete').length > 0 && (
-                <span className="text-emerald-400 ml-2">{nonArchivedTasks.filter(t => t.frontmatter.phase === 'complete').length} done</span>
-              )}
-            </span>
-          )}
+          {nonArchivedTasks.length > 0 && (() => {
+            const counts = nonArchivedTasks.reduce((acc, t) => {
+              const p = t.frontmatter.phase
+              acc[p] = (acc[p] || 0) + 1
+              return acc
+            }, {} as Record<string, number>)
+            return (
+              <span className="text-xs text-slate-500 font-mono">
+                {counts.executing > 0 && <span className="text-orange-400">{counts.executing} running</span>}
+                {counts.ready > 0 && <span className="text-blue-400 ml-2">{counts.ready} ready</span>}
+                {counts.complete > 0 && <span className="text-emerald-400 ml-2">{counts.complete} done</span>}
+              </span>
+            )
+          })()}
           <div className="h-6 w-px bg-slate-700" />
           <button
             onClick={handleToggleQueue}

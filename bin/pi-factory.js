@@ -3,7 +3,8 @@
 // Pi-Factory CLI
 // =============================================================================
 
-import { spawn, execSync } from 'child_process';
+import { spawn } from 'child_process';
+import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
@@ -14,7 +15,8 @@ const args = process.argv.slice(2);
 const command = args.find(a => !a.startsWith('-')) || 'start';
 const flags = new Set(args.filter(a => a.startsWith('-')));
 
-const port = process.env.PORT || '3000';
+const rawPort = process.env.PORT || '3000';
+const port = /^\d+$/.test(rawPort) ? rawPort : '3000';
 const host = process.env.HOST || '0.0.0.0';
 
 function startServer() {
@@ -32,9 +34,9 @@ function startServer() {
     setTimeout(() => {
       const url = `http://localhost:${port}`;
       try {
-        if (process.platform === 'darwin') execSync(`open ${url}`);
-        else if (process.platform === 'linux') execSync(`xdg-open ${url}`);
-        else if (process.platform === 'win32') execSync(`start ${url}`);
+        if (process.platform === 'darwin') spawn('open', [url], { stdio: 'ignore' });
+        else if (process.platform === 'linux') spawn('xdg-open', [url], { stdio: 'ignore' });
+        else if (process.platform === 'win32') spawn('cmd', ['/c', 'start', url], { stdio: 'ignore' });
       } catch { /* ignore */ }
     }, 1500);
   }
@@ -82,9 +84,7 @@ Examples:
 if (flags.has('--help') || flags.has('-h')) {
   showHelp();
 } else if (flags.has('--version') || flags.has('-v')) {
-  const pkg = JSON.parse(
-    (await import('fs')).readFileSync(join(__dirname, '..', 'package.json'), 'utf-8')
-  );
+  const pkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-8'));
   console.log(pkg.version);
 } else {
   startServer();

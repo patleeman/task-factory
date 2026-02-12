@@ -8,7 +8,8 @@
 
 import { join, dirname } from 'path';
 import { homedir } from 'os';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync } from 'fs';
+import { writeFile } from 'fs/promises';
 import { fileURLToPath } from 'url';
 import {
   createAgentSession,
@@ -32,6 +33,8 @@ import {
   addDraftTask,
   addArtifact,
   getShelf,
+  removeShelfItem,
+  updateDraftTask as updateDraftTaskFn,
 } from './shelf-service.js';
 import { getWorkspaceById } from './workspace-service.js';
 import { discoverTasks } from './task-service.js';
@@ -42,17 +45,19 @@ import { getRepoExtensionPaths } from './agent-execution-service.js';
 // Shelf callback registry — used by extension tools
 // =============================================================================
 
-declare global {
-  var __piFactoryShelfCallbacks: Map<string, {
-    createDraftTask: (args: any) => void;
-    createArtifact: (args: any) => void;
-  }> | undefined;
-}
-
-function ensureShelfCallbackRegistry(): Map<string, {
+export interface ShelfCallbacks {
   createDraftTask: (args: any) => void;
   createArtifact: (args: any) => void;
-}> {
+  removeItem: (itemId: string) => string;
+  updateDraftTask: (draftId: string, updates: any) => string;
+  getShelf: () => any;
+}
+
+declare global {
+  var __piFactoryShelfCallbacks: Map<string, ShelfCallbacks> | undefined;
+}
+
+function ensureShelfCallbackRegistry(): Map<string, ShelfCallbacks> {
   if (!globalThis.__piFactoryShelfCallbacks) {
     globalThis.__piFactoryShelfCallbacks = new Map();
   }
@@ -91,6 +96,27 @@ function registerShelfCallbacks(
       const shelf = addArtifact(workspaceId, artifact);
       broadcast({ type: 'shelf:updated', workspaceId, shelf });
     },
+    removeItem: (itemId: string) => {
+      try {
+        const shelf = removeShelfItem(workspaceId, itemId);
+        broadcast({ type: 'shelf:updated', workspaceId, shelf });
+        return `Removed item ${itemId}`;
+      } catch (err: any) {
+        return `Failed to remove: ${err.message}`;
+      }
+    },
+    updateDraftTask: (draftId: string, updates: any) => {
+      try {
+        const shelf = updateDraftTaskFn(workspaceId, draftId, updates);
+        broadcast({ type: 'shelf:updated', workspaceId, shelf });
+        return `Updated draft ${draftId}`;
+      } catch (err: any) {
+        return `Failed to update: ${err.message}`;
+      }
+    },
+    getShelf: () => {
+      return getShelf(workspaceId);
+    },
   });
 }
 
@@ -120,12 +146,36 @@ function loadPersistedMessages(workspaceId: string): PlanningMessage[] {
   }
 }
 
+const persistTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
 function persistMessages(workspaceId: string, messages: PlanningMessage[]): void {
   const path = messagesPath(workspaceId);
   if (!path) return;
+
+  // Debounce: write at most once per 500ms per workspace
+  const existing = persistTimers.get(workspaceId);
+  if (existing) clearTimeout(existing);
+
+  persistTimers.set(workspaceId, setTimeout(() => {
+    persistTimers.delete(workspaceId);
+    writeFile(path, JSON.stringify(messages, null, 2)).catch(err => {
+      console.error(`[PlanningAgent] Failed to persist messages for ${workspaceId}:`, err);
+    });
+  }, 500));
+}
+
+/** Flush pending writes immediately (used on reset). */
+function persistMessagesSync(workspaceId: string, messages: PlanningMessage[]): void {
+  const path = messagesPath(workspaceId);
+  if (!path) return;
+  const existing = persistTimers.get(workspaceId);
+  if (existing) { clearTimeout(existing); persistTimers.delete(workspaceId); }
   try {
+    const { writeFileSync } = require('fs');
     writeFileSync(path, JSON.stringify(messages, null, 2));
-  } catch { /* best-effort */ }
+  } catch (err) {
+    console.error(`[PlanningAgent] Failed to persist messages for ${workspaceId}:`, err);
+  }
 }
 
 // =============================================================================
@@ -333,6 +383,13 @@ Parameters:
 - name (string): Descriptive name for the artifact
 - html (string): Complete HTML document. Use inline styles. Keep it self-contained.
 
+### manage_shelf
+List, remove, or update shelf items.
+Parameters:
+- action (string): "list" | "remove" | "update"
+- item_id (string, optional): ID of the item (required for remove/update)
+- updates (object, optional): Fields to update on a draft task (title, content, acceptance_criteria, type, priority, complexity)
+
 ## Guidelines
 - Keep tasks small and focused — each should be completable in a single agent session
 - Write clear acceptance criteria that are specific and testable
@@ -515,11 +572,14 @@ async function sendToAgent(
         let fullPrompt = systemPrompt;
         if (hasHistory) {
           fullPrompt += '\n\n---\n\n## Conversation History (restored)\n\n';
-          // Only include last ~20 messages to avoid token limits
-          const recentHistory = priorMessages.slice(-20);
+          // Include last ~10 messages, truncate each to ~500 chars to avoid token limits
+          const recentHistory = priorMessages.slice(-10);
           for (const msg of recentHistory) {
             const role = msg.role === 'user' ? 'User' : 'Assistant';
-            fullPrompt += `**${role}:** ${msg.content}\n\n`;
+            const truncated = msg.content.length > 500
+              ? msg.content.slice(0, 500) + '... [truncated]'
+              : msg.content;
+            fullPrompt += `**${role}:** ${truncated}\n\n`;
           }
           fullPrompt += '---\n\n## Current Message\n\n';
         } else {
@@ -667,5 +727,5 @@ export async function resetPlanningSession(workspaceId: string): Promise<void> {
   }
   planningSessions.delete(workspaceId);
   unregisterShelfCallbacks(workspaceId);
-  persistMessages(workspaceId, []);
+  persistMessagesSync(workspaceId, []);
 }

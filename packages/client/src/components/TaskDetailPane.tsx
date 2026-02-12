@@ -696,11 +696,14 @@ function QualityGatesSection({
 }) {
   const toggleGate = async (gate: keyof import('@pi-factory/shared').QualityChecks) => {
     try {
-      await fetch(`/api/workspaces/${workspaceId}/tasks/${taskId}/quality`, {
+      const res = await fetch(`/api/workspaces/${workspaceId}/tasks/${taskId}/quality`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ [gate]: !qualityChecks[gate] }),
       })
+      if (!res.ok) {
+        console.error('Failed to toggle quality gate:', res.status, await res.text())
+      }
     } catch (err) {
       console.error('Failed to toggle quality gate:', err)
     }
