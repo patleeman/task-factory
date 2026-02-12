@@ -1,6 +1,14 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+import { mkdtempSync, mkdirSync, rmSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
 import type { Task } from '@pi-factory/shared';
-import { shouldResumeInterruptedPlanning } from '../src/task-service.js';
+import {
+  createTask as createTaskFile,
+  discoverTasks,
+  moveTaskToPhase,
+  shouldResumeInterruptedPlanning,
+} from '../src/task-service.js';
 
 function createTask(overrides: Partial<Task['frontmatter']> = {}): Task {
   const now = new Date().toISOString();
@@ -29,6 +37,26 @@ function createTask(overrides: Partial<Task['frontmatter']> = {}): Task {
     history: [],
     filePath: '/tmp/workspace/.pi/tasks/test-1.md',
   };
+}
+
+const tempRoots: string[] = [];
+
+afterEach(() => {
+  for (const root of tempRoots) {
+    rmSync(root, { recursive: true, force: true });
+  }
+  tempRoots.length = 0;
+});
+
+function createTempWorkspace(): { workspacePath: string; tasksDir: string } {
+  const root = mkdtempSync(join(tmpdir(), 'pi-factory-task-service-'));
+  tempRoots.push(root);
+
+  const workspacePath = join(root, 'workspace');
+  const tasksDir = join(workspacePath, '.pi', 'tasks');
+  mkdirSync(tasksDir, { recursive: true });
+
+  return { workspacePath, tasksDir };
 }
 
 describe('shouldResumeInterruptedPlanning', () => {
@@ -60,5 +88,60 @@ describe('shouldResumeInterruptedPlanning', () => {
   it('returns false when planning is not running anymore', () => {
     const task = createTask({ planningStatus: 'completed', plan: undefined });
     expect(shouldResumeInterruptedPlanning(task)).toBe(false);
+  });
+});
+
+describe('task ordering', () => {
+  it('creates new backlog tasks at the start (left)', () => {
+    const { workspacePath, tasksDir } = createTempWorkspace();
+
+    const first = createTaskFile(workspacePath, tasksDir, {
+      title: 'First task',
+      content: 'first',
+      acceptanceCriteria: ['done'],
+    });
+
+    const second = createTaskFile(workspacePath, tasksDir, {
+      title: 'Second task',
+      content: 'second',
+      acceptanceCriteria: ['done'],
+    });
+
+    expect(second.frontmatter.order).toBeLessThan(first.frontmatter.order);
+
+    const backlogIds = discoverTasks(tasksDir)
+      .filter((task) => task.frontmatter.phase === 'backlog')
+      .map((task) => task.id);
+
+    expect(backlogIds).toEqual([second.id, first.id]);
+  });
+
+  it('inserts moved tasks at the start of the destination phase', () => {
+    const { workspacePath, tasksDir } = createTempWorkspace();
+
+    const first = createTaskFile(workspacePath, tasksDir, {
+      title: 'First task',
+      content: 'first',
+      acceptanceCriteria: ['done'],
+    });
+
+    const second = createTaskFile(workspacePath, tasksDir, {
+      title: 'Second task',
+      content: 'second',
+      acceptanceCriteria: ['done'],
+    });
+
+    let tasks = discoverTasks(tasksDir);
+    const firstLive = tasks.find((task) => task.id === first.id)!;
+    moveTaskToPhase(firstLive, 'ready', 'user', 'move first to ready', tasks);
+
+    tasks = discoverTasks(tasksDir);
+    const secondLive = tasks.find((task) => task.id === second.id)!;
+    moveTaskToPhase(secondLive, 'ready', 'user', 'move second to ready', tasks);
+
+    const readyTasks = discoverTasks(tasksDir).filter((task) => task.frontmatter.phase === 'ready');
+
+    expect(readyTasks.map((task) => task.id)).toEqual([second.id, first.id]);
+    expect(readyTasks[0].frontmatter.order).toBeLessThan(readyTasks[1].frontmatter.order);
   });
 });

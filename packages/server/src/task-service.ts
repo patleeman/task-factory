@@ -137,10 +137,14 @@ export function createTask(
   const fileName = `${id.toLowerCase()}.md`;
   const filePath = join(tasksDir, fileName);
 
-  // Assign order = max existing order in backlog + 1 (new tasks go to bottom)
+  // Assign order at the START of backlog (leftmost card in the UI).
   const existingTasks = discoverTasks(tasksDir);
   const backlogTasks = existingTasks.filter(t => t.frontmatter.phase === 'backlog');
-  const maxOrder = backlogTasks.reduce((max, t) => Math.max(max, t.frontmatter.order ?? 0), 0);
+  const minOrder = backlogTasks.reduce(
+    (min, t) => Math.min(min, t.frontmatter.order ?? 0),
+    Number.POSITIVE_INFINITY,
+  );
+  const nextOrder = Number.isFinite(minOrder) ? minOrder - 1 : 0;
 
   const taskDefaults = loadTaskDefaults();
   const resolvedDefaults = applyTaskDefaultsToRequest(request, taskDefaults);
@@ -155,7 +159,7 @@ export function createTask(
     project: basename(workspacePath),
     blockedCount: 0,
     blockedDuration: 0,
-    order: maxOrder + 1,
+    order: nextOrder,
     acceptanceCriteria: request.acceptanceCriteria || [],
     testingInstructions: [],
     commits: [],
@@ -246,13 +250,16 @@ export function moveTaskToPhase(
   const oldPhase = task.frontmatter.phase;
   const now = new Date().toISOString();
 
-  // Assign order at bottom of target phase
+  // Insert at the START of the target phase (leftmost card in the UI).
   if (allTasks) {
     const tasksInTarget = allTasks.filter(
       t => t.frontmatter.phase === newPhase && t.id !== task.id
     );
-    const maxOrder = tasksInTarget.reduce((max, t) => Math.max(max, t.frontmatter.order ?? 0), 0);
-    task.frontmatter.order = maxOrder + 1;
+    const minOrder = tasksInTarget.reduce(
+      (min, t) => Math.min(min, t.frontmatter.order ?? 0),
+      Number.POSITIVE_INFINITY,
+    );
+    task.frontmatter.order = Number.isFinite(minOrder) ? minOrder - 1 : 0;
   }
 
   if (newPhase === 'executing' && !task.frontmatter.started) {

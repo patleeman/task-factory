@@ -174,7 +174,7 @@ class QueueManager {
         return; // At capacity — wait for current to finish
       }
 
-      // Find next ready task — pull from the TOP of the ready column (lowest order first)
+      // Find next ready task — pull from the END of the ready column (rightmost / highest order).
       const readyTasks = tasks
         .filter(t => t.frontmatter.phase === 'ready')
         .sort((a, b) => {
@@ -187,7 +187,7 @@ class QueueManager {
         return; // Nothing to do
       }
 
-      const nextTask = readyTasks[0];
+      const nextTask = readyTasks[readyTasks.length - 1];
       console.log(`[QueueManager] Picking up task: ${nextTask.id} (${nextTask.frontmatter.title})`);
 
       // Move to executing

@@ -31,6 +31,7 @@ function formatFileSize(bytes: number): string {
 
 export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdates }: CreateTaskPaneProps) {
   const { initialDraft, restoredFromDraft, updateDraft, clearDraft, dismissRestoredBanner } = useLocalStorageDraft()
+  const hasRestoredDraftContent = initialDraft.content.trim().length > 0
 
   const [content, setContent] = useState(initialDraft.content)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -60,7 +61,7 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
         setTaskDefaults(defaults)
 
         // Preserve restored drafts with user-entered content.
-        if (restoredFromDraft) {
+        if (hasRestoredDraftContent) {
           return
         }
 
@@ -70,7 +71,7 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
       .catch((err) => {
         console.error('Failed to load task defaults:', err)
       })
-  }, [restoredFromDraft])
+  }, [hasRestoredDraftContent])
 
   // Register form with server when pane opens, unregister on close
   useEffect(() => {
