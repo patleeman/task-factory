@@ -648,6 +648,13 @@ import {
   buildAgentContext,
   discoverPiThemes,
 } from './pi-integration.js';
+import {
+  PiAuthServiceError,
+  clearProviderCredential,
+  loadPiAuthOverview,
+  piLoginManager,
+  setProviderApiKey,
+} from './pi-auth-service.js';
 
 // Get available models (from Pi SDK ModelRegistry)
 app.get('/api/pi/available-models', async (_req, res) => {
@@ -673,6 +680,143 @@ app.get('/api/pi/available-models', async (_req, res) => {
 app.get('/api/pi/settings', (_req, res) => {
   const settings = loadPiSettings();
   res.json(settings || {});
+});
+
+// Get Pi auth provider status and stored credential state
+app.get('/api/pi/auth', async (_req, res) => {
+  try {
+    const overview = await loadPiAuthOverview();
+    res.json(overview);
+  } catch (err) {
+    console.error('Failed to load Pi auth overview:', err);
+    res.status(500).json({ error: 'Failed to load auth settings' });
+  }
+});
+
+// Save API key for a provider in ~/.pi/agent/auth.json
+app.put('/api/pi/auth/providers/:providerId/api-key', async (req, res) => {
+  const providerId = req.params.providerId;
+  const apiKey = (req.body as { apiKey?: unknown }).apiKey;
+
+  if (typeof apiKey !== 'string') {
+    res.status(400).json({ error: 'apiKey must be a string' });
+    return;
+  }
+
+  try {
+    const provider = await setProviderApiKey(providerId, apiKey);
+    res.json(provider);
+  } catch (err) {
+    if (err instanceof PiAuthServiceError) {
+      res.status(err.status).json({ error: err.message });
+      return;
+    }
+
+    console.error(`Failed to save API key for provider ${providerId}:`, err);
+    res.status(500).json({ error: 'Failed to save API key' });
+  }
+});
+
+// Remove stored credential for a provider (api_key or oauth)
+app.delete('/api/pi/auth/providers/:providerId', async (req, res) => {
+  const providerId = req.params.providerId;
+
+  try {
+    const provider = await clearProviderCredential(providerId);
+    res.json(provider);
+  } catch (err) {
+    if (err instanceof PiAuthServiceError) {
+      res.status(err.status).json({ error: err.message });
+      return;
+    }
+
+    console.error(`Failed to clear credential for provider ${providerId}:`, err);
+    res.status(500).json({ error: 'Failed to clear credential' });
+  }
+});
+
+// Start OAuth login flow for a provider
+app.post('/api/pi/auth/login/start', async (req, res) => {
+  const providerId = (req.body as { providerId?: unknown }).providerId;
+
+  if (typeof providerId !== 'string') {
+    res.status(400).json({ error: 'providerId must be a string' });
+    return;
+  }
+
+  try {
+    const session = await piLoginManager.start(providerId);
+    res.json(session);
+  } catch (err) {
+    if (err instanceof PiAuthServiceError) {
+      res.status(err.status).json({ error: err.message });
+      return;
+    }
+
+    console.error(`Failed to start OAuth login for provider ${providerId}:`, err);
+    res.status(500).json({ error: 'Failed to start login flow' });
+  }
+});
+
+// Get OAuth login flow status
+app.get('/api/pi/auth/login/:sessionId', (req, res) => {
+  try {
+    const session = piLoginManager.get(req.params.sessionId);
+    res.json(session);
+  } catch (err) {
+    if (err instanceof PiAuthServiceError) {
+      res.status(err.status).json({ error: err.message });
+      return;
+    }
+
+    console.error(`Failed to read OAuth login session ${req.params.sessionId}:`, err);
+    res.status(500).json({ error: 'Failed to read login session' });
+  }
+});
+
+// Submit input for pending OAuth login prompt/manual code request
+app.post('/api/pi/auth/login/:sessionId/input', (req, res) => {
+  const requestId = (req.body as { requestId?: unknown }).requestId;
+  const value = (req.body as { value?: unknown }).value;
+
+  if (typeof requestId !== 'string') {
+    res.status(400).json({ error: 'requestId must be a string' });
+    return;
+  }
+
+  if (typeof value !== 'string') {
+    res.status(400).json({ error: 'value must be a string' });
+    return;
+  }
+
+  try {
+    const session = piLoginManager.submitInput(req.params.sessionId, requestId, value);
+    res.json(session);
+  } catch (err) {
+    if (err instanceof PiAuthServiceError) {
+      res.status(err.status).json({ error: err.message });
+      return;
+    }
+
+    console.error(`Failed to submit OAuth login input for session ${req.params.sessionId}:`, err);
+    res.status(500).json({ error: 'Failed to submit login input' });
+  }
+});
+
+// Cancel OAuth login session
+app.post('/api/pi/auth/login/:sessionId/cancel', (req, res) => {
+  try {
+    const session = piLoginManager.cancel(req.params.sessionId);
+    res.json(session);
+  } catch (err) {
+    if (err instanceof PiAuthServiceError) {
+      res.status(err.status).json({ error: err.message });
+      return;
+    }
+
+    console.error(`Failed to cancel OAuth login session ${req.params.sessionId}:`, err);
+    res.status(500).json({ error: 'Failed to cancel login session' });
+  }
 });
 
 // Get Pi models

@@ -16,6 +16,53 @@ export interface ExecutionSnapshot {
   isRunning: boolean
 }
 
+export type PiProviderAuthState = 'none' | 'api_key' | 'oauth' | 'external'
+
+export interface PiAuthProviderOverview {
+  id: string
+  authState: PiProviderAuthState
+  hasStoredCredential: boolean
+  supportsOAuth: boolean
+  oauthProviderName?: string
+  usesCallbackServer: boolean
+}
+
+export interface PiOAuthProviderOverview {
+  id: string
+  name: string
+  usesCallbackServer: boolean
+  loggedIn: boolean
+}
+
+export interface PiAuthOverview {
+  providers: PiAuthProviderOverview[]
+  oauthProviders: PiOAuthProviderOverview[]
+}
+
+export type PiOAuthLoginStatus = 'running' | 'awaiting_input' | 'succeeded' | 'failed' | 'cancelled'
+
+export interface PiOAuthLoginInputRequest {
+  id: string
+  type: 'prompt' | 'manual-code'
+  message: string
+  placeholder?: string
+  allowEmpty?: boolean
+}
+
+export interface PiOAuthLoginSession {
+  id: string
+  providerId: string
+  providerName: string
+  status: PiOAuthLoginStatus
+  startedAt: string
+  updatedAt: string
+  authUrl?: string
+  authInstructions?: string
+  progressMessages: string[]
+  inputRequest?: PiOAuthLoginInputRequest
+  error?: string
+}
+
 export const api = {
   async getWorkspaces(): Promise<Workspace[]> {
     const res = await fetch('/api/workspaces')
@@ -142,6 +189,97 @@ export const api = {
 
   async getAvailableModels(): Promise<AvailableModel[]> {
     const res = await fetch('/api/pi/available-models')
+    return res.json()
+  },
+
+  async getPiAuthOverview(): Promise<PiAuthOverview> {
+    const res = await fetch('/api/pi/auth')
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to load auth settings' }))
+      throw new Error(err.error || `Failed to load auth settings (${res.status})`)
+    }
+    return res.json()
+  },
+
+  async saveProviderApiKey(providerId: string, apiKey: string): Promise<PiAuthProviderOverview> {
+    const res = await fetch(`/api/pi/auth/providers/${encodeURIComponent(providerId)}/api-key`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiKey }),
+    })
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to save API key' }))
+      throw new Error(err.error || `Failed to save API key (${res.status})`)
+    }
+
+    return res.json()
+  },
+
+  async clearProviderCredential(providerId: string): Promise<PiAuthProviderOverview> {
+    const res = await fetch(`/api/pi/auth/providers/${encodeURIComponent(providerId)}`, {
+      method: 'DELETE',
+    })
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to clear credential' }))
+      throw new Error(err.error || `Failed to clear credential (${res.status})`)
+    }
+
+    return res.json()
+  },
+
+  async startOAuthLogin(providerId: string): Promise<PiOAuthLoginSession> {
+    const res = await fetch('/api/pi/auth/login/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ providerId }),
+    })
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to start login flow' }))
+      throw new Error(err.error || `Failed to start login flow (${res.status})`)
+    }
+
+    return res.json()
+  },
+
+  async getOAuthLoginSession(sessionId: string): Promise<PiOAuthLoginSession> {
+    const res = await fetch(`/api/pi/auth/login/${encodeURIComponent(sessionId)}`)
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to read login session' }))
+      throw new Error(err.error || `Failed to read login session (${res.status})`)
+    }
+
+    return res.json()
+  },
+
+  async submitOAuthLoginInput(sessionId: string, requestId: string, value: string): Promise<PiOAuthLoginSession> {
+    const res = await fetch(`/api/pi/auth/login/${encodeURIComponent(sessionId)}/input`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requestId, value }),
+    })
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to submit login input' }))
+      throw new Error(err.error || `Failed to submit login input (${res.status})`)
+    }
+
+    return res.json()
+  },
+
+  async cancelOAuthLogin(sessionId: string): Promise<PiOAuthLoginSession> {
+    const res = await fetch(`/api/pi/auth/login/${encodeURIComponent(sessionId)}/cancel`, {
+      method: 'POST',
+    })
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to cancel login flow' }))
+      throw new Error(err.error || `Failed to cancel login flow (${res.status})`)
+    }
+
     return res.json()
   },
 
