@@ -164,7 +164,7 @@ export function WorkspacePage() {
           setTasks((prev) =>
             prev.map((t) =>
               t.id === msg.taskId
-                ? { ...t, frontmatter: { ...t.frontmatter, plan: msg.plan } }
+                ? { ...t, frontmatter: { ...t.frontmatter, plan: msg.plan, planningStatus: 'completed' } }
                 : t
             )
           )

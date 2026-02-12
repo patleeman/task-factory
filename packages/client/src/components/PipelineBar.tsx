@@ -373,7 +373,9 @@ function PipelineCard({
   const isExecuting = phase === 'executing'
   const isComplete = phase === 'complete'
   const isAgentRunning = isExecuting
-  const phaseBg = PHASE_BG[phase] || PHASE_BG.backlog
+  // Backlog tasks with a completed plan get a distinct color to signal "ready to promote"
+  const hasPlan = phase === 'backlog' && !!task.frontmatter.plan && task.frontmatter.planningStatus !== 'running'
+  const phaseBg = hasPlan ? 'bg-indigo-100' : (PHASE_BG[phase] || PHASE_BG.backlog)
 
   const handleDragStart = (e: React.DragEvent) => {
     e.dataTransfer.setData(DRAG_MIME, JSON.stringify({
@@ -419,12 +421,13 @@ function PipelineCard({
           isExecuting ? 'text-orange-600'
           : isComplete ? 'text-emerald-600'
           : phase === 'ready' ? 'text-blue-600'
+          : hasPlan ? 'text-indigo-600'
           : 'text-slate-400'
         }`}>
           {isAgentRunning && (
             <span className="inline-block w-3 h-3 rounded-full border-[1.5px] border-t-transparent animate-spin border-orange-500" />
           )}
-          {PHASE_DISPLAY_NAMES[phase]}
+          {hasPlan ? 'Planned' : PHASE_DISPLAY_NAMES[phase]}
         </span>
         {advanceAction && (
           <button
