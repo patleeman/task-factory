@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import type { Task, Workspace, ActivityEntry, Phase, QueueStatus, Shelf } from '@pi-factory/shared'
+import type { Task, Workspace, ActivityEntry, Phase, QueueStatus, Shelf, PlanningMessage } from '@pi-factory/shared'
 import { api } from '../api'
 import { PipelineBar } from './PipelineBar'
 import { TaskDetailPane } from './TaskDetailPane'
@@ -40,6 +40,7 @@ export function WorkspacePage() {
   const toastTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
 
   const [shelf, setShelf] = useState<Shelf>({ items: [] })
+  const [planningMessages, setPlanningMessages] = useState<PlanningMessage[]>([])
 
   const selectedTask = mainPane.type === 'task-detail' ? mainPane.task : null
   const selectedTaskRef = useRef(selectedTask)
@@ -52,7 +53,7 @@ export function WorkspacePage() {
 
   const { subscribe, isConnected } = useWebSocket(workspaceId || null)
   const agentStream = useAgentStreaming(selectedTask?.id || null, subscribe)
-  const planningStream = usePlanningStreaming(workspaceId || null, subscribe)
+  const planningStream = usePlanningStreaming(workspaceId || null, subscribe, planningMessages)
 
   // Derived data
   const archivedTasks = tasks
@@ -75,13 +76,15 @@ export function WorkspacePage() {
       api.getActivity(workspaceId, 100),
       api.getQueueStatus(workspaceId),
       api.getShelf(workspaceId),
+      api.getPlanningMessages(workspaceId),
     ])
-      .then(([ws, tasksData, activityData, qStatus, shelfData]) => {
+      .then(([ws, tasksData, activityData, qStatus, shelfData, planningMsgs]) => {
         setWorkspace(ws)
         setTasks(tasksData)
         setActivity(activityData)
         setQueueStatus(qStatus)
         setShelf(shelfData)
+        setPlanningMessages(planningMsgs)
         setIsLoading(false)
       })
       .catch((err) => {
@@ -332,6 +335,7 @@ export function WorkspacePage() {
     if (!workspaceId) return
     try {
       await api.resetPlanningSession(workspaceId)
+      setPlanningMessages([]) // Clear local state to reset the hook
     } catch (err) {
       console.error('Failed to reset planning session:', err)
     }
@@ -530,7 +534,7 @@ export function WorkspacePage() {
         <div className="flex-1 flex overflow-hidden min-h-0">
           {/* Left pane — Chat (planning or task, depending on mode) */}
           <div
-            className="bg-slate-50 overflow-hidden shrink-0"
+            className={`overflow-hidden shrink-0 ${mode === 'task' ? 'bg-orange-50/30' : 'bg-slate-50'}`}
             style={{ width: leftPaneWidth }}
           >
             {mode === 'planning' ? (
@@ -588,7 +592,7 @@ export function WorkspacePage() {
                 />
               ) : (
                 <ShelfPane
-                  shelf={planningStream.shelf || shelf}
+                  shelf={shelf}
                   onPushDraft={handlePushDraft}
                   onPushAll={handlePushAllDrafts}
                   onRemoveItem={handleRemoveShelfItem}

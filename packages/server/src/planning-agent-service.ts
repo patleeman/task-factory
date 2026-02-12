@@ -112,6 +112,8 @@ interface PlanningSession {
   toolCallArgs: Map<string, { toolName: string; args: Record<string, unknown> }>;
   unsubscribe?: () => void;
   broadcast: (event: ServerEvent) => void;
+  /** Whether the first user message has been sent (system prompt gets prepended) */
+  firstMessageSent: boolean;
 }
 
 const planningSessions = new Map<string, PlanningSession>();
@@ -145,6 +147,7 @@ async function getOrCreateSession(
     currentThinkingText: '',
     toolCallArgs: new Map(),
     broadcast,
+    firstMessageSent: false,
   };
 
   planningSessions.set(workspaceId, session);
@@ -184,14 +187,9 @@ async function getOrCreateSession(
       handlePlanningEvent(event, session);
     });
 
-    // Send system prompt to establish planning agent identity
-    const systemPrompt = buildPlanningSystemPrompt(workspace.path, workspaceId);
-    await piSession.prompt(systemPrompt);
-
-    // After the initial prompt resolves, the agent is ready
+    // Session is ready — system prompt will be prepended to first user message
     session.status = 'idle';
     broadcast({ type: 'planning:status', workspaceId, status: 'idle' });
-    broadcast({ type: 'planning:turn_end', workspaceId });
 
   } catch (err) {
     console.error('[PlanningAgent] Failed to create session:', err);
@@ -458,7 +456,19 @@ export async function sendPlanningMessage(
   broadcast({ type: 'planning:status', workspaceId, status: 'streaming' });
 
   try {
-    await session.piSession.followUp(content);
+    if (!session.firstMessageSent) {
+      // First message: use prompt() with system context prepended
+      const workspace = getWorkspaceById(workspaceId);
+      const systemPrompt = buildPlanningSystemPrompt(
+        workspace?.path || '',
+        workspaceId,
+      );
+      const fullPrompt = `${systemPrompt}\n\n---\n\n# User Message\n\n${content}`;
+      await session.piSession.prompt(fullPrompt);
+      session.firstMessageSent = true;
+    } else {
+      await session.piSession.followUp(content);
+    }
 
     // Turn complete
     session.status = 'idle';

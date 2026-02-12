@@ -17,6 +17,7 @@ export function ChatPane({
 }: ChatPaneProps) {
   const [input, setInput] = useState('')
   const [isComposing, setIsComposing] = useState(false)
+  const [isSending, setIsSending] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -28,9 +29,15 @@ export function ChatPane({
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages.length, streamingText.length, toolCalls.length])
 
+  // Clear sending state when agent starts responding
+  useEffect(() => {
+    if (isActive) setIsSending(false)
+  }, [isActive])
+
   const handleSend = () => {
     const trimmed = input.trim()
-    if (!trimmed || isActive) return
+    if (!trimmed || isActive || isSending) return
+    setIsSending(true)
     onSendMessage(trimmed)
     setInput('')
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
@@ -44,7 +51,10 @@ export function ChatPane({
     }
   }
 
-  const statusLabel = status === 'streaming' ? 'Generating...'
+  const busy = isActive || isSending
+
+  const statusLabel = isSending && !isActive ? 'Initializing agent...'
+    : status === 'streaming' ? 'Generating...'
     : status === 'tool_use' ? 'Running tool...'
     : status === 'thinking' ? 'Thinking...'
     : status === 'error' ? 'Error'
@@ -70,7 +80,7 @@ export function ChatPane({
       </div>
 
       {/* Status bar */}
-      {isActive && statusLabel && (
+      {busy && statusLabel && (
         <div className="flex items-center gap-2 px-4 py-1.5 bg-blue-50 border-b border-blue-100 shrink-0">
           <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
           <span className="text-xs font-mono text-blue-600">{statusLabel}</span>
@@ -80,7 +90,7 @@ export function ChatPane({
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto min-h-0">
         <div className="px-4 py-3 space-y-3 text-[14px] leading-relaxed">
-          {messages.length === 0 && !isActive && (
+          {messages.length === 0 && !busy && (
             <div className="text-center py-16 text-slate-400">
               <div className="text-3xl mb-3 opacity-50">🏭</div>
               <p className="text-sm font-medium text-slate-500 mb-1">Pi Factory Agent</p>
@@ -130,8 +140,8 @@ export function ChatPane({
             onKeyDown={handleKeyDown}
             onCompositionStart={() => setIsComposing(true)}
             onCompositionEnd={() => setIsComposing(false)}
-            placeholder={isActive ? 'Agent is working...' : 'Ask anything...'}
-            disabled={isActive}
+            placeholder={busy ? 'Agent is working...' : 'Ask anything...'}
+            disabled={busy}
             className="flex-1 resize-none rounded-lg border border-slate-200 bg-white text-slate-800 placeholder-slate-400 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:border-slate-400 focus:ring-slate-200 min-h-[40px] max-h-[120px] disabled:opacity-50 disabled:cursor-not-allowed"
             rows={1}
             onInput={(e) => {
@@ -142,7 +152,7 @@ export function ChatPane({
           />
           <button
             onClick={handleSend}
-            disabled={!input.trim() || isActive}
+            disabled={!input.trim() || busy}
             className="text-sm font-mono py-2 px-3 rounded-lg shrink-0 disabled:opacity-30 bg-slate-700 text-white hover:bg-slate-600 transition-colors"
           >
             ↩

@@ -35,6 +35,7 @@ const INITIAL_STATE: PlanningStreamState = {
 export function usePlanningStreaming(
   workspaceId: string | null,
   subscribe: (handler: (event: ServerEvent) => void) => () => void,
+  initialMessages?: PlanningMessage[],
 ): PlanningStreamState {
   const [state, setState] = useState<PlanningStreamState>(INITIAL_STATE)
   const workspaceIdRef = useRef(workspaceId)
@@ -43,6 +44,22 @@ export function usePlanningStreaming(
   useEffect(() => {
     setState(INITIAL_STATE)
   }, [workspaceId])
+
+  // Seed with initial messages loaded from server, or clear on reset
+  useEffect(() => {
+    if (!initialMessages) return
+    setState((prev) => {
+      // Reset requested (empty array passed after a reset call)
+      if (initialMessages.length === 0 && prev.messages.length > 0) {
+        return { ...INITIAL_STATE }
+      }
+      // Seed only if we haven't received any streaming messages yet
+      if (initialMessages.length > 0 && prev.messages.length === 0) {
+        return { ...prev, messages: initialMessages }
+      }
+      return prev
+    })
+  }, [initialMessages])
 
   useEffect(() => {
     return subscribe((msg) => {
