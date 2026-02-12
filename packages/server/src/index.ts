@@ -953,6 +953,7 @@ import {
   kickQueue,
   initializeQueueManagers,
 } from './queue-manager.js';
+import { buildExecutionSnapshots } from './execution-snapshot.js';
 
 // Start task execution
 app.post('/api/workspaces/:workspaceId/tasks/:taskId/execute', async (req, res) => {
@@ -1266,10 +1267,22 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/summary/generate', async (r
   }
 });
 
-// Get all active executions
+// Get all active executions (debug/admin)
 app.get('/api/executions', (_req, res) => {
   const sessions = getAllActiveSessions();
-  res.json(sessions);
+  res.json(buildExecutionSnapshots(sessions));
+});
+
+// Get active executions for a specific workspace
+app.get('/api/workspaces/:workspaceId/executions', (req, res) => {
+  const workspace = getWorkspaceById(req.params.workspaceId);
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return;
+  }
+
+  const sessions = getAllActiveSessions();
+  res.json(buildExecutionSnapshots(sessions, workspace.id));
 });
 
 // =============================================================================

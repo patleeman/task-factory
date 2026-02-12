@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useParams, useNavigate, useMatch } from 'react-router-dom'
-import type { Task, Workspace, ActivityEntry, Phase, QueueStatus, Shelf, PlanningMessage, QAAnswer } from '@pi-factory/shared'
+import type { Task, Workspace, ActivityEntry, Phase, QueueStatus, Shelf, PlanningMessage, QAAnswer, AgentExecutionStatus } from '@pi-factory/shared'
 import { api } from '../api'
 import { PipelineBar } from './PipelineBar'
 import { TaskDetailPane } from './TaskDetailPane'
@@ -16,6 +16,16 @@ import { QADialog } from './QADialog'
 
 const LEFT_PANE_MIN = 320
 const LEFT_PANE_MAX = 1400
+const RUNNING_EXECUTION_STATUSES = new Set<AgentExecutionStatus>([
+  'streaming',
+  'tool_use',
+  'thinking',
+  'post-hooks',
+])
+
+function isExecutionStatusRunning(status: AgentExecutionStatus): boolean {
+  return RUNNING_EXECUTION_STATUSES.has(status)
+}
 
 export function WorkspacePage() {
   const { workspaceId, taskId } = useParams<{ workspaceId: string; taskId?: string }>()
@@ -42,6 +52,7 @@ export function WorkspacePage() {
   const [shelf, setShelf] = useState<Shelf>({ items: [] })
   const [planningMessages, setPlanningMessages] = useState<PlanningMessage[]>([])
   const [planGeneratingTaskIds, setPlanGeneratingTaskIds] = useState<Set<string>>(new Set())
+  const [runningExecutionTaskIds, setRunningExecutionTaskIds] = useState<Set<string>>(new Set())
 
   const selectedTask = taskId ? tasks.find((t) => t.id === taskId) || null : null
   const isTaskRoute = Boolean(taskId)
@@ -60,6 +71,13 @@ export function WorkspacePage() {
       new Date(b.frontmatter.updated).getTime() - new Date(a.frontmatter.updated).getTime()
     )
   const nonArchivedTasks = tasks.filter(t => t.frontmatter.phase !== 'archived')
+  const runningTaskIds = useMemo(() => {
+    const ids = new Set(runningExecutionTaskIds)
+    for (const taskId of planGeneratingTaskIds) {
+      ids.add(taskId)
+    }
+    return ids
+  }, [runningExecutionTaskIds, planGeneratingTaskIds])
 
   // Load workspace data
   useEffect(() => {
@@ -67,6 +85,7 @@ export function WorkspacePage() {
 
     setIsLoading(true)
     setError(null)
+    setRunningExecutionTaskIds(new Set())
 
     Promise.all([
       api.getWorkspace(workspaceId),
@@ -75,8 +94,9 @@ export function WorkspacePage() {
       api.getQueueStatus(workspaceId),
       api.getShelf(workspaceId),
       api.getPlanningMessages(workspaceId),
+      api.getActiveExecutions(workspaceId),
     ])
-      .then(([ws, tasksData, activityData, qStatus, shelfData, planningMsgs]) => {
+      .then(([ws, tasksData, activityData, qStatus, shelfData, planningMsgs, activeExecutions]) => {
         setWorkspace(ws)
         setTasks(tasksData)
         setActivity(activityData)
@@ -87,6 +107,11 @@ export function WorkspacePage() {
           tasksData
             .filter((t) => t.frontmatter.planningStatus === 'running' && !t.frontmatter.plan)
             .map((t) => t.id)
+        ))
+        setRunningExecutionTaskIds(new Set(
+          activeExecutions
+            .filter((session) => session.isRunning)
+            .map((session) => session.taskId)
         ))
         setIsLoading(false)
       })
@@ -193,6 +218,17 @@ export function WorkspacePage() {
           break
         case 'queue:status':
           setQueueStatus(msg.status)
+          break
+        case 'agent:execution_status':
+          setRunningExecutionTaskIds((prev) => {
+            const next = new Set(prev)
+            if (isExecutionStatusRunning(msg.status)) {
+              next.add(msg.taskId)
+            } else {
+              next.delete(msg.taskId)
+            }
+            return next
+          })
           break
         case 'shelf:updated':
           setShelf(msg.shelf)
@@ -683,6 +719,7 @@ export function WorkspacePage() {
         <div className="bg-slate-50 border-t border-slate-200 shrink-0">
           <PipelineBar
             tasks={nonArchivedTasks}
+            runningTaskIds={runningTaskIds}
             selectedTaskId={selectedTask?.id || null}
             onTaskClick={handleSelectTask}
             onMoveTask={handleMoveTask}

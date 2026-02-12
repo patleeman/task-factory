@@ -5,6 +5,7 @@ import { PHASE_DISPLAY_NAMES } from '@pi-factory/shared'
 
 interface PipelineBarProps {
   tasks: Task[]
+  runningTaskIds: ReadonlySet<string>
   selectedTaskId: string | null
   onTaskClick: (task: Task) => void
   onMoveTask: (task: Task, toPhase: Phase) => void
@@ -49,6 +50,7 @@ const DRAG_MIME = 'application/pi-factory-task'
 
 export function PipelineBar({
   tasks,
+  runningTaskIds,
   selectedTaskId,
   onTaskClick,
   onMoveTask,
@@ -253,6 +255,7 @@ export function PipelineBar({
                         <div className="px-1">
                           <PipelineCard
                             task={task}
+                            isRunning={runningTaskIds.has(task.id)}
                             isSelected={task.id === selectedTaskId}
                             advanceAction={getAdvanceAction(task)}
                             onTaskClick={onTaskClick}
@@ -354,6 +357,7 @@ function VerticalDropIndicator() {
 
 function PipelineCard({
   task,
+  isRunning,
   isSelected,
   advanceAction,
   onTaskClick,
@@ -362,6 +366,7 @@ function PipelineCard({
   onDragEndNotify,
 }: {
   task: Task
+  isRunning: boolean
   isSelected: boolean
   advanceAction?: { label: string; toPhase: Phase } | null
   onTaskClick: (task: Task) => void
@@ -372,7 +377,7 @@ function PipelineCard({
   const phase = task.frontmatter.phase
   const isExecuting = phase === 'executing'
   const isComplete = phase === 'complete'
-  const isAgentRunning = isExecuting
+  const isAgentRunning = isRunning
   // Backlog tasks with a completed plan get a distinct color to signal "ready to promote"
   const hasPlan = phase === 'backlog' && !!task.frontmatter.plan && task.frontmatter.planningStatus !== 'running'
   const phaseBg = hasPlan ? 'bg-indigo-100' : (PHASE_BG[phase] || PHASE_BG.backlog)

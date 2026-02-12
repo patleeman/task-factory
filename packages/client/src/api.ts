@@ -7,6 +7,15 @@ export interface AvailableModel {
   reasoning: boolean
 }
 
+export interface ExecutionSnapshot {
+  taskId: string
+  workspaceId: string
+  status: 'idle' | 'running' | 'paused' | 'completed' | 'error'
+  startTime: string
+  endTime?: string
+  isRunning: boolean
+}
+
 export const api = {
   async getWorkspaces(): Promise<Workspace[]> {
     const res = await fetch('/api/workspaces')
@@ -161,6 +170,11 @@ export const api = {
 
   async stopQueue(workspaceId: string): Promise<QueueStatus> {
     const res = await fetch(`/api/workspaces/${workspaceId}/queue/stop`, { method: 'POST' })
+    return res.json()
+  },
+
+  async getActiveExecutions(workspaceId: string): Promise<ExecutionSnapshot[]> {
+    const res = await fetch(`/api/workspaces/${workspaceId}/executions`)
     return res.json()
   },
 
