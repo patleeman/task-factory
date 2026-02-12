@@ -85,10 +85,10 @@ export function ChatPane({
       )}
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto min-h-0">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto min-h-0 relative">
         <div className="px-4 py-3 space-y-3 text-[14px] leading-relaxed">
           {messages.length === 0 && !busy && (
-            <div className="text-center py-16 text-slate-400">
+            <div className="flex flex-col items-center justify-center text-slate-400 absolute inset-0">
               <p className="text-sm font-medium text-slate-500 mb-1">Planning Agent</p>
               <p className="text-xs">
                 Ask me to research, plan, or decompose work into tasks
