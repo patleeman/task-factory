@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react'
 import type { ModelConfig } from '@pi-factory/shared'
+import { DEFAULT_POST_EXECUTION_SKILLS } from '@pi-factory/shared'
 import { MarkdownEditor } from './MarkdownEditor'
 import { SkillSelector } from './SkillSelector'
 import { ModelSelector } from './ModelSelector'
@@ -73,7 +74,7 @@ export function CreateTaskPane({ onCancel, onSubmit }: CreateTaskPaneProps) {
 
   const handleClearForm = useCallback(() => {
     setContent('')
-    setSelectedSkillIds([])
+    setSelectedSkillIds([...DEFAULT_POST_EXECUTION_SKILLS])
     setModelConfig(undefined)
     setPendingFiles([])
     clearDraft()
@@ -115,7 +116,7 @@ export function CreateTaskPane({ onCancel, onSubmit }: CreateTaskPaneProps) {
     setIsSubmitting(true)
     await onSubmit({
       content,
-      postExecutionSkills: selectedSkillIds.length > 0 ? selectedSkillIds : undefined,
+      postExecutionSkills: selectedSkillIds,
       modelConfig,
       pendingFiles: pendingFiles.length > 0 ? pendingFiles : undefined,
     })

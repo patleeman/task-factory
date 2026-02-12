@@ -18,6 +18,7 @@ import type {
   Attachment,
   ReorderTasksRequest,
 } from '@pi-factory/shared';
+import { DEFAULT_POST_EXECUTION_SKILLS } from '@pi-factory/shared';
 
 
 // =============================================================================
@@ -162,7 +163,9 @@ export function createTask(
     commits: [],
     attachments: [],
     modelConfig: request.modelConfig || undefined,
-    postExecutionSkills: request.postExecutionSkills || undefined,
+    postExecutionSkills: request.postExecutionSkills !== undefined
+      ? request.postExecutionSkills
+      : DEFAULT_POST_EXECUTION_SKILLS,
     qualityChecks: {
       testsPass: false,
       lintPass: false,

@@ -62,12 +62,6 @@ function formatToolHeader(name: string, args?: Record<string, unknown>): { prefi
       const preview = summary.length > 80 ? summary.slice(0, 77) + '...' : summary
       return { prefix: '✅ complete', detail: preview || String(a.taskId || '') }
     }
-    case 'output': {
-      const text = String(a.content || a.text || a.message || '')
-      const firstLine = text.split('\n')[0].trim()
-      const preview = firstLine.length > 80 ? firstLine.slice(0, 77) + '...' : firstLine
-      return { prefix: 'output', detail: preview }
-    }
     default: {
       const parts = Object.entries(a)
         .filter(([, v]) => v != null)

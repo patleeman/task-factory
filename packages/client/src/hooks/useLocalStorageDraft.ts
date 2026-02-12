@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef } from 'react'
+import { DEFAULT_POST_EXECUTION_SKILLS } from '@pi-factory/shared'
 
 const STORAGE_KEY = 'pi-factory:create-task-draft'
 
@@ -14,7 +15,7 @@ export interface TaskDraft {
 
 const EMPTY_DRAFT: TaskDraft = {
   content: '',
-  selectedSkillIds: [],
+  selectedSkillIds: [...DEFAULT_POST_EXECUTION_SKILLS],
   modelConfig: undefined,
 }
 

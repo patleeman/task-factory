@@ -33,6 +33,30 @@ export const PHASE_DISPLAY_NAMES: Record<Phase, string> = {
   archived: 'Archived',
 };
 
+/**
+ * Returns the next phase a task should be promoted to, or null if already at the end.
+ * Special case: complete → archived (standard promotion).
+ */
+export function getPromotePhase(current: Phase): Phase | null {
+  const index = PHASES.indexOf(current);
+  if (index < 0 || index >= PHASES.length - 1) return null;
+  return PHASES[index + 1];
+}
+
+/**
+ * Returns the previous phase a task should be demoted to, or null if already at the start.
+ * Special cases:
+ *   - complete demotes to ready (skip executing — rework pattern)
+ *   - archived cannot be demoted (null)
+ */
+export function getDemotePhase(current: Phase): Phase | null {
+  if (current === 'archived') return null;
+  if (current === 'complete') return 'ready';
+  const index = PHASES.indexOf(current);
+  if (index <= 0) return null;
+  return PHASES[index - 1];
+}
+
 // WIP limits for each phase (null = unlimited)
 export const DEFAULT_WIP_LIMITS: Record<Phase, number | null> = {
   backlog: null,
@@ -443,3 +467,6 @@ export interface PostExecutionSkill {
   path: string;            // absolute path to skill directory
   metadata: Record<string, string>;
 }
+
+/** Default post-execution skills applied to new tasks when none are specified. */
+export const DEFAULT_POST_EXECUTION_SKILLS: string[] = ['checkpoint', 'code-review'];

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react'
 import type { Task, Phase, ActivityEntry, ModelConfig } from '@pi-factory/shared'
-import { PHASES, PHASE_DISPLAY_NAMES } from '@pi-factory/shared'
+import { PHASES, PHASE_DISPLAY_NAMES, getPromotePhase, getDemotePhase } from '@pi-factory/shared'
 import { MarkdownEditor } from './MarkdownEditor'
 import { TaskChat } from './TaskChat'
 import type { AgentStreamState } from '../hooks/useAgentStreaming'
@@ -219,6 +219,32 @@ export function TaskDetailPane({
               {isExecuting ? '...' : '▶ Run'}
             </button>
           ) : null}
+          {/* Demote button */}
+          {(() => {
+            const demoteTo = getDemotePhase(frontmatter.phase);
+            return (
+              <button
+                onClick={() => demoteTo && onMove(demoteTo)}
+                disabled={!demoteTo}
+                className="btn text-xs py-1 px-2.5 bg-slate-100 text-slate-600 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                ← {demoteTo ? PHASE_DISPLAY_NAMES[demoteTo] : 'None'}
+              </button>
+            );
+          })()}
+          {/* Promote button */}
+          {(() => {
+            const promoteTo = getPromotePhase(frontmatter.phase);
+            return (
+              <button
+                onClick={() => promoteTo && onMove(promoteTo)}
+                disabled={!promoteTo}
+                className="btn text-xs py-1 px-2.5 bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {promoteTo ? PHASE_DISPLAY_NAMES[promoteTo] : 'None'} →
+              </button>
+            );
+          })()}
           <div className="relative">
             <button
               onClick={() => setShowMoveMenu(!showMoveMenu)}
