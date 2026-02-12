@@ -230,12 +230,29 @@ body {
   @apply bg-transparent p-0;
 }
 
-.chat-prose ul, .chat-prose ol {
+.chat-prose ul, .chat-prose ol,
+.prose ul, .prose ol {
   @apply pl-5 mb-2 space-y-0.5;
 }
 
-.chat-prose ul { @apply list-disc; }
-.chat-prose ol { @apply list-decimal; }
+.chat-prose ul, .prose ul { @apply list-disc; }
+.chat-prose ol, .prose ol { @apply list-decimal; }
+
+/* GFM task lists */
+.chat-prose .contains-task-list,
+.prose .contains-task-list {
+  @apply list-none pl-0;
+}
+
+.chat-prose .task-list-item,
+.prose .task-list-item {
+  @apply list-none;
+}
+
+.chat-prose .task-list-item > input[type='checkbox'],
+.prose .task-list-item > input[type='checkbox'] {
+  @apply mr-2 mt-0.5 align-middle opacity-100;
+}
 
 .chat-prose a {
   @apply text-blue-600 underline hover:text-blue-700;
