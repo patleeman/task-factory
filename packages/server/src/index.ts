@@ -624,7 +624,6 @@ import {
   discoverPiExtensions,
   discoverPiSkills,
   loadPiSkill,
-  loadGlobalAgentsMd,
   buildAgentContext,
   discoverPiThemes,
 } from './pi-integration.js';
@@ -739,17 +738,31 @@ app.get('/api/pi/themes', (_req, res) => {
   res.json(themes);
 });
 
-// Get global AGENTS.md
-app.get('/api/pi/agents-md', (_req, res) => {
-  const content = loadGlobalAgentsMd();
-  res.json({ content: content || '' });
+// Get AGENTS.md (global + optional workspace override)
+app.get('/api/pi/agents-md', (req, res) => {
+  const workspaceId = req.query.workspace as string | undefined;
+
+  let workspacePath: string | undefined;
+  if (workspaceId) {
+    const workspace = getWorkspaceById(workspaceId);
+    if (!workspace) {
+      res.status(404).json({ error: 'Workspace not found' });
+      return;
+    }
+    workspacePath = workspace.path;
+  }
+
+  const context = buildAgentContext(workspaceId, undefined, workspacePath);
+  res.json({ content: context.globalRules });
 });
 
 // Get agent context (combined)
 app.get('/api/pi/context', (req, res) => {
   const workspaceId = req.query.workspace as string | undefined;
   const skillIds = req.query.skills as string[] | undefined;
-  const context = buildAgentContext(workspaceId, skillIds);
+
+  const workspacePath = workspaceId ? getWorkspaceById(workspaceId)?.path : undefined;
+  const context = buildAgentContext(workspaceId, skillIds, workspacePath);
   res.json(context);
 });
 

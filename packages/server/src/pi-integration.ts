@@ -3,8 +3,16 @@
 // =============================================================================
 // Integrates with Pi agent configuration, settings, extensions, and skills
 
-import { readFileSync, existsSync, readdirSync, mkdirSync, writeFileSync } from 'fs';
-import { join, resolve } from 'path';
+import {
+  readFileSync,
+  existsSync,
+  readdirSync,
+  mkdirSync,
+  writeFileSync,
+  accessSync,
+  constants,
+} from 'fs';
+import { join, resolve, isAbsolute } from 'path';
 import { homedir } from 'os';
 import type { TaskDefaults } from '@pi-factory/shared';
 
@@ -297,12 +305,12 @@ export function loadPiSkill(skillId: string): PiSkill | null {
 }
 
 // =============================================================================
-// Global Rules (AGENTS.md)
+// Global + Workspace Rules (AGENTS.md)
 // =============================================================================
 
 export function loadGlobalAgentsMd(): string | null {
   const agentsPath = join(PI_AGENT_DIR, 'AGENTS.md');
-  
+
   if (!existsSync(agentsPath)) {
     return null;
   }
@@ -313,6 +321,103 @@ export function loadGlobalAgentsMd(): string | null {
     console.error('Failed to load AGENTS.md:', err);
     return null;
   }
+}
+
+function resolveWorkspaceAgentsMdPath(workspacePath: string, agentsMdPath: string): string {
+  if (isAbsolute(agentsMdPath)) {
+    return agentsMdPath;
+  }
+
+  return resolve(workspacePath, agentsMdPath);
+}
+
+/**
+ * Load workspace-specific AGENTS.md content.
+ * Relative paths are resolved from the workspace root.
+ */
+export function loadWorkspaceAgentsMd(workspacePath: string, agentsMdPath?: string | null): string | null {
+  if (!agentsMdPath) {
+    return null;
+  }
+
+  const resolvedPath = resolveWorkspaceAgentsMdPath(workspacePath, agentsMdPath);
+
+  if (!existsSync(resolvedPath)) {
+    console.warn(
+      `[PiIntegration] Workspace AGENTS.md not found: ${resolvedPath} (configured as "${agentsMdPath}")`,
+    );
+    return null;
+  }
+
+  try {
+    accessSync(resolvedPath, constants.R_OK);
+    return readFileSync(resolvedPath, 'utf-8');
+  } catch (err) {
+    console.warn(
+      `[PiIntegration] Workspace AGENTS.md is not readable: ${resolvedPath} (${String(err)})`,
+    );
+    return null;
+  }
+}
+
+function mergeAgentsMd(globalAgentsMd: string, workspaceAgentsMd: string | null): string {
+  if (!workspaceAgentsMd || workspaceAgentsMd.trim().length === 0) {
+    return globalAgentsMd;
+  }
+
+  if (!globalAgentsMd || globalAgentsMd.trim().length === 0) {
+    return workspaceAgentsMd;
+  }
+
+  return `${globalAgentsMd.trimEnd()}\n\n${workspaceAgentsMd.trimStart()}`;
+}
+
+function loadWorkspaceAgentsMdPathFromConfig(workspacePath: string): string | undefined {
+  const workspaceConfigPath = join(workspacePath, '.pi', 'factory.json');
+
+  if (!existsSync(workspaceConfigPath)) {
+    return undefined;
+  }
+
+  try {
+    const raw = readFileSync(workspaceConfigPath, 'utf-8');
+    const parsed = JSON.parse(raw) as { agentsMdPath?: unknown };
+
+    if (typeof parsed.agentsMdPath === 'string' && parsed.agentsMdPath.trim().length > 0) {
+      return parsed.agentsMdPath;
+    }
+  } catch (err) {
+    console.warn(
+      `[PiIntegration] Failed to parse workspace config at ${workspaceConfigPath}: ${String(err)}`,
+    );
+  }
+
+  return undefined;
+}
+
+function loadWorkspacePathFromRegistry(workspaceId: string): string | undefined {
+  const registryPath = join(PI_FACTORY_DIR, 'workspaces.json');
+
+  if (!existsSync(registryPath)) {
+    return undefined;
+  }
+
+  try {
+    const raw = readFileSync(registryPath, 'utf-8');
+    const entries = JSON.parse(raw) as Array<{ id?: unknown; path?: unknown }>;
+
+    for (const entry of entries) {
+      if (entry.id === workspaceId && typeof entry.path === 'string' && entry.path.length > 0) {
+        return entry.path;
+      }
+    }
+  } catch (err) {
+    console.warn(
+      `[PiIntegration] Failed to parse workspace registry at ${registryPath}: ${String(err)}`,
+    );
+  }
+
+  return undefined;
 }
 
 // =============================================================================
@@ -424,10 +529,30 @@ export interface AgentContext {
   workspaceConfig?: WorkspacePiConfig;
 }
 
-export function buildAgentContext(workspaceId?: string, skillIds?: string[]): AgentContext {
+export function buildAgentContext(
+  workspaceId?: string,
+  skillIds?: string[],
+  workspacePath?: string,
+): AgentContext {
   const settings = loadMergedSettings();
-  const globalRules = loadGlobalAgentsMd() || '';
-  
+  const globalAgentsMd = loadGlobalAgentsMd() || '';
+
+  let resolvedWorkspacePath = workspacePath;
+
+  if (!resolvedWorkspacePath && workspaceId) {
+    resolvedWorkspacePath = loadWorkspacePathFromRegistry(workspaceId);
+  }
+
+  const workspaceAgentsMdPath = resolvedWorkspacePath
+    ? loadWorkspaceAgentsMdPathFromConfig(resolvedWorkspacePath)
+    : undefined;
+
+  const workspaceAgentsMd = resolvedWorkspacePath
+    ? loadWorkspaceAgentsMd(resolvedWorkspacePath, workspaceAgentsMdPath)
+    : null;
+
+  const globalRules = mergeAgentsMd(globalAgentsMd, workspaceAgentsMd);
+
   // Load skills - either specified ones or enabled for workspace
   let availableSkills: PiSkill[];
   if (skillIds) {

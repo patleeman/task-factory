@@ -285,6 +285,10 @@ export interface WorkspaceConfig {
   taskLocations: string[]; // directory paths
   defaultTaskLocation: string;
 
+  // Optional workspace-specific AGENTS.md path
+  // Relative paths are resolved from the workspace root.
+  agentsMdPath?: string;
+
   // WIP limits (override defaults)
   wipLimits?: Partial<Record<Phase, number | null>>;
 
