@@ -7,6 +7,7 @@ import { SkillSelector } from './SkillSelector'
 import { ModelSelector } from './ModelSelector'
 import { PostExecutionSummary, GenerateSummaryButton } from './PostExecutionSummary'
 import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { api } from '../api'
 
 interface TaskDetailPaneProps {
@@ -42,7 +43,6 @@ export function TaskDetailPane({
   const [editedModelConfig, setEditedModelConfig] = useState<ModelConfig | undefined>(
     task.frontmatter.modelConfig
   )
-  const [isRegeneratingCriteria, setIsRegeneratingCriteria] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const { frontmatter } = task
 
@@ -90,17 +90,6 @@ export function TaskDetailPane({
       setIsEditing(false)
     } catch (err) {
       console.error('Failed to save task:', err)
-    }
-  }
-
-  const handleRegenerateCriteria = async () => {
-    setIsRegeneratingCriteria(true)
-    try {
-      await api.regenerateCriteria(workspaceId, task.id)
-    } catch (err) {
-      console.error('Failed to regenerate acceptance criteria:', err)
-    } finally {
-      setIsRegeneratingCriteria(false)
     }
   }
 
@@ -210,9 +199,7 @@ export function TaskDetailPane({
           setSelectedSkillIds={setSelectedSkillIds}
           availableSkills={availableSkills}
           missingAcceptanceCriteria={missingAcceptanceCriteria}
-          isRegeneratingCriteria={isRegeneratingCriteria}
           isPlanGenerating={isPlanGenerating}
-          onRegenerateCriteria={handleRegenerateCriteria}
           onSaveEdit={handleSaveEdit}
           onDelete={handleDelete}
         />
@@ -225,7 +212,7 @@ export function TaskDetailPane({
 // Details Content — shared between tabbed and side-by-side layouts
 // =============================================================================
 
-function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditing, editedTitle, setEditedTitle, editedContent, setEditedContent, editedCriteria, setEditedCriteria, editedModelConfig, setEditedModelConfig, selectedSkillIds, setSelectedSkillIds, availableSkills, missingAcceptanceCriteria, isRegeneratingCriteria, isPlanGenerating, onRegenerateCriteria, onSaveEdit, onDelete }: any) {
+function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditing, editedTitle, setEditedTitle, editedContent, setEditedContent, editedCriteria, setEditedCriteria, editedModelConfig, setEditedModelConfig, selectedSkillIds, setSelectedSkillIds, availableSkills, missingAcceptanceCriteria, isPlanGenerating, onSaveEdit, onDelete }: any) {
   const isCompleted = frontmatter.phase === 'complete' || frontmatter.phase === 'archived'
 
   return (
@@ -325,7 +312,7 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
           </div>
           <div>
             <h4 className="text-xs font-semibold text-slate-600 mb-1">Goal</h4>
-            <div className="prose prose-slate prose-sm max-w-none text-slate-800"><ReactMarkdown>{frontmatter.plan.goal}</ReactMarkdown></div>
+            <div className="prose prose-slate prose-sm max-w-none text-slate-800"><ReactMarkdown remarkPlugins={[remarkGfm]}>{frontmatter.plan.goal}</ReactMarkdown></div>
           </div>
           {frontmatter.plan.steps.length > 0 && (
             <div>
@@ -334,7 +321,7 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
                 {frontmatter.plan.steps.map((step: string, i: number) => (
                   <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
                     <span className="text-blue-600 font-semibold shrink-0 min-w-[1.5rem] text-right">{i + 1}.</span>
-                    <div className="prose prose-slate prose-sm max-w-none min-w-0 [&>p]:m-0"><ReactMarkdown>{step}</ReactMarkdown></div>
+                    <div className="prose prose-slate prose-sm max-w-none min-w-0 [&>p]:m-0"><ReactMarkdown remarkPlugins={[remarkGfm]}>{step}</ReactMarkdown></div>
                   </li>
                 ))}
               </ol>
@@ -345,7 +332,7 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
               <h4 className="text-xs font-semibold text-slate-600 mb-1">Validation</h4>
               <ul className="space-y-1.5">
                 {frontmatter.plan.validation.map((item: string, i: number) => (
-                  <li key={i} className="flex items-start gap-2 text-sm text-slate-700"><span className="text-green-500 shrink-0 mt-0.5">✓</span><div className="prose prose-slate prose-sm max-w-none min-w-0 [&>p]:m-0"><ReactMarkdown>{item}</ReactMarkdown></div></li>
+                  <li key={i} className="flex items-start gap-2 text-sm text-slate-700"><span className="text-green-500 shrink-0 mt-0.5">✓</span><div className="prose prose-slate prose-sm max-w-none min-w-0 [&>p]:m-0"><ReactMarkdown remarkPlugins={[remarkGfm]}>{item}</ReactMarkdown></div></li>
                 ))}
               </ul>
             </div>
@@ -355,7 +342,7 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
               <h4 className="text-xs font-semibold text-slate-600 mb-1">Cleanup</h4>
               <ul className="space-y-1.5">
                 {frontmatter.plan.cleanup.map((item: string, i: number) => (
-                  <li key={i} className="flex items-start gap-2 text-sm text-slate-700"><span className="text-slate-400 shrink-0 mt-0.5 text-xs">—</span><div className="prose prose-slate prose-sm max-w-none min-w-0 [&>p]:m-0"><ReactMarkdown>{item}</ReactMarkdown></div></li>
+                  <li key={i} className="flex items-start gap-2 text-sm text-slate-700"><span className="text-slate-400 shrink-0 mt-0.5 text-xs">—</span><div className="prose prose-slate prose-sm max-w-none min-w-0 [&>p]:m-0"><ReactMarkdown remarkPlugins={[remarkGfm]}>{item}</ReactMarkdown></div></li>
                 ))}
               </ul>
             </div>
@@ -369,7 +356,7 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
         {isEditing ? (
           <MarkdownEditor value={editedContent} onChange={setEditedContent} placeholder="Task description in markdown..." minHeight="400px" />
         ) : task.content ? (
-          <div className="prose prose-slate prose-sm max-w-none"><ReactMarkdown>{task.content}</ReactMarkdown></div>
+          <div className="prose prose-slate prose-sm max-w-none"><ReactMarkdown remarkPlugins={[remarkGfm]}>{task.content}</ReactMarkdown></div>
         ) : (
           <p className="text-sm text-slate-400 italic">No description</p>
         )}
@@ -377,15 +364,10 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
 
       {/* Acceptance Criteria */}
       <div className={missingAcceptanceCriteria ? 'rounded-lg border-2 border-red-300 bg-red-50 p-3 -mx-1' : ''}>
-        <div className="flex items-center justify-between mb-2">
+        <div className="mb-2">
           <h3 className={`text-xs font-semibold uppercase tracking-wide ${missingAcceptanceCriteria ? 'text-red-600' : 'text-slate-500'}`}>
             {missingAcceptanceCriteria && <span className="mr-1 text-red-500">!</span>}Acceptance Criteria
           </h3>
-          {!isEditing && (
-            <button onClick={onRegenerateCriteria} disabled={isRegeneratingCriteria} className="text-xs text-blue-600 hover:text-blue-800 font-medium disabled:opacity-50 disabled:cursor-wait flex items-center gap-1" title="Regenerate acceptance criteria using task description and plan">
-              {isRegeneratingCriteria ? (<><span className="inline-block w-3 h-3 border border-blue-400 border-t-transparent rounded-full animate-spin" />Regenerating…</>) : '↻ Regenerate'}
-            </button>
-          )}
         </div>
         {isEditing ? (
           <MarkdownEditor value={editedCriteria} onChange={setEditedCriteria} placeholder="One criterion per line" minHeight="160px" />
@@ -394,7 +376,7 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
             {frontmatter.acceptanceCriteria.map((criteria: string, i: number) => (
               <li key={i} className="flex items-start gap-2 text-sm">
                 <span className="w-5 h-5 rounded border border-slate-300 flex items-center justify-center text-[10px] text-slate-400 shrink-0 mt-0.5">{i + 1}</span>
-                <div className="prose prose-slate prose-sm max-w-none min-w-0 text-slate-700 [&>p]:m-0"><ReactMarkdown>{criteria}</ReactMarkdown></div>
+                <div className="prose prose-slate prose-sm max-w-none min-w-0 text-slate-700 [&>p]:m-0"><ReactMarkdown remarkPlugins={[remarkGfm]}>{criteria}</ReactMarkdown></div>
               </li>
             ))}
           </ul>

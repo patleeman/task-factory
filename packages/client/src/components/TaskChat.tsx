@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, memo, useMemo, useCallback } from 'react'
 import type { ActivityEntry, Attachment, AgentExecutionStatus, Phase } from '@pi-factory/shared'
 import type { AgentStreamState, ToolCallState } from '../hooks/useAgentStreaming'
 import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { api } from '../api'
 
 type SendMode = 'message' | 'steer' | 'followUp'
@@ -343,7 +344,7 @@ const CollapsibleAgentMessage = memo(function CollapsibleAgentMessage({
 }) {
   return (
     <div className="chat-prose text-slate-700">
-      <ReactMarkdown>{content}</ReactMarkdown>
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
     </div>
   )
 })
@@ -674,7 +675,7 @@ export function TaskChat({
           {isAgentActive && agentStream.streamingText && (
             <div>
               <div className="chat-prose text-slate-700">
-                <ReactMarkdown>{agentStream.streamingText}</ReactMarkdown>
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{agentStream.streamingText}</ReactMarkdown>
               </div>
               <span className="inline-block w-[2px] h-[14px] bg-slate-400 animate-pulse align-middle ml-0.5" />
             </div>

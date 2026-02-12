@@ -260,6 +260,31 @@ body {
   @apply border-slate-200 my-3;
 }
 
+.chat-prose del {
+  @apply text-slate-400;
+}
+
+/* Table styles for chat prose and task detail prose */
+.chat-prose table,
+.prose table {
+  @apply w-full border-collapse my-3 text-sm;
+}
+
+.chat-prose th,
+.prose th {
+  @apply border border-slate-300 bg-slate-100 px-3 py-1.5 text-left font-semibold text-slate-700 text-xs;
+}
+
+.chat-prose td,
+.prose td {
+  @apply border border-slate-200 px-3 py-1.5 text-slate-700;
+}
+
+.chat-prose tr:hover,
+.prose tr:hover {
+  @apply bg-slate-50;
+}
+
 /* Quality Gates */
 .quality-check {
   @apply flex items-center gap-2 text-sm;
