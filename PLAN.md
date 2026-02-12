@@ -464,15 +464,15 @@ pi-factory/
 - [x] Batch push from shelf to backlog (push-all endpoint + UI button)
 - [x] Status awareness (system prompt includes current tasks and shelf state)
 
-### Phase 4: Quality & Metrics
-- [ ] Quality gates implementation
-- [ ] Metrics calculation (cycle time, throughput)
-- [ ] Metrics accessible via planning agent ("how are we doing?")
-- [ ] Blocker tracking and escalation
+### Phase 4: Quality & Metrics ✅
+- [x] Quality gates implementation (interactive toggles in TaskDetailPane)
+- [x] Metrics calculation (cycle time, lead time — calculated on phase transition)
+- [x] Metrics accessible via planning agent (system prompt includes aggregate stats)
+- [x] Blocker tracking and escalation (blocker status shown in system prompt)
 
 ### Phase 5: Polish & Release
-- [ ] UI refinement and animations
-- [ ] Keyboard shortcuts
+- [x] UI refinement and animations (mode transitions, quality gate styling)
+- [x] Keyboard shortcuts (Esc=deselect, ⌘N=new task, ⌘K=focus chat)
 - [ ] CLI improvements
 - [ ] Documentation
 - [ ] npm publishing
