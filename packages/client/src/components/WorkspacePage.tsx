@@ -13,9 +13,9 @@ import { useAgentStreaming } from '../hooks/useAgentStreaming'
 import { usePlanningStreaming } from '../hooks/usePlanningStreaming'
 import { TaskChat } from './TaskChat'
 
-const RIGHT_PANE_MIN = 280
-const RIGHT_PANE_MAX = 700
-const RIGHT_PANE_DEFAULT = 380
+const LEFT_PANE_MIN = 320
+const LEFT_PANE_MAX = 800
+const LEFT_PANE_DEFAULT = 480
 
 type MainPaneMode =
   | { type: 'empty' }
@@ -30,7 +30,7 @@ export function WorkspacePage() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [activity, setActivity] = useState<ActivityEntry[]>([])
   const [mainPane, setMainPane] = useState<MainPaneMode>({ type: 'empty' })
-  const [rightPaneWidth, setRightPaneWidth] = useState(RIGHT_PANE_DEFAULT)
+  const [leftPaneWidth, setLeftPaneWidth] = useState(LEFT_PANE_DEFAULT)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [toast, setToast] = useState<string | null>(null)
@@ -404,8 +404,8 @@ export function WorkspacePage() {
   }
 
   const handleResize = useCallback((delta: number) => {
-    // delta is positive when dragging left — shrink the left pane
-    setRightPaneWidth((prev) => Math.min(RIGHT_PANE_MAX, Math.max(RIGHT_PANE_MIN, prev - delta)))
+    // delta is positive when dragging right — expand the left pane
+    setLeftPaneWidth((prev) => Math.min(LEFT_PANE_MAX, Math.max(LEFT_PANE_MIN, prev - delta)))
   }, [])
 
   if (isLoading) {
@@ -531,7 +531,7 @@ export function WorkspacePage() {
           {/* Left pane — Chat (planning or task, depending on mode) */}
           <div
             className="bg-slate-50 overflow-hidden shrink-0"
-            style={{ width: rightPaneWidth }}
+            style={{ width: leftPaneWidth }}
           >
             {mode === 'planning' ? (
               <ChatPane
