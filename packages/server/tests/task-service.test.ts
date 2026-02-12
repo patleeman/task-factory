@@ -8,7 +8,9 @@ import {
   createTask as createTaskFile,
   discoverTasks,
   moveTaskToPhase,
+  parseTaskContent,
   shouldResumeInterruptedPlanning,
+  updateTask,
 } from '../src/task-service.js';
 
 function createTask(overrides: Partial<Task['frontmatter']> = {}): Task {
@@ -147,6 +149,69 @@ describe('task ordering', () => {
   });
 });
 
+describe('acceptance criteria normalization', () => {
+  it('strips empty acceptance criteria when creating tasks', () => {
+    const { workspacePath, tasksDir } = createTempWorkspace();
+
+    const created = createTaskFile(workspacePath, tasksDir, {
+      title: 'Normalize criteria on create',
+      content: 'create task',
+      acceptanceCriteria: ['', '  first criterion  ', '   ', 'second criterion'],
+    });
+
+    expect(created.frontmatter.acceptanceCriteria).toEqual(['first criterion', 'second criterion']);
+
+    const persisted = discoverTasks(tasksDir).find((task) => task.id === created.id)!;
+    expect(persisted.frontmatter.acceptanceCriteria).toEqual(['first criterion', 'second criterion']);
+  });
+
+  it('strips empty acceptance criteria when updating tasks', () => {
+    const { workspacePath, tasksDir } = createTempWorkspace();
+
+    const created = createTaskFile(workspacePath, tasksDir, {
+      title: 'Normalize criteria on update',
+      content: 'update task',
+      acceptanceCriteria: ['existing'],
+    });
+
+    const updated = updateTask(created, {
+      acceptanceCriteria: ['  ', '\t', '  keep me  ', ''],
+    });
+
+    expect(updated.frontmatter.acceptanceCriteria).toEqual(['keep me']);
+
+    const persisted = discoverTasks(tasksDir).find((task) => task.id === created.id)!;
+    expect(persisted.frontmatter.acceptanceCriteria).toEqual(['keep me']);
+  });
+
+  it('strips empty acceptance criteria when parsing task files', () => {
+    const now = new Date().toISOString();
+    const rawTask = `---
+id: TEST-RAW
+phase: backlog
+created: ${now}
+updated: ${now}
+workspace: /tmp/workspace
+project: workspace
+acceptanceCriteria:
+  - ""
+  - "   "
+  - Keep this
+testingInstructions: []
+commits: []
+attachments: []
+blocked:
+  isBlocked: false
+---
+
+Body`;
+
+    const parsed = parseTaskContent(rawTask, '/tmp/test-raw.md');
+
+    expect(parsed.frontmatter.acceptanceCriteria).toEqual(['Keep this']);
+  });
+});
+
 describe('canMoveToPhase', () => {
   it.each(['backlog', 'ready', 'executing', 'complete'] as const)(
     'allows moving from %s to archived',
@@ -185,5 +250,13 @@ describe('canMoveToPhase', () => {
 
     const withCriteria = createTask({ phase: 'backlog', acceptanceCriteria: ['has AC'] });
     expect(canMoveToPhase(withCriteria, 'ready')).toEqual({ allowed: true });
+  });
+
+  it('blocks move to ready when criteria are only empty strings', () => {
+    const whitespaceOnly = createTask({ phase: 'backlog', acceptanceCriteria: ['   ', '\t', ''] });
+    const blocked = canMoveToPhase(whitespaceOnly, 'ready');
+
+    expect(blocked.allowed).toBe(false);
+    expect(blocked.reason).toBe('Task must have acceptance criteria before moving to Ready');
   });
 });

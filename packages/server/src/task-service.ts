@@ -46,6 +46,26 @@ export function generateTaskId(workspacePath: string, tasksDir: string): string 
   return `${prefix}-${maxNum + 1}`;
 }
 
+export function normalizeAcceptanceCriteria(criteria: unknown): string[] {
+  if (!Array.isArray(criteria)) {
+    return [];
+  }
+
+  return criteria
+    .map((criterion) => {
+      if (typeof criterion === 'string') {
+        return criterion.trim();
+      }
+
+      if (criterion == null) {
+        return '';
+      }
+
+      return String(criterion).trim();
+    })
+    .filter(Boolean);
+}
+
 export function parseTaskFile(filePath: string): Task {
   const content = readFileSync(filePath, 'utf-8');
   return parseTaskContent(content, filePath);
@@ -87,6 +107,8 @@ export function parseTaskContent(content: string, filePath: string): Task {
     blocked: parsed.blocked || { isBlocked: false },
     ...parsed,
   };
+
+  frontmatter.acceptanceCriteria = normalizeAcceptanceCriteria(frontmatter.acceptanceCriteria);
 
   return {
     id: frontmatter.id,
@@ -160,7 +182,7 @@ export function createTask(
     blockedCount: 0,
     blockedDuration: 0,
     order: nextOrder,
-    acceptanceCriteria: request.acceptanceCriteria || [],
+    acceptanceCriteria: normalizeAcceptanceCriteria(request.acceptanceCriteria),
     testingInstructions: [],
     commits: [],
     attachments: [],
@@ -199,7 +221,7 @@ export function updateTask(
   }
 
   if (request.acceptanceCriteria !== undefined) {
-    task.frontmatter.acceptanceCriteria = request.acceptanceCriteria;
+    task.frontmatter.acceptanceCriteria = normalizeAcceptanceCriteria(request.acceptanceCriteria);
   }
 
   if (request.assigned !== undefined) {
@@ -439,7 +461,7 @@ export function canMoveToPhase(task: Task, targetPhase: Phase): {
 
   // Phase-specific validation
   if (targetPhase === 'ready') {
-    if (task.frontmatter.acceptanceCriteria.length === 0) {
+    if (normalizeAcceptanceCriteria(task.frontmatter.acceptanceCriteria).length === 0) {
       return {
         allowed: false,
         reason: 'Task must have acceptance criteria before moving to Ready',
