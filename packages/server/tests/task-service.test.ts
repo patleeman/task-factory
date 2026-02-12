@@ -4,6 +4,7 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import type { Task } from '@pi-factory/shared';
 import {
+  canMoveToPhase,
   createTask as createTaskFile,
   discoverTasks,
   moveTaskToPhase,
@@ -143,5 +144,46 @@ describe('task ordering', () => {
 
     expect(readyTasks.map((task) => task.id)).toEqual([second.id, first.id]);
     expect(readyTasks[0].frontmatter.order).toBeLessThan(readyTasks[1].frontmatter.order);
+  });
+});
+
+describe('canMoveToPhase', () => {
+  it.each(['backlog', 'ready', 'executing', 'complete'] as const)(
+    'allows moving from %s to archived',
+    (phase) => {
+      const task = createTask({ phase });
+      const result = canMoveToPhase(task, 'archived');
+
+      expect(result).toEqual({ allowed: true });
+    },
+  );
+
+  it('keeps non-archive constraints (backlog -> executing is rejected)', () => {
+    const task = createTask({ phase: 'backlog' });
+    const result = canMoveToPhase(task, 'executing');
+
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toBe('Cannot move from backlog to executing');
+  });
+
+  it('only allows unarchive from archived to backlog', () => {
+    const archivedTask = createTask({ phase: 'archived' });
+
+    expect(canMoveToPhase(archivedTask, 'backlog')).toEqual({ allowed: true });
+
+    const blocked = canMoveToPhase(archivedTask, 'ready');
+    expect(blocked.allowed).toBe(false);
+    expect(blocked.reason).toBe('Cannot move from archived to ready');
+  });
+
+  it('preserves the ready phase acceptance criteria guard', () => {
+    const missingCriteria = createTask({ phase: 'backlog', acceptanceCriteria: [] });
+    const blocked = canMoveToPhase(missingCriteria, 'ready');
+
+    expect(blocked.allowed).toBe(false);
+    expect(blocked.reason).toBe('Task must have acceptance criteria before moving to Ready');
+
+    const withCriteria = createTask({ phase: 'backlog', acceptanceCriteria: ['has AC'] });
+    expect(canMoveToPhase(withCriteria, 'ready')).toEqual({ allowed: true });
   });
 });

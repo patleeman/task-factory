@@ -418,9 +418,9 @@ export function canMoveToPhase(task: Task, targetPhase: Phase): {
   // Users can pause executing tasks (move back to backlog/ready) and resume later.
   // The session file is preserved so the agent picks up where it left off.
   const validTransitions: Record<Phase, Phase[]> = {
-    backlog: ['ready'],
-    ready: ['backlog', 'executing'],
-    executing: ['backlog', 'ready', 'complete'],
+    backlog: ['ready', 'archived'],
+    ready: ['backlog', 'executing', 'archived'],
+    executing: ['backlog', 'ready', 'complete', 'archived'],
     complete: ['ready', 'executing', 'archived'],
     archived: ['backlog'], // Un-archive back to backlog
   };
