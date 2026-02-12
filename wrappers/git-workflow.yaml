@@ -1,0 +1,6 @@
+name: Git Workflow
+description: Checkpoint and code-review after execution
+preExecutionSkills: []
+postExecutionSkills:
+  - checkpoint
+  - code-review

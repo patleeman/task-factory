@@ -26,7 +26,7 @@ import {
   type PiSkill,
 } from './pi-integration.js';
 import { moveTaskToPhase, updateTask, saveTaskFile } from './task-service.js';
-import { runPostExecutionSkills } from './post-execution-skills.js';
+import { runPreExecutionSkills, runPostExecutionSkills } from './post-execution-skills.js';
 import { withTimeout } from './with-timeout.js';
 import { generateAndPersistSummary } from './summary-service.js';
 
@@ -606,6 +606,55 @@ async function runAgentExecution(
   images?: ImageContent[],
 ): Promise<void> {
   try {
+    // Run pre-execution skills before the main prompt
+    const preSkillIds = task.frontmatter.preExecutionSkills;
+    if (preSkillIds && preSkillIds.length > 0 && session.piSession) {
+      session.broadcastToWorkspace?.({
+        type: 'agent:execution_status',
+        taskId: task.id,
+        status: 'pre-hooks' as any,
+      });
+
+      const preStartEntry = createSystemEvent(
+        workspaceId,
+        task.id,
+        'phase-change',
+        `Running ${preSkillIds.length} pre-execution skill(s): ${preSkillIds.join(', ')}`,
+        { skillIds: preSkillIds }
+      );
+      session.broadcastToWorkspace?.({ type: 'activity:entry', entry: preStartEntry });
+
+      try {
+        await runPreExecutionSkills(session.piSession, preSkillIds, {
+          taskId: task.id,
+          workspaceId,
+          broadcastToWorkspace: session.broadcastToWorkspace,
+          skillConfigs: task.frontmatter.skillConfigs,
+        });
+      } catch (preErr) {
+        console.error('Pre-execution skills failed:', preErr);
+        const preErrEntry = createSystemEvent(
+          workspaceId,
+          task.id,
+          'phase-change',
+          `Pre-execution skills failed — skipping main execution and post-execution: ${preErr}`,
+          { error: String(preErr) }
+        );
+        session.broadcastToWorkspace?.({ type: 'activity:entry', entry: preErrEntry });
+
+        // Pre-execution failure: skip main execution and post-execution
+        handleAgentError(session, workspaceId, task, preErr);
+        return;
+      }
+
+      // Broadcast that pre-execution is done, main execution starting
+      session.broadcastToWorkspace?.({
+        type: 'agent:execution_status',
+        taskId: task.id,
+        status: 'streaming',
+      });
+    }
+
     const promptOpts = images && images.length > 0 ? { images } : undefined;
     await session.piSession!.prompt(prompt, promptOpts);
 

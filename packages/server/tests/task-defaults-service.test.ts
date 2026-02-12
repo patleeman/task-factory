@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_POST_EXECUTION_SKILLS, type TaskDefaults } from '@pi-factory/shared';
+import { DEFAULT_POST_EXECUTION_SKILLS, DEFAULT_PRE_EXECUTION_SKILLS, type TaskDefaults } from '@pi-factory/shared';
 import {
   applyTaskDefaultsToRequest,
   getBuiltInTaskDefaults,
@@ -22,6 +22,7 @@ describe('validateTaskDefaults', () => {
         modelId: 'claude-sonnet-4',
         thinkingLevel: 'minimal',
       },
+      preExecutionSkills: [],
       postExecutionSkills: ['checkpoint', 'code-review'],
     };
 
@@ -34,6 +35,7 @@ describe('validateTaskDefaults', () => {
         provider: 'anthropic',
         modelId: 'gpt-4o',
       },
+      preExecutionSkills: [],
       postExecutionSkills: ['checkpoint'],
     };
 
@@ -52,6 +54,7 @@ describe('validateTaskDefaults', () => {
         modelId: 'gpt-4o',
         thinkingLevel: 'high',
       },
+      preExecutionSkills: [],
       postExecutionSkills: ['checkpoint'],
     };
 
@@ -70,6 +73,7 @@ describe('validateTaskDefaults', () => {
         modelId: 'claude-sonnet-4',
         thinkingLevel: 'xhigh',
       },
+      preExecutionSkills: [],
       postExecutionSkills: ['checkpoint'],
     };
 
@@ -82,6 +86,7 @@ describe('validateTaskDefaults', () => {
         provider: 'anthropic',
         modelId: 'claude-sonnet-4',
       },
+      preExecutionSkills: [],
       postExecutionSkills: ['checkpoint', 'not-a-real-skill'],
     };
 
@@ -90,6 +95,21 @@ describe('validateTaskDefaults', () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.error).toContain('Unknown post-execution skills');
+    }
+  });
+
+  it('rejects unknown pre-execution skill IDs', () => {
+    const defaults: TaskDefaults = {
+      modelConfig: undefined,
+      preExecutionSkills: ['not-a-real-skill'],
+      postExecutionSkills: ['checkpoint'],
+    };
+
+    const result = validateTaskDefaults(defaults, AVAILABLE_MODELS, AVAILABLE_SKILLS);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain('Unknown pre-execution skills');
     }
   });
 });
@@ -112,6 +132,7 @@ describe('resolveTaskDefaults', () => {
     } as any);
 
     expect(resolved.postExecutionSkills).toEqual(DEFAULT_POST_EXECUTION_SKILLS);
+    expect(resolved.preExecutionSkills).toEqual(DEFAULT_PRE_EXECUTION_SKILLS);
     expect(resolved.modelConfig).toEqual({
       provider: 'anthropic',
       modelId: 'claude-sonnet-4',
@@ -128,12 +149,14 @@ describe('applyTaskDefaultsToRequest', () => {
         modelId: 'claude-sonnet-4',
         thinkingLevel: 'low',
       },
+      preExecutionSkills: ['checkpoint'],
       postExecutionSkills: ['checkpoint', 'code-review'],
     };
 
     const applied = applyTaskDefaultsToRequest({ content: 'Implement feature' }, defaults);
 
     expect(applied.modelConfig).toEqual(defaults.modelConfig);
+    expect(applied.preExecutionSkills).toEqual(defaults.preExecutionSkills);
     expect(applied.postExecutionSkills).toEqual(defaults.postExecutionSkills);
   });
 
@@ -144,6 +167,7 @@ describe('applyTaskDefaultsToRequest', () => {
         modelId: 'claude-sonnet-4',
         thinkingLevel: 'low',
       },
+      preExecutionSkills: ['checkpoint'],
       postExecutionSkills: ['checkpoint', 'code-review'],
     };
 
@@ -153,10 +177,12 @@ describe('applyTaskDefaultsToRequest', () => {
         provider: 'openai',
         modelId: 'gpt-4o',
       },
+      preExecutionSkills: [],
       postExecutionSkills: ['security-review'],
     }, defaults);
 
     expect(applied.modelConfig).toEqual({ provider: 'openai', modelId: 'gpt-4o' });
+    expect(applied.preExecutionSkills).toEqual([]);
     expect(applied.postExecutionSkills).toEqual(['security-review']);
   });
 });

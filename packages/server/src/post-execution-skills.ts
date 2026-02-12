@@ -192,6 +192,79 @@ interface SkillSession {
 }
 
 /**
+ * Run pre-execution skills sequentially on an existing Pi session.
+ * Each skill runs as a fresh prompt turn. Unlike post-execution skills,
+ * pre-execution skills throw on first failure — preventing main execution
+ * and post-execution from running.
+ */
+export async function runPreExecutionSkills(
+  piSession: SkillSession,
+  skillIds: string[],
+  ctx: RunSkillsContext,
+): Promise<void> {
+  const { taskId, workspaceId, broadcastToWorkspace, skillConfigs } = ctx;
+
+  for (const skillId of skillIds) {
+    let skill = getPostExecutionSkill(skillId);
+    if (!skill) {
+      const errMsg = `Pre-execution skill "${skillId}" not found`;
+      console.warn(`[Skills] ${errMsg}`);
+      const notFoundEntry = createSystemEvent(
+        workspaceId,
+        taskId,
+        'phase-change',
+        errMsg,
+        { skillId }
+      );
+      broadcastToWorkspace?.({ type: 'activity:entry', entry: notFoundEntry });
+      throw new Error(errMsg);
+    }
+
+    // Apply configuration overrides from task skillConfigs
+    skill = applySkillConfigOverrides(skill, skillConfigs?.[skillId]);
+
+    // Broadcast that we're starting this skill
+    const startEntry = createSystemEvent(
+      workspaceId,
+      taskId,
+      'phase-change',
+      `Running pre-execution skill: ${skill.name}`,
+      { skillId: skill.id, skillType: skill.type }
+    );
+    broadcastToWorkspace?.({ type: 'activity:entry', entry: startEntry });
+
+    try {
+      if (skill.type === 'loop') {
+        await runLoopSkill(piSession, skill, ctx);
+      } else {
+        await runFollowUpSkill(piSession, skill, ctx);
+      }
+    } catch (err) {
+      console.error(`[Skills] Pre-execution skill "${skillId}" failed:`, err);
+      const errEntry = createSystemEvent(
+        workspaceId,
+        taskId,
+        'phase-change',
+        `Pre-execution skill "${skill.name}" failed: ${err}`,
+        { skillId: skill.id, error: String(err) }
+      );
+      broadcastToWorkspace?.({ type: 'activity:entry', entry: errEntry });
+      // Throw to prevent main execution and post-execution from running
+      throw new Error(`Pre-execution skill "${skill.name}" failed: ${err}`);
+    }
+
+    const doneEntry = createSystemEvent(
+      workspaceId,
+      taskId,
+      'phase-change',
+      `Pre-execution skill completed: ${skill.name}`,
+      { skillId: skill.id }
+    );
+    broadcastToWorkspace?.({ type: 'activity:entry', entry: doneEntry });
+  }
+}
+
+/**
  * Run post-execution skills sequentially on an existing Pi session.
  * Each skill runs as a fresh prompt turn so tool output/events are emitted
  * and visible in the task chat timeline.

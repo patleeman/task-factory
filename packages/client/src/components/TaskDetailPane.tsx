@@ -39,6 +39,9 @@ export function TaskDetailPane({
     formatAcceptanceCriteriaForEditor(task.frontmatter.acceptanceCriteria)
   )
   const [availableSkills, setAvailableSkills] = useState<PostExecutionSkill[]>([])
+  const [selectedPreSkillIds, setSelectedPreSkillIds] = useState<string[]>(
+    task.frontmatter.preExecutionSkills || []
+  )
   const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>(
     task.frontmatter.postExecutionSkills || []
   )
@@ -70,6 +73,7 @@ export function TaskDetailPane({
     setEditedTitle(task.frontmatter.title)
     setEditedContent(task.content)
     setEditedCriteria(formatAcceptanceCriteriaForEditor(task.frontmatter.acceptanceCriteria))
+    setSelectedPreSkillIds(task.frontmatter.preExecutionSkills || [])
     setSelectedSkillIds(task.frontmatter.postExecutionSkills || [])
     setEditedModelConfig(task.frontmatter.modelConfig)
     setEditedSkillConfigs(task.frontmatter.skillConfigs || {})
@@ -89,6 +93,7 @@ export function TaskDetailPane({
             .split('\n')
             .map((s) => s.trim())
             .filter(Boolean),
+          preExecutionSkills: selectedPreSkillIds,
           postExecutionSkills: selectedSkillIds,
           skillConfigs: Object.keys(editedSkillConfigs).length > 0 ? editedSkillConfigs : undefined,
           modelConfig: editedModelConfig,
@@ -202,6 +207,8 @@ export function TaskDetailPane({
           setEditedCriteria={setEditedCriteria}
           editedModelConfig={editedModelConfig}
           setEditedModelConfig={setEditedModelConfig}
+          selectedPreSkillIds={selectedPreSkillIds}
+          setSelectedPreSkillIds={setSelectedPreSkillIds}
           selectedSkillIds={selectedSkillIds}
           setSelectedSkillIds={setSelectedSkillIds}
           editedSkillConfigs={editedSkillConfigs}
@@ -221,7 +228,7 @@ export function TaskDetailPane({
 // Details Content — shared between tabbed and side-by-side layouts
 // =============================================================================
 
-function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditing, editedTitle, setEditedTitle, editedContent, setEditedContent, editedCriteria, setEditedCriteria, editedModelConfig, setEditedModelConfig, selectedSkillIds, setSelectedSkillIds, editedSkillConfigs, setEditedSkillConfigs, availableSkills, missingAcceptanceCriteria, isPlanGenerating, onSaveEdit, onDelete }: any) {
+function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditing, editedTitle, setEditedTitle, editedContent, setEditedContent, editedCriteria, setEditedCriteria, editedModelConfig, setEditedModelConfig, selectedPreSkillIds, setSelectedPreSkillIds, selectedSkillIds, setSelectedSkillIds, editedSkillConfigs, setEditedSkillConfigs, availableSkills, missingAcceptanceCriteria, isPlanGenerating, onSaveEdit, onDelete }: any) {
   const isCompleted = frontmatter.phase === 'complete' || frontmatter.phase === 'archived'
   const hasSummary = Boolean(task.frontmatter.postExecutionSummary)
   const displayAcceptanceCriteria = normalizeAcceptanceCriteria(frontmatter.acceptanceCriteria)
@@ -288,6 +295,32 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
               )}
             </div>
           ) : null}
+        </div>
+      )}
+
+      {/* Pre-Execution Skills */}
+      {(isEditing ? availableSkills.length > 0 : (frontmatter.preExecutionSkills || []).length > 0) && (
+        <div>
+          <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Pre-Execution Skills</h3>
+          {isEditing ? (
+            <div>
+              <p className="text-xs text-slate-400 mb-2">Run before the agent starts. Failure blocks execution.</p>
+              <SkillSelector availableSkills={availableSkills} selectedSkillIds={selectedPreSkillIds} onChange={setSelectedPreSkillIds} />
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {(frontmatter.preExecutionSkills || []).map((skillId: string, index: number) => {
+                const skill = availableSkills.find((s: any) => s.id === skillId)
+                return (
+                  <span key={skillId} className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-blue-50 border border-blue-200 text-xs font-medium text-blue-700">
+                    <span className="text-[10px] text-blue-400 font-bold">{index + 1}.</span>
+                    <span className="text-[10px] text-slate-400 font-mono">{skill?.type === 'loop' ? 'loop' : 'gate'}</span>
+                    {skill?.name || skillId}
+                  </span>
+                )
+              })}
+            </div>
+          )}
         </div>
       )}
 

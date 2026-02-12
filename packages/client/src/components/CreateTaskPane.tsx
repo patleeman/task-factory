@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react'
-import type { ModelConfig, NewTaskFormState, TaskDefaults } from '@pi-factory/shared'
-import { DEFAULT_POST_EXECUTION_SKILLS } from '@pi-factory/shared'
+import type { ModelConfig, NewTaskFormState, TaskDefaults, ExecutionWrapper } from '@pi-factory/shared'
+import { DEFAULT_PRE_EXECUTION_SKILLS, DEFAULT_POST_EXECUTION_SKILLS } from '@pi-factory/shared'
 import { MarkdownEditor } from './MarkdownEditor'
 import { SkillSelector } from './SkillSelector'
 import { ModelSelector } from './ModelSelector'
@@ -10,6 +10,7 @@ import type { PostExecutionSkill } from '../types/pi'
 
 export interface CreateTaskData {
   content: string
+  preExecutionSkills?: string[]
   postExecutionSkills?: string[]
   skillConfigs?: Record<string, Record<string, string>>
   modelConfig?: ModelConfig
@@ -38,10 +39,14 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [availableSkills, setAvailableSkills] = useState<PostExecutionSkill[]>([])
   const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>(initialDraft.selectedSkillIds)
+  const [selectedPreSkillIds, setSelectedPreSkillIds] = useState<string[]>(initialDraft.selectedPreSkillIds || [])
   const [skillConfigs, setSkillConfigs] = useState<Record<string, Record<string, string>>>({})
   const [modelConfig, setModelConfig] = useState<ModelConfig | undefined>(initialDraft.modelConfig as ModelConfig | undefined)
+  const [availableWrappers, setAvailableWrappers] = useState<ExecutionWrapper[]>([])
+  const [selectedWrapperId, setSelectedWrapperId] = useState<string>('')
   const [taskDefaults, setTaskDefaults] = useState<TaskDefaults>({
     modelConfig: undefined,
+    preExecutionSkills: [...DEFAULT_PRE_EXECUTION_SKILLS],
     postExecutionSkills: [...DEFAULT_POST_EXECUTION_SKILLS],
   })
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
@@ -54,7 +59,12 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
     fetch('/api/factory/skills')
       .then(r => r.json())
       .then(setAvailableSkills)
-      .catch(err => console.error('Failed to load post-execution skills:', err))
+      .catch(err => console.error('Failed to load skills:', err))
+
+    fetch('/api/wrappers')
+      .then(r => r.json())
+      .then(setAvailableWrappers)
+      .catch(err => console.error('Failed to load execution wrappers:', err))
   }, [])
 
   useEffect(() => {
@@ -67,6 +77,7 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
           return
         }
 
+        setSelectedPreSkillIds([...defaults.preExecutionSkills])
         setSelectedSkillIds([...defaults.postExecutionSkills])
         setModelConfig(defaults.modelConfig ? { ...defaults.modelConfig } : undefined)
       })
@@ -80,6 +91,7 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
     const formState: NewTaskFormState = {
       content,
       selectedSkillIds,
+      selectedPreSkillIds,
       modelConfig,
     }
     api.openTaskForm(workspaceId, formState).catch(() => {})
@@ -93,16 +105,17 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
   useEffect(() => {
     if (syncTimer.current) clearTimeout(syncTimer.current)
     syncTimer.current = setTimeout(() => {
-      api.syncTaskForm(workspaceId, { content, selectedSkillIds, modelConfig }).catch(() => {})
+      api.syncTaskForm(workspaceId, { content, selectedSkillIds, selectedPreSkillIds, modelConfig }).catch(() => {})
     }, 300)
     return () => { if (syncTimer.current) clearTimeout(syncTimer.current) }
-  }, [workspaceId, content, selectedSkillIds, modelConfig])
+  }, [workspaceId, content, selectedSkillIds, selectedPreSkillIds, modelConfig])
 
   // Apply incoming updates from the planning agent
   useEffect(() => {
     if (!agentFormUpdates) return
     if (agentFormUpdates.content !== undefined) setContent(agentFormUpdates.content)
     if (agentFormUpdates.selectedSkillIds !== undefined) setSelectedSkillIds(agentFormUpdates.selectedSkillIds)
+    if (agentFormUpdates.selectedPreSkillIds !== undefined) setSelectedPreSkillIds(agentFormUpdates.selectedPreSkillIds)
     if (agentFormUpdates.modelConfig !== undefined) setModelConfig(agentFormUpdates.modelConfig)
   }, [agentFormUpdates])
 
@@ -134,9 +147,11 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
 
   const handleClearForm = useCallback(() => {
     setContent('')
+    setSelectedPreSkillIds([...taskDefaults.preExecutionSkills])
     setSelectedSkillIds([...taskDefaults.postExecutionSkills])
     setSkillConfigs({})
     setModelConfig(taskDefaults.modelConfig ? { ...taskDefaults.modelConfig } : undefined)
+    setSelectedWrapperId('')
     setPendingFiles([])
     clearDraft()
   }, [clearDraft, taskDefaults])
@@ -179,6 +194,7 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
     const hasSkillConfigs = Object.keys(skillConfigs).length > 0
     await onSubmit({
       content,
+      preExecutionSkills: selectedPreSkillIds,
       postExecutionSkills: selectedSkillIds,
       skillConfigs: hasSkillConfigs ? skillConfigs : undefined,
       modelConfig,
@@ -299,6 +315,53 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
     </div>
   )
 
+  const handleWrapperChange = (wrapperId: string) => {
+    setSelectedWrapperId(wrapperId)
+    if (!wrapperId) return
+    const wrapper = availableWrappers.find(w => w.id === wrapperId)
+    if (wrapper) {
+      setSelectedPreSkillIds([...wrapper.preExecutionSkills])
+      setSelectedSkillIds([...wrapper.postExecutionSkills])
+    }
+  }
+
+  const wrapperSection = availableWrappers.length > 0 ? (
+    <div className="shrink-0">
+      <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+        Execution Wrapper
+      </label>
+      <p className="text-xs text-slate-400 mb-2">
+        Pre-configured skill pairs that wrap execution.
+      </p>
+      <select
+        value={selectedWrapperId}
+        onChange={(e) => handleWrapperChange(e.target.value)}
+        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent"
+      >
+        <option value="">None (manual skill selection)</option>
+        {availableWrappers.map(w => (
+          <option key={w.id} value={w.id}>{w.name} — {w.description}</option>
+        ))}
+      </select>
+    </div>
+  ) : null
+
+  const preSkillsSection = availableSkills.length > 0 ? (
+    <div className="shrink-0">
+      <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+        Pre-Execution Skills
+      </label>
+      <p className="text-xs text-slate-400 mb-2">
+        Run before the agent starts its main work. Failure blocks execution.
+      </p>
+      <SkillSelector
+        availableSkills={availableSkills}
+        selectedSkillIds={selectedPreSkillIds}
+        onChange={setSelectedPreSkillIds}
+      />
+    </div>
+  ) : null
+
   const skillsSection = availableSkills.length > 0 ? (
     <div className="shrink-0">
       <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
@@ -382,6 +445,8 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
           {/* Right panel — configuration */}
           <div className="flex-1 min-w-0 p-5 space-y-5 overflow-y-auto">
             {modelSection}
+            {wrapperSection}
+            {preSkillsSection}
             {skillsSection}
           </div>
         </div>
@@ -391,6 +456,8 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
           {descriptionSection}
           {attachmentsSection}
           {modelSection}
+          {wrapperSection}
+          {preSkillsSection}
           {skillsSection}
         </div>
       )}

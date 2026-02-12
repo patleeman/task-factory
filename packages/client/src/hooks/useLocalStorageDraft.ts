@@ -1,11 +1,12 @@
 import { useState, useCallback, useRef } from 'react'
-import { DEFAULT_POST_EXECUTION_SKILLS } from '@pi-factory/shared'
+import { DEFAULT_PRE_EXECUTION_SKILLS, DEFAULT_POST_EXECUTION_SKILLS } from '@pi-factory/shared'
 
 const STORAGE_KEY = 'pi-factory:create-task-draft'
 
 export interface TaskDraft {
   content: string
   selectedSkillIds: string[]
+  selectedPreSkillIds: string[]
   modelConfig?: {
     provider: string
     modelId: string
@@ -16,6 +17,7 @@ export interface TaskDraft {
 const EMPTY_DRAFT: TaskDraft = {
   content: '',
   selectedSkillIds: [...DEFAULT_POST_EXECUTION_SKILLS],
+  selectedPreSkillIds: [...DEFAULT_PRE_EXECUTION_SKILLS],
   modelConfig: undefined,
 }
 
@@ -31,6 +33,7 @@ function loadDraft(): TaskDraft | null {
     return {
       content: parsed.content || '',
       selectedSkillIds: Array.isArray(parsed.selectedSkillIds) ? parsed.selectedSkillIds : [],
+      selectedPreSkillIds: Array.isArray(parsed.selectedPreSkillIds) ? parsed.selectedPreSkillIds : [],
       modelConfig: parsed.modelConfig || undefined,
     }
   } catch {

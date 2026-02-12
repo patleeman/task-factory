@@ -8,9 +8,9 @@ import express from 'express';
 import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import cors from 'cors';
-import { join, dirname, resolve } from 'path';
+import { join, dirname, resolve, normalize, isAbsolute, relative } from 'path';
 import { fileURLToPath } from 'url';
-import { readdirSync } from 'fs';
+import { readdir } from 'fs/promises';
 import { homedir } from 'os';
 
 import type {
@@ -49,16 +49,29 @@ import {
   getActivityTimeline,
   getActivityForTask,
 } from './activity-service.js';
+import { logger } from './logger.js';
 
 // =============================================================================
 // Configuration
 // =============================================================================
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
-const HOST = process.env.HOST || '0.0.0.0';
+const HOST = process.env.HOST || '127.0.0.1';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+function isPathSafe(pathToCheck: string): boolean {
+  const normalized = resolve(pathToCheck);
+  // Allow paths within the user's home directory
+  const allowedRoot = homedir();
+  const rel = relative(allowedRoot, normalized);
+  return !rel.startsWith('..') && !isAbsolute(rel);
+}
 
 // =============================================================================
 // State
@@ -94,12 +107,17 @@ app.get('/api/health', (_req, res) => {
 });
 
 // Browse directories (for folder picker)
-app.get('/api/browse', (req, res) => {
+app.get('/api/browse', async (req, res) => {
   const rawPath = (req.query.path as string) || homedir();
   const dir = resolve(rawPath.replace(/^~/, homedir()));
 
+  if (!isPathSafe(dir)) {
+    res.status(403).json({ error: 'Access denied: Path is outside allowed directory' });
+    return;
+  }
+
   try {
-    const entries = readdirSync(dir, { withFileTypes: true });
+    const entries = await readdir(dir, { withFileTypes: true });
     const folders = entries
       .filter(e => e.isDirectory() && !e.name.startsWith('.'))
       .map(e => ({
@@ -110,18 +128,19 @@ app.get('/api/browse', (req, res) => {
 
     res.json({ current: dir, folders });
   } catch (err) {
-    res.status(400).json({ error: `Cannot read directory: ${dir}` });
+    logger.error(`Cannot read directory: ${dir}`, err);
+    res.status(400).json({ error: `Cannot read directory` });
   }
 });
 
 // List workspaces
-app.get('/api/workspaces', (_req, res) => {
-  const workspaces = listWorkspaces();
+app.get('/api/workspaces', async (_req, res) => {
+  const workspaces = await listWorkspaces();
   res.json(workspaces);
 });
 
 // Create workspace
-app.post('/api/workspaces', (req, res) => {
+app.post('/api/workspaces', async (req, res) => {
   const { path, name, config } = req.body;
 
   if (!path) {
@@ -129,17 +148,23 @@ app.post('/api/workspaces', (req, res) => {
     return;
   }
 
+  if (!isPathSafe(path)) {
+    res.status(403).json({ error: 'Access denied: Workspace path is outside allowed directory' });
+    return;
+  }
+
   try {
-    const workspace = createWorkspace(path, name, config);
+    const workspace = await createWorkspace(path, name, config);
     res.json(workspace);
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    logger.error('Failed to create workspace', err);
+    res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 
 // Get workspace
-app.get('/api/workspaces/:id', (req, res) => {
-  const workspace = getWorkspaceById(req.params.id);
+app.get('/api/workspaces/:id', async (req, res) => {
+  const workspace = await getWorkspaceById(req.params.id);
 
   if (!workspace) {
     res.status(404).json({ error: 'Workspace not found' });
@@ -151,7 +176,7 @@ app.get('/api/workspaces/:id', (req, res) => {
 
 // Delete workspace
 app.delete('/api/workspaces/:id', async (req, res) => {
-  const workspace = getWorkspaceById(req.params.id);
+  const workspace = await getWorkspaceById(req.params.id);
 
   if (!workspace) {
     res.status(404).json({ error: 'Workspace not found' });
@@ -180,7 +205,7 @@ app.delete('/api/workspaces/:id', async (req, res) => {
     }
 
     // Delete workspace data and remove from registry
-    const deleted = deleteWorkspace(workspace.id);
+    const deleted = await deleteWorkspace(workspace.id);
 
     if (!deleted) {
       res.status(500).json({ error: 'Failed to delete workspace' });
@@ -189,13 +214,14 @@ app.delete('/api/workspaces/:id', async (req, res) => {
 
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    logger.error('Error deleting workspace', err);
+    res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 
 // Get workspace tasks
-app.get('/api/workspaces/:id/tasks', (req, res) => {
-  const workspace = getWorkspaceById(req.params.id);
+app.get('/api/workspaces/:id/tasks', async (req, res) => {
+  const workspace = await getWorkspaceById(req.params.id);
 
   if (!workspace) {
     res.status(404).json({ error: 'Workspace not found' });
@@ -210,7 +236,7 @@ app.get('/api/workspaces/:id/tasks', (req, res) => {
 
 // Create task
 app.post('/api/workspaces/:id/tasks', async (req, res) => {
-  const workspace = getWorkspaceById(req.params.id);
+  const workspace = await getWorkspaceById(req.params.id);
 
   if (!workspace) {
     res.status(404).json({ error: 'Workspace not found' });
@@ -249,17 +275,18 @@ app.post('/api/workspaces/:id/tasks', async (req, res) => {
         workspacePath: workspace.path,
         broadcastToWorkspace: (event: any) => broadcastToWorkspace(workspace.id, event),
       }).catch((err) => {
-        console.error('Background plan generation failed:', err);
+        logger.error('Background plan generation failed:', err);
       });
     }
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    logger.error('Error creating task', err);
+    res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 
 // Get task
-app.get('/api/workspaces/:workspaceId/tasks/:taskId', (req, res) => {
-  const workspace = getWorkspaceById(req.params.workspaceId);
+app.get('/api/workspaces/:workspaceId/tasks/:taskId', async (req, res) => {
+  const workspace = await getWorkspaceById(req.params.workspaceId);
 
   if (!workspace) {
     res.status(404).json({ error: 'Workspace not found' });
@@ -280,7 +307,7 @@ app.get('/api/workspaces/:workspaceId/tasks/:taskId', (req, res) => {
 
 // Update task
 app.patch('/api/workspaces/:workspaceId/tasks/:taskId', async (req, res) => {
-  const workspace = getWorkspaceById(req.params.workspaceId);
+  const workspace = await getWorkspaceById(req.params.workspaceId);
 
   if (!workspace) {
     res.status(404).json({ error: 'Workspace not found' });
@@ -309,13 +336,14 @@ app.patch('/api/workspaces/:workspaceId/tasks/:taskId', async (req, res) => {
 
     res.json(task);
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    logger.error('Error updating task', err);
+    res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 
 // Regenerate task plan
-app.post('/api/workspaces/:workspaceId/tasks/:taskId/plan/regenerate', (req, res) => {
-  const workspace = getWorkspaceById(req.params.workspaceId);
+app.post('/api/workspaces/:workspaceId/tasks/:taskId/plan/regenerate', async (req, res) => {
+  const workspace = await getWorkspaceById(req.params.workspaceId);
 
   if (!workspace) {
     res.status(404).json({ error: 'Workspace not found' });
@@ -331,7 +359,12 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/plan/regenerate', (req, res
     return;
   }
 
-  if (task.frontmatter.planningStatus === 'running' && !task.frontmatter.plan) {
+  if (task.frontmatter.plan) {
+    res.status(409).json({ error: 'Task already has a plan' });
+    return;
+  }
+
+  if (task.frontmatter.planningStatus === 'running') {
     res.status(409).json({ error: 'Plan generation is already running for this task' });
     return;
   }
@@ -342,15 +375,15 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/plan/regenerate', (req, res
     task,
     workspaceId: workspace.id,
     workspacePath: workspace.path,
-    broadcastToWorkspace: (event: any) => broadcastToWorkspace(workspace.id, event),
+    broadcastToWorkspace: (event: ServerEvent) => broadcastToWorkspace(workspace.id, event),
   }).catch((err) => {
-    console.error('Plan regeneration failed:', err);
+    logger.error('Plan regeneration failed:', err);
   });
 });
 
 // Delete task
 app.delete('/api/workspaces/:workspaceId/tasks/:taskId', async (req, res) => {
-  const workspace = getWorkspaceById(req.params.workspaceId);
+  const workspace = await getWorkspaceById(req.params.workspaceId);
 
   if (!workspace) {
     res.status(404).json({ error: 'Workspace not found' });
@@ -372,13 +405,14 @@ app.delete('/api/workspaces/:workspaceId/tasks/:taskId', async (req, res) => {
 
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    logger.error('Error deleting task', err);
+    res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 
 // Move task to phase
 app.post('/api/workspaces/:workspaceId/tasks/:taskId/move', async (req, res) => {
-  const workspace = getWorkspaceById(req.params.workspaceId);
+  const workspace = await getWorkspaceById(req.params.workspaceId);
 
   if (!workspace) {
     res.status(404).json({ error: 'Workspace not found' });
@@ -479,13 +513,14 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/move', async (req, res) => 
 
     res.json(task);
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    logger.error('Error moving task', err);
+    res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 
 // Reorder tasks within a phase
-app.post('/api/workspaces/:workspaceId/tasks/reorder', (req, res) => {
-  const workspace = getWorkspaceById(req.params.workspaceId);
+app.post('/api/workspaces/:workspaceId/tasks/reorder', async (req, res) => {
+  const workspace = await getWorkspaceById(req.params.workspaceId);
 
   if (!workspace) {
     res.status(404).json({ error: 'Workspace not found' });
@@ -511,13 +546,14 @@ app.post('/api/workspaces/:workspaceId/tasks/reorder', (req, res) => {
 
     res.json({ success: true, count: reordered.length });
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    logger.error('Error reordering tasks', err);
+    res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 
 // Get activity log
-app.get('/api/workspaces/:id/activity', (req, res) => {
-  const workspace = getWorkspaceById(req.params.id);
+app.get('/api/workspaces/:id/activity', async (req, res) => {
+  const workspace = await getWorkspaceById(req.params.id);
 
   if (!workspace) {
     res.status(404).json({ error: 'Workspace not found' });
@@ -531,8 +567,8 @@ app.get('/api/workspaces/:id/activity', (req, res) => {
 });
 
 // Get activity for specific task
-app.get('/api/workspaces/:workspaceId/tasks/:taskId/activity', (req, res) => {
-  const workspace = getWorkspaceById(req.params.workspaceId);
+app.get('/api/workspaces/:workspaceId/tasks/:taskId/activity', async (req, res) => {
+  const workspace = await getWorkspaceById(req.params.workspaceId);
 
   if (!workspace) {
     res.status(404).json({ error: 'Workspace not found' });
@@ -547,7 +583,7 @@ app.get('/api/workspaces/:workspaceId/tasks/:taskId/activity', (req, res) => {
 
 // Send message to activity log
 app.post('/api/workspaces/:workspaceId/activity', async (req, res) => {
-  const workspace = getWorkspaceById(req.params.workspaceId);
+  const workspace = await getWorkspaceById(req.params.workspaceId);
 
   if (!workspace) {
     res.status(404).json({ error: 'Workspace not found' });
@@ -591,12 +627,12 @@ app.post('/api/workspaces/:workspaceId/activity', async (req, res) => {
     const activeSession = getActiveSession(taskId);
     if (activeSession?.piSession && activeSession.status === 'running') {
       steerTask(taskId, content, chatImages.length > 0 ? chatImages : undefined).catch((err) => {
-        console.error('Failed to steer agent with chat message:', err);
+        logger.error('Failed to steer agent with chat message:', err);
       });
     } else if (activeSession?.piSession && (activeSession.status as string) === 'idle') {
       // Agent session is open but currently idle. Send message as a new turn.
       followUpTask(taskId, content, chatImages.length > 0 ? chatImages : undefined).catch((err) => {
-        console.error('Failed to follow-up agent with chat message:', err);
+        logger.error('Failed to follow-up agent with chat message:', err);
       });
     } else if (!activeSession) {
       // No active session — try to resume or start fresh depending on phase
@@ -614,7 +650,7 @@ app.post('/api/workspaces/:workspaceId/activity', async (req, res) => {
           (event) => broadcastToWorkspace(workspace.id, event),
           chatImages.length > 0 ? chatImages : undefined,
         ).catch((err) => {
-          console.error('Failed to resume chat for task:', err);
+          logger.error('Failed to resume chat for task:', err);
         });
       } else if (task) {
         // No previous session — start a fresh agent chat
@@ -626,7 +662,7 @@ app.post('/api/workspaces/:workspaceId/activity', async (req, res) => {
           (event) => broadcastToWorkspace(workspace.id, event),
           chatImages.length > 0 ? chatImages : undefined,
         ).catch((err) => {
-          console.error('Failed to start chat for task:', err);
+          logger.error('Failed to start chat for task:', err);
         });
       }
     }
@@ -671,7 +707,7 @@ app.get('/api/pi/available-models', async (_req, res) => {
     }));
     res.json(models);
   } catch (err) {
-    console.error('Failed to load available models:', err);
+    logger.error('Failed to load available models:', err);
     res.json([]);
   }
 });
@@ -688,7 +724,7 @@ app.get('/api/pi/auth', async (_req, res) => {
     const overview = await loadPiAuthOverview();
     res.json(overview);
   } catch (err) {
-    console.error('Failed to load Pi auth overview:', err);
+    logger.error('Failed to load Pi auth overview:', err);
     res.status(500).json({ error: 'Failed to load auth settings' });
   }
 });
@@ -712,7 +748,7 @@ app.put('/api/pi/auth/providers/:providerId/api-key', async (req, res) => {
       return;
     }
 
-    console.error(`Failed to save API key for provider ${providerId}:`, err);
+    logger.error(`Failed to save API key for provider ${providerId}:`, err);
     res.status(500).json({ error: 'Failed to save API key' });
   }
 });
@@ -730,7 +766,7 @@ app.delete('/api/pi/auth/providers/:providerId', async (req, res) => {
       return;
     }
 
-    console.error(`Failed to clear credential for provider ${providerId}:`, err);
+    logger.error(`Failed to clear credential for provider ${providerId}:`, err);
     res.status(500).json({ error: 'Failed to clear credential' });
   }
 });
@@ -753,7 +789,7 @@ app.post('/api/pi/auth/login/start', async (req, res) => {
       return;
     }
 
-    console.error(`Failed to start OAuth login for provider ${providerId}:`, err);
+    logger.error(`Failed to start OAuth login for provider ${providerId}:`, err);
     res.status(500).json({ error: 'Failed to start login flow' });
   }
 });
@@ -769,7 +805,7 @@ app.get('/api/pi/auth/login/:sessionId', (req, res) => {
       return;
     }
 
-    console.error(`Failed to read OAuth login session ${req.params.sessionId}:`, err);
+    logger.error(`Failed to read OAuth login session ${req.params.sessionId}:`, err);
     res.status(500).json({ error: 'Failed to read login session' });
   }
 });
@@ -798,7 +834,7 @@ app.post('/api/pi/auth/login/:sessionId/input', (req, res) => {
       return;
     }
 
-    console.error(`Failed to submit OAuth login input for session ${req.params.sessionId}:`, err);
+    logger.error(`Failed to submit OAuth login input for session ${req.params.sessionId}:`, err);
     res.status(500).json({ error: 'Failed to submit login input' });
   }
 });
@@ -814,7 +850,7 @@ app.post('/api/pi/auth/login/:sessionId/cancel', (req, res) => {
       return;
     }
 
-    console.error(`Failed to cancel OAuth login session ${req.params.sessionId}:`, err);
+    logger.error(`Failed to cancel OAuth login session ${req.params.sessionId}:`, err);
     res.status(500).json({ error: 'Failed to cancel login session' });
   }
 });
@@ -872,6 +908,63 @@ app.post('/api/factory/skills/reload', (_req, res) => {
   res.json({ count: skills.length, skills: skills.map(s => s.id) });
 });
 
+// Get execution wrappers
+app.get('/api/wrappers', (_req, res) => {
+  const wrappers = discoverWrappers();
+  res.json(wrappers);
+});
+
+// Get single execution wrapper
+app.get('/api/wrappers/:id', (req, res) => {
+  const wrapper = getWrapper(req.params.id);
+  if (!wrapper) {
+    res.status(404).json({ error: 'Wrapper not found' });
+    return;
+  }
+  res.json(wrapper);
+});
+
+// Reload execution wrappers
+app.post('/api/wrappers/reload', (_req, res) => {
+  const wrappers = reloadWrappers();
+  res.json({ count: wrappers.length, wrappers: wrappers.map(w => w.id) });
+});
+
+// Apply wrapper to a task
+app.post('/api/workspaces/:workspaceId/tasks/:taskId/apply-wrapper', async (req, res) => {
+  const { wrapperId } = req.body;
+  if (!wrapperId || typeof wrapperId !== 'string') {
+    res.status(400).json({ error: 'wrapperId is required' });
+    return;
+  }
+
+  const workspace = await getWorkspaceById(req.params.workspaceId);
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return;
+  }
+
+  const tasksDir = getTasksDir(workspace);
+  const allTasks = discoverTasks(tasksDir);
+  const task = allTasks.find(t => t.id === req.params.taskId);
+  if (!task) {
+    res.status(404).json({ error: 'Task not found' });
+    return;
+  }
+
+  try {
+    const updated = applyWrapper(task, wrapperId);
+    updated.frontmatter.updated = new Date().toISOString();
+    const { saveTaskFile } = await import('./task-service.js');
+    saveTaskFile(updated);
+
+    broadcastToWorkspace(workspace.id, { type: 'task:updated', task: updated, changes: {} });
+    res.json(updated);
+  } catch (err) {
+    res.status(400).json({ error: String(err) });
+  }
+});
+
 // Get Pi skills
 app.get('/api/pi/skills', (req, res) => {
   const skillIds = req.query.ids as string[] | undefined;
@@ -904,12 +997,12 @@ app.get('/api/pi/themes', (_req, res) => {
 });
 
 // Get AGENTS.md + workspace shared context (combined prompt rules)
-app.get('/api/pi/agents-md', (req, res) => {
+app.get('/api/pi/agents-md', async (req, res) => {
   const workspaceId = req.query.workspace as string | undefined;
 
   let workspacePath: string | undefined;
   if (workspaceId) {
-    const workspace = getWorkspaceById(workspaceId);
+    const workspace = await getWorkspaceById(workspaceId);
     if (!workspace) {
       res.status(404).json({ error: 'Workspace not found' });
       return;
@@ -922,11 +1015,16 @@ app.get('/api/pi/agents-md', (req, res) => {
 });
 
 // Get agent context (combined)
-app.get('/api/pi/context', (req, res) => {
+app.get('/api/pi/context', async (req, res) => {
   const workspaceId = req.query.workspace as string | undefined;
   const skillIds = req.query.skills as string[] | undefined;
 
-  const workspacePath = workspaceId ? getWorkspaceById(workspaceId)?.path : undefined;
+  let workspacePath: string | undefined;
+  if (workspaceId) {
+    const workspace = await getWorkspaceById(workspaceId);
+    if (workspace) workspacePath = workspace.path;
+  }
+
   const context = buildAgentContext(workspaceId, skillIds, workspacePath);
   res.json(context);
 });
@@ -1041,8 +1139,8 @@ app.post('/api/workspaces/:workspaceId/pi-config', (req, res) => {
 });
 
 // Get workspace shared context (user + agent collaboration store)
-app.get('/api/workspaces/:workspaceId/shared-context', (req, res) => {
-  const workspace = getWorkspaceById(req.params.workspaceId);
+app.get('/api/workspaces/:workspaceId/shared-context', async (req, res) => {
+  const workspace = await getWorkspaceById(req.params.workspaceId);
 
   if (!workspace) {
     res.status(404).json({ error: 'Workspace not found' });
@@ -1060,8 +1158,8 @@ app.get('/api/workspaces/:workspaceId/shared-context', (req, res) => {
 });
 
 // Save workspace shared context (last write wins)
-app.put('/api/workspaces/:workspaceId/shared-context', (req, res) => {
-  const workspace = getWorkspaceById(req.params.workspaceId);
+app.put('/api/workspaces/:workspaceId/shared-context', async (req, res) => {
+  const workspace = await getWorkspaceById(req.params.workspaceId);
 
   if (!workspace) {
     res.status(404).json({ error: 'Workspace not found' });
@@ -1126,6 +1224,13 @@ import {
 } from './post-execution-skills.js';
 
 import {
+  discoverWrappers,
+  getWrapper,
+  reloadWrappers,
+  applyWrapper,
+} from './execution-wrapper-service.js';
+
+import {
   startQueueProcessing,
   stopQueueProcessing,
   getQueueStatus,
@@ -1136,7 +1241,7 @@ import { buildExecutionSnapshots } from './execution-snapshot.js';
 
 // Start task execution
 app.post('/api/workspaces/:workspaceId/tasks/:taskId/execute', async (req, res) => {
-  const workspace = getWorkspaceById(req.params.workspaceId);
+  const workspace = await getWorkspaceById(req.params.workspaceId);
   
   if (!workspace) {
     res.status(404).json({ error: 'Workspace not found' });
@@ -1193,7 +1298,8 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/execute', async (req, res) 
     
     res.json({ sessionId: session.id, status: session.status });
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    logger.error('Error starting execution', err);
+    res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 
@@ -1213,7 +1319,7 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/steer', async (req, res) =>
   }
 
   // Log the user steer message in activity
-  const workspace = getWorkspaceById(req.params.workspaceId);
+  const workspace = await getWorkspaceById(req.params.workspaceId);
   if (workspace) {
     const metadata = attachmentIds && attachmentIds.length > 0 ? { attachmentIds } : undefined;
     const entry = createChatMessage(workspace.id, req.params.taskId, 'user', content, undefined, metadata);
@@ -1247,7 +1353,7 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/follow-up', async (req, res
   }
 
   // Log the user follow-up message in activity
-  const workspace = getWorkspaceById(req.params.workspaceId);
+  const workspace = await getWorkspaceById(req.params.workspaceId);
   if (workspace) {
     const metadata = attachmentIds && attachmentIds.length > 0 ? { attachmentIds } : undefined;
     const entry = createChatMessage(workspace.id, req.params.taskId, 'user', content, undefined, metadata);
@@ -1301,8 +1407,8 @@ import {
 import type { CriterionStatus } from '@pi-factory/shared';
 
 // Get post-execution summary
-app.get('/api/workspaces/:workspaceId/tasks/:taskId/summary', (req, res) => {
-  const workspace = getWorkspaceById(req.params.workspaceId);
+app.get('/api/workspaces/:workspaceId/tasks/:taskId/summary', async (req, res) => {
+  const workspace = await getWorkspaceById(req.params.workspaceId);
   if (!workspace) {
     res.status(404).json({ error: 'Workspace not found' });
     return;
@@ -1326,8 +1432,8 @@ app.get('/api/workspaces/:workspaceId/tasks/:taskId/summary', (req, res) => {
 });
 
 // Update a criterion's validation status
-app.patch('/api/workspaces/:workspaceId/tasks/:taskId/summary/criteria/:index', (req, res) => {
-  const workspace = getWorkspaceById(req.params.workspaceId);
+app.patch('/api/workspaces/:workspaceId/tasks/:taskId/summary/criteria/:index', async (req, res) => {
+  const workspace = await getWorkspaceById(req.params.workspaceId);
   if (!workspace) {
     res.status(404).json({ error: 'Workspace not found' });
     return;
@@ -1371,7 +1477,7 @@ app.patch('/api/workspaces/:workspaceId/tasks/:taskId/summary/criteria/:index', 
 
 // Generate (or regenerate) post-execution summary
 app.post('/api/workspaces/:workspaceId/tasks/:taskId/summary/generate', async (req, res) => {
-  const workspace = getWorkspaceById(req.params.workspaceId);
+  const workspace = await getWorkspaceById(req.params.workspaceId);
   if (!workspace) {
     res.status(404).json({ error: 'Workspace not found' });
     return;
@@ -1428,7 +1534,7 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/summary/generate', async (r
         const { session: resumed } = await createAgentSession(sessionOpts);
         piSession = resumed;
       } catch (err) {
-        console.error('[SummaryGenerate] Failed to resume session, falling back:', err);
+        logger.error('[SummaryGenerate] Failed to resume session, falling back:', err);
       }
     }
 
@@ -1442,7 +1548,8 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/summary/generate', async (r
 
     res.json(summary);
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    logger.error('Error generating summary', err);
+    res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 
@@ -1453,8 +1560,8 @@ app.get('/api/executions', (_req, res) => {
 });
 
 // Get active executions for a specific workspace
-app.get('/api/workspaces/:workspaceId/executions', (req, res) => {
-  const workspace = getWorkspaceById(req.params.workspaceId);
+app.get('/api/workspaces/:workspaceId/executions', async (req, res) => {
+  const workspace = await getWorkspaceById(req.params.workspaceId);
   if (!workspace) {
     res.status(404).json({ error: 'Workspace not found' });
     return;
@@ -1469,25 +1576,25 @@ app.get('/api/workspaces/:workspaceId/executions', (req, res) => {
 // =============================================================================
 
 // Get queue status
-app.get('/api/workspaces/:workspaceId/queue/status', (req, res) => {
-  const workspace = getWorkspaceById(req.params.workspaceId);
+app.get('/api/workspaces/:workspaceId/queue/status', async (req, res) => {
+  const workspace = await getWorkspaceById(req.params.workspaceId);
   if (!workspace) {
     res.status(404).json({ error: 'Workspace not found' });
     return;
   }
-  const status = getQueueStatus(workspace.id);
+  const status = await getQueueStatus(workspace.id);
   res.json(status);
 });
 
 // Start queue processing
-app.post('/api/workspaces/:workspaceId/queue/start', (req, res) => {
-  const workspace = getWorkspaceById(req.params.workspaceId);
+app.post('/api/workspaces/:workspaceId/queue/start', async (req, res) => {
+  const workspace = await getWorkspaceById(req.params.workspaceId);
   if (!workspace) {
     res.status(404).json({ error: 'Workspace not found' });
     return;
   }
 
-  const status = startQueueProcessing(
+  const status = await startQueueProcessing(
     workspace.id,
     (event) => broadcastToWorkspace(workspace.id, event),
   );
@@ -1503,14 +1610,14 @@ app.post('/api/workspaces/:workspaceId/queue/start', (req, res) => {
 });
 
 // Stop queue processing
-app.post('/api/workspaces/:workspaceId/queue/stop', (req, res) => {
-  const workspace = getWorkspaceById(req.params.workspaceId);
+app.post('/api/workspaces/:workspaceId/queue/stop', async (req, res) => {
+  const workspace = await getWorkspaceById(req.params.workspaceId);
   if (!workspace) {
     res.status(404).json({ error: 'Workspace not found' });
     return;
   }
 
-  const status = stopQueueProcessing(workspace.id);
+  const status = await stopQueueProcessing(workspace.id);
 
   createSystemEvent(
     workspace.id,
@@ -1527,7 +1634,7 @@ app.post('/api/workspaces/:workspaceId/queue/stop', (req, res) => {
 // =============================================================================
 
 import multer from 'multer';
-import { existsSync as fsExists, mkdirSync as fsMkdir, readdirSync as fsReaddir, unlinkSync as fsUnlink, statSync as fsStat } from 'fs';
+import { mkdir, unlink, stat } from 'fs/promises';
 import { extname } from 'path';
 
 function getAttachmentsDir(workspace: import('@pi-factory/shared').Workspace, taskId: string): string {
@@ -1538,13 +1645,19 @@ function getAttachmentsDir(workspace: import('@pi-factory/shared').Workspace, ta
 const upload = multer({
   storage: multer.diskStorage({
     destination: (req, _file, cb) => {
-      const workspaceId = req.params.workspaceId as string;
-      const taskId = req.params.taskId as string;
-      const workspace = getWorkspaceById(workspaceId);
-      if (!workspace) return cb(new Error('Workspace not found'), '');
-      const dir = getAttachmentsDir(workspace, taskId);
-      if (!fsExists(dir)) fsMkdir(dir, { recursive: true });
-      cb(null, dir);
+      (async () => {
+        try {
+          const workspaceId = req.params.workspaceId as string;
+          const taskId = req.params.taskId as string;
+          const workspace = await getWorkspaceById(workspaceId);
+          if (!workspace) return cb(new Error('Workspace not found'), '');
+          const dir = getAttachmentsDir(workspace, taskId);
+          await mkdir(dir, { recursive: true });
+          cb(null, dir);
+        } catch (err) {
+          cb(err as Error, '');
+        }
+      })();
     },
     filename: (_req, file, cb) => {
       const id = crypto.randomUUID().slice(0, 8);
@@ -1561,7 +1674,7 @@ const upload = multer({
 app.post('/api/workspaces/:workspaceId/tasks/:taskId/attachments', upload.array('files', 10), async (req, res) => {
   const workspaceId = req.params.workspaceId as string;
   const taskId = req.params.taskId as string;
-  const workspace = getWorkspaceById(workspaceId);
+  const workspace = await getWorkspaceById(workspaceId);
   if (!workspace) { res.status(404).json({ error: 'Workspace not found' }); return; }
 
   const tasksDir = getTasksDir(workspace);
@@ -1592,8 +1705,8 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/attachments', upload.array(
 });
 
 // List attachments for a task
-app.get('/api/workspaces/:workspaceId/tasks/:taskId/attachments', (req, res) => {
-  const workspace = getWorkspaceById(req.params.workspaceId);
+app.get('/api/workspaces/:workspaceId/tasks/:taskId/attachments', async (req, res) => {
+  const workspace = await getWorkspaceById(req.params.workspaceId);
   if (!workspace) { res.status(404).json({ error: 'Workspace not found' }); return; }
 
   const tasksDir = getTasksDir(workspace);
@@ -1605,21 +1718,24 @@ app.get('/api/workspaces/:workspaceId/tasks/:taskId/attachments', (req, res) => 
 });
 
 // Serve an attachment file
-app.get('/api/workspaces/:workspaceId/tasks/:taskId/attachments/:storedName', (req, res) => {
-  const workspace = getWorkspaceById(req.params.workspaceId);
+app.get('/api/workspaces/:workspaceId/tasks/:taskId/attachments/:storedName', async (req, res) => {
+  const workspace = await getWorkspaceById(req.params.workspaceId);
   if (!workspace) { res.status(404).json({ error: 'Workspace not found' }); return; }
 
   const dir = getAttachmentsDir(workspace, req.params.taskId);
   const filePath = join(dir, req.params.storedName);
 
-  if (!fsExists(filePath)) { res.status(404).json({ error: 'Attachment not found' }); return; }
-
-  res.sendFile(filePath);
+  try {
+    await stat(filePath);
+    res.sendFile(filePath);
+  } catch {
+    res.status(404).json({ error: 'Attachment not found' });
+  }
 });
 
 // Delete an attachment
 app.delete('/api/workspaces/:workspaceId/tasks/:taskId/attachments/:attachmentId', async (req, res) => {
-  const workspace = getWorkspaceById(req.params.workspaceId);
+  const workspace = await getWorkspaceById(req.params.workspaceId);
   if (!workspace) { res.status(404).json({ error: 'Workspace not found' }); return; }
 
   const tasksDir = getTasksDir(workspace);
@@ -1633,7 +1749,11 @@ app.delete('/api/workspaces/:workspaceId/tasks/:taskId/attachments/:attachmentId
   // Delete file from disk
   const dir = getAttachmentsDir(workspace, req.params.taskId);
   const filePath = join(dir, attachment.storedName);
-  if (fsExists(filePath)) fsUnlink(filePath);
+  try {
+    await unlink(filePath);
+  } catch {
+    // Ignore error if file doesn't exist
+  }
 
   // Remove from task metadata
   task.frontmatter.attachments = (task.frontmatter.attachments || []).filter(a => a.id !== req.params.attachmentId);
@@ -1681,11 +1801,17 @@ function getPlanningAttachmentsDir(workspace: import('@pi-factory/shared').Works
 const planningUpload = multer({
   storage: multer.diskStorage({
     destination: (req, _file, cb) => {
-      const workspace = getWorkspaceById(req.params.workspaceId as string);
-      if (!workspace) return cb(new Error('Workspace not found'), '');
-      const dir = getPlanningAttachmentsDir(workspace);
-      if (!fsExists(dir)) fsMkdir(dir, { recursive: true });
-      cb(null, dir);
+      (async () => {
+        try {
+          const workspace = await getWorkspaceById(req.params.workspaceId as string);
+          if (!workspace) return cb(new Error('Workspace not found'), '');
+          const dir = getPlanningAttachmentsDir(workspace);
+          await mkdir(dir, { recursive: true });
+          cb(null, dir);
+        } catch (err) {
+          cb(err as Error, '');
+        }
+      })();
     },
     filename: (_req, file, cb) => {
       const id = crypto.randomUUID().slice(0, 8);
@@ -1703,8 +1829,8 @@ function getPlanningAttachmentList(workspaceId: string): import('@pi-factory/sha
   return planningAttachments.get(workspaceId) || [];
 }
 
-app.post('/api/workspaces/:workspaceId/planning/attachments', planningUpload.array('files', 10), (req, res) => {
-  const workspace = getWorkspaceById(req.params.workspaceId as string);
+app.post('/api/workspaces/:workspaceId/planning/attachments', planningUpload.array('files', 10), async (req, res) => {
+  const workspace = await getWorkspaceById(req.params.workspaceId as string);
   if (!workspace) { res.status(404).json({ error: 'Workspace not found' }); return; }
 
   const files = req.files as Express.Multer.File[];
@@ -1725,19 +1851,23 @@ app.post('/api/workspaces/:workspaceId/planning/attachments', planningUpload.arr
   res.json(newAttachments);
 });
 
-app.get('/api/workspaces/:workspaceId/planning/attachments/:storedName', (req, res) => {
-  const workspace = getWorkspaceById(req.params.workspaceId);
+app.get('/api/workspaces/:workspaceId/planning/attachments/:storedName', async (req, res) => {
+  const workspace = await getWorkspaceById(req.params.workspaceId);
   if (!workspace) { res.status(404).json({ error: 'Workspace not found' }); return; }
 
   const dir = getPlanningAttachmentsDir(workspace);
   const filePath = join(dir, req.params.storedName);
-  if (!fsExists(filePath)) { res.status(404).json({ error: 'Attachment not found' }); return; }
-  res.sendFile(filePath);
+  try {
+    await stat(filePath);
+    res.sendFile(filePath);
+  } catch {
+    res.status(404).json({ error: 'Attachment not found' });
+  }
 });
 
 // Send message to planning agent
 app.post('/api/workspaces/:workspaceId/planning/message', async (req, res) => {
-  const workspace = getWorkspaceById(req.params.workspaceId);
+  const workspace = await getWorkspaceById(req.params.workspaceId);
   if (!workspace) {
     res.status(404).json({ error: 'Workspace not found' });
     return;
@@ -1760,10 +1890,9 @@ app.post('/api/workspaces/:workspaceId/planning/message', async (req, res) => {
         const att = allAtts.find(a => a.id === id);
         if (!att || !att.mimeType.startsWith('image/')) continue;
         const filePath = join(dir, att.storedName);
-        if (!fsExists(filePath)) continue;
         try {
-          const { readFileSync } = await import('fs');
-          const data = readFileSync(filePath).toString('base64');
+          const { readFile } = await import('fs/promises');
+          const data = (await readFile(filePath)).toString('base64');
           images.push({ type: 'image', data, mimeType: att.mimeType });
         } catch { /* skip */ }
       }
@@ -1777,18 +1906,19 @@ app.post('/api/workspaces/:workspaceId/planning/message', async (req, res) => {
       (event) => broadcastToWorkspace(workspace.id, event),
       images,
     ).catch((err) => {
-      console.error('Planning agent error:', err);
+      logger.error('Planning agent error:', err);
     });
 
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    logger.error('Error sending planning message', err);
+    res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 
 // Get planning conversation history
-app.get('/api/workspaces/:workspaceId/planning/messages', (req, res) => {
-  const workspace = getWorkspaceById(req.params.workspaceId);
+app.get('/api/workspaces/:workspaceId/planning/messages', async (req, res) => {
+  const workspace = await getWorkspaceById(req.params.workspaceId);
   if (!workspace) {
     res.status(404).json({ error: 'Workspace not found' });
     return;
@@ -1797,8 +1927,8 @@ app.get('/api/workspaces/:workspaceId/planning/messages', (req, res) => {
 });
 
 // Get planning agent status
-app.get('/api/workspaces/:workspaceId/planning/status', (req, res) => {
-  const workspace = getWorkspaceById(req.params.workspaceId);
+app.get('/api/workspaces/:workspaceId/planning/status', async (req, res) => {
+  const workspace = await getWorkspaceById(req.params.workspaceId);
   if (!workspace) {
     res.status(404).json({ error: 'Workspace not found' });
     return;
@@ -1808,7 +1938,7 @@ app.get('/api/workspaces/:workspaceId/planning/status', (req, res) => {
 
 // Reset planning session
 app.post('/api/workspaces/:workspaceId/planning/reset', async (req, res) => {
-  const workspace = getWorkspaceById(req.params.workspaceId);
+  const workspace = await getWorkspaceById(req.params.workspaceId);
   if (!workspace) {
     res.status(404).json({ error: 'Workspace not found' });
     return;
@@ -1821,8 +1951,8 @@ app.post('/api/workspaces/:workspaceId/planning/reset', async (req, res) => {
 });
 
 // Submit Q&A response (user answers to agent's ask_questions call)
-app.post('/api/workspaces/:workspaceId/qa/respond', (req, res) => {
-  const workspace = getWorkspaceById(req.params.workspaceId);
+app.post('/api/workspaces/:workspaceId/qa/respond', async (req, res) => {
+  const workspace = await getWorkspaceById(req.params.workspaceId);
   if (!workspace) {
     res.status(404).json({ error: 'Workspace not found' });
     return;
@@ -1854,8 +1984,8 @@ app.post('/api/workspaces/:workspaceId/qa/respond', (req, res) => {
 });
 
 // Abort a pending Q&A request (user wants to skip and type directly)
-app.post('/api/workspaces/:workspaceId/qa/abort', (req, res) => {
-  const workspace = getWorkspaceById(req.params.workspaceId);
+app.post('/api/workspaces/:workspaceId/qa/abort', async (req, res) => {
+  const workspace = await getWorkspaceById(req.params.workspaceId);
   if (!workspace) {
     res.status(404).json({ error: 'Workspace not found' });
     return;
@@ -1890,8 +2020,8 @@ import type { NewTaskFormState } from '@pi-factory/shared';
 const taskFormStates = new Map<string, NewTaskFormState>();
 
 // Client tells server the create-task form is open (syncs current state)
-app.post('/api/workspaces/:workspaceId/task-form/open', (req, res) => {
-  const workspace = getWorkspaceById(req.params.workspaceId);
+app.post('/api/workspaces/:workspaceId/task-form/open', async (req, res) => {
+  const workspace = await getWorkspaceById(req.params.workspaceId);
   if (!workspace) { res.status(404).json({ error: 'Workspace not found' }); return; }
 
   const formState: NewTaskFormState = req.body;
@@ -1928,8 +2058,8 @@ app.post('/api/workspaces/:workspaceId/task-form/open', (req, res) => {
 });
 
 // Client tells server the create-task form is closed
-app.post('/api/workspaces/:workspaceId/task-form/close', (req, res) => {
-  const workspace = getWorkspaceById(req.params.workspaceId);
+app.post('/api/workspaces/:workspaceId/task-form/close', async (req, res) => {
+  const workspace = await getWorkspaceById(req.params.workspaceId);
   if (!workspace) { res.status(404).json({ error: 'Workspace not found' }); return; }
 
   taskFormStates.delete(workspace.id);
@@ -1938,8 +2068,8 @@ app.post('/api/workspaces/:workspaceId/task-form/close', (req, res) => {
 });
 
 // Client syncs form state changes to server
-app.patch('/api/workspaces/:workspaceId/task-form', (req, res) => {
-  const workspace = getWorkspaceById(req.params.workspaceId);
+app.patch('/api/workspaces/:workspaceId/task-form', async (req, res) => {
+  const workspace = await getWorkspaceById(req.params.workspaceId);
   if (!workspace) { res.status(404).json({ error: 'Workspace not found' }); return; }
 
   const current = taskFormStates.get(workspace.id);
@@ -1950,8 +2080,8 @@ app.patch('/api/workspaces/:workspaceId/task-form', (req, res) => {
 });
 
 // Get shelf
-app.get('/api/workspaces/:workspaceId/shelf', (req, res) => {
-  const workspace = getWorkspaceById(req.params.workspaceId);
+app.get('/api/workspaces/:workspaceId/shelf', async (req, res) => {
+  const workspace = await getWorkspaceById(req.params.workspaceId);
   if (!workspace) {
     res.status(404).json({ error: 'Workspace not found' });
     return;
@@ -1960,8 +2090,8 @@ app.get('/api/workspaces/:workspaceId/shelf', (req, res) => {
 });
 
 // Update draft task on shelf
-app.patch('/api/workspaces/:workspaceId/shelf/drafts/:draftId', (req, res) => {
-  const workspace = getWorkspaceById(req.params.workspaceId);
+app.patch('/api/workspaces/:workspaceId/shelf/drafts/:draftId', async (req, res) => {
+  const workspace = await getWorkspaceById(req.params.workspaceId);
   if (!workspace) {
     res.status(404).json({ error: 'Workspace not found' });
     return;
@@ -1972,13 +2102,14 @@ app.patch('/api/workspaces/:workspaceId/shelf/drafts/:draftId', (req, res) => {
     broadcastToWorkspace(workspace.id, { type: 'shelf:updated', workspaceId: workspace.id, shelf });
     res.json(shelf);
   } catch (err) {
-    res.status(404).json({ error: String(err) });
+    logger.error('Error updating draft', err);
+    res.status(404).json({ error: 'Not found' });
   }
 });
 
 // Remove item from shelf
-app.delete('/api/workspaces/:workspaceId/shelf/items/:itemId', (req, res) => {
-  const workspace = getWorkspaceById(req.params.workspaceId);
+app.delete('/api/workspaces/:workspaceId/shelf/items/:itemId', async (req, res) => {
+  const workspace = await getWorkspaceById(req.params.workspaceId);
   if (!workspace) {
     res.status(404).json({ error: 'Workspace not found' });
     return;
@@ -1990,8 +2121,8 @@ app.delete('/api/workspaces/:workspaceId/shelf/items/:itemId', (req, res) => {
 });
 
 // Clear entire shelf
-app.delete('/api/workspaces/:workspaceId/shelf', (req, res) => {
-  const workspace = getWorkspaceById(req.params.workspaceId);
+app.delete('/api/workspaces/:workspaceId/shelf', async (req, res) => {
+  const workspace = await getWorkspaceById(req.params.workspaceId);
   if (!workspace) {
     res.status(404).json({ error: 'Workspace not found' });
     return;
@@ -2004,7 +2135,7 @@ app.delete('/api/workspaces/:workspaceId/shelf', (req, res) => {
 
 // Push draft task to backlog (creates a real task)
 app.post('/api/workspaces/:workspaceId/shelf/drafts/:draftId/push', async (req, res) => {
-  const workspace = getWorkspaceById(req.params.workspaceId);
+  const workspace = await getWorkspaceById(req.params.workspaceId);
   if (!workspace) {
     res.status(404).json({ error: 'Workspace not found' });
     return;
@@ -2055,17 +2186,18 @@ app.post('/api/workspaces/:workspaceId/shelf/drafts/:draftId/push', async (req, 
         workspacePath: workspace.path,
         broadcastToWorkspace: (event: any) => broadcastToWorkspace(workspace.id, event),
       }).catch((err) => {
-        console.error('Background plan generation failed:', err);
+        logger.error('Background plan generation failed:', err);
       });
     }
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    logger.error('Error pushing draft to backlog', err);
+    res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 
 // Push all draft tasks to backlog
 app.post('/api/workspaces/:workspaceId/shelf/push-all', async (req, res) => {
-  const workspace = getWorkspaceById(req.params.workspaceId);
+  const workspace = await getWorkspaceById(req.params.workspaceId);
   if (!workspace) {
     res.status(404).json({ error: 'Workspace not found' });
     return;
@@ -2112,11 +2244,11 @@ app.post('/api/workspaces/:workspaceId/shelf/push-all', async (req, res) => {
           workspacePath: workspace.path,
           broadcastToWorkspace: (event: any) => broadcastToWorkspace(workspace.id, event),
         }).catch((err) => {
-          console.error('Background plan generation failed:', err);
+          logger.error('Background plan generation failed:', err);
         });
       }
     } catch (err) {
-      console.error(`Failed to create task from draft ${draft.id}:`, err);
+      logger.error(`Failed to create task from draft ${draft.id}:`, err);
     }
   }
 
@@ -2146,14 +2278,14 @@ wss.on('connection', (ws) => {
   const clientId = crypto.randomUUID();
   clients.set(clientId, ws);
 
-  console.log(`Client connected: ${clientId}`);
+  logger.info(`Client connected: ${clientId}`);
 
   ws.on('message', (data) => {
     try {
       const event = JSON.parse(data.toString()) as ClientEvent;
       handleClientEvent(clientId, event);
     } catch (err) {
-      console.error('Failed to parse WebSocket message:', err);
+      logger.error('Failed to parse WebSocket message:', err);
     }
   });
 
@@ -2166,7 +2298,7 @@ wss.on('connection', (ws) => {
         workspaceSubscriptions.delete(workspaceId);
       }
     }
-    console.log(`Client disconnected: ${clientId}`);
+    logger.info(`Client disconnected: ${clientId}`);
   });
 
   // Send welcome
@@ -2181,7 +2313,7 @@ function handleClientEvent(clientId: string, event: ClientEvent) {
         workspaceSubscriptions.set(workspaceId, new Set());
       }
       workspaceSubscriptions.get(workspaceId)!.add(clientId);
-      console.log(`Client ${clientId} subscribed to ${workspaceId}`);
+      logger.info(`Client ${clientId} subscribed to ${workspaceId}`);
       break;
     }
 
@@ -2230,7 +2362,7 @@ function broadcastToWorkspace(workspaceId: string, event: ServerEvent) {
 // =============================================================================
 
 async function resumeInterruptedPlanningRuns(): Promise<void> {
-  const workspaces = listWorkspaces();
+  const workspaces = await listWorkspaces();
 
   for (const workspace of workspaces) {
     const tasksDir = getTasksDir(workspace);
@@ -2245,7 +2377,7 @@ async function resumeInterruptedPlanningRuns(): Promise<void> {
       continue;
     }
 
-    console.log(`[Startup] Resuming ${interrupted.length} interrupted planning task(s) in ${workspace.name}`);
+    logger.info(`[Startup] Resuming ${interrupted.length} interrupted planning task(s) in ${workspace.name}`);
 
     for (const task of interrupted) {
       const entry = createSystemEvent(
@@ -2263,7 +2395,7 @@ async function resumeInterruptedPlanningRuns(): Promise<void> {
         workspacePath: workspace.path,
         broadcastToWorkspace: (event: ServerEvent) => broadcastToWorkspace(workspace.id, event),
       }).catch((err) => {
-        console.error(`[Startup] Failed to resume planning for ${task.id}:`, err);
+        logger.error(`[Startup] Failed to resume planning for ${task.id}:`, err);
       });
     }
   }
@@ -2271,7 +2403,7 @@ async function resumeInterruptedPlanningRuns(): Promise<void> {
 
 async function main() {
   server.listen(PORT, HOST, () => {
-    console.log(`
+    logger.info(`
 ╔══════════════════════════════════════════════════════════╗
 ║  Pi-Factory Server                                       ║
 ║  TPS-inspired Agent Work Queue                           ║
@@ -2287,9 +2419,9 @@ async function main() {
 
     // Resume planning tasks that were interrupted by shutdown/restart.
     resumeInterruptedPlanningRuns().catch((err) => {
-      console.error('[Startup] Failed to resume interrupted planning runs:', err);
+      logger.error('[Startup] Failed to resume interrupted planning runs:', err);
     });
   });
 }
 
-main().catch(console.error);
+main().catch((err) => logger.error('Startup failed', err));

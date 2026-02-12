@@ -46,6 +46,7 @@ function normalizeTaskDefaultsForUi(
 
   return {
     modelConfig,
+    preExecutionSkills: defaults.preExecutionSkills.filter((skillId) => availableSkillIds.has(skillId)),
     postExecutionSkills: defaults.postExecutionSkills.filter((skillId) => availableSkillIds.has(skillId)),
   }
 }
@@ -257,6 +258,7 @@ export function SettingsPage() {
               : undefined,
           }
           : undefined,
+        preExecutionSkills: [...form.preExecutionSkills],
         postExecutionSkills: [...form.postExecutionSkills],
       }
 
@@ -339,6 +341,16 @@ export function SettingsPage() {
         .then(setLoginSession)
         .catch((err) => {
           console.error('Failed to refresh login session:', err)
+          const message = err instanceof Error ? err.message : 'Failed to refresh login session'
+          setAuthError(message)
+          setLoginSession((current) => {
+            if (!current || current.id !== sessionId) return current
+            return {
+              ...current,
+              status: 'failed',
+              error: message,
+            }
+          })
         })
     }, 1000)
 
@@ -652,6 +664,18 @@ export function SettingsPage() {
                   </select>
                 </div>
               )}
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Pre-Execution Skills
+                </label>
+                <p className="text-xs text-slate-500 mb-2">Run before the agent starts. Failure blocks execution.</p>
+                <SkillSelector
+                  availableSkills={skills}
+                  selectedSkillIds={form.preExecutionSkills}
+                  onChange={(skillIds) => setForm({ ...form, preExecutionSkills: skillIds })}
+                />
+              </div>
 
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">

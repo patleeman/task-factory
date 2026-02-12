@@ -75,6 +75,7 @@ export interface ModelConfig {
 
 export interface TaskDefaults {
   modelConfig?: ModelConfig;
+  preExecutionSkills: string[];
   postExecutionSkills: string[];
 }
 
@@ -118,6 +119,9 @@ export interface TaskFrontmatter {
 
   // Ordering (position within a column; lower = closer to top)
   order: number;
+
+  // Pre-execution skills (run before main agent execution)
+  preExecutionSkills?: string[];
 
   // Post-execution skills (run after main agent execution)
   postExecutionSkills?: string[];
@@ -362,6 +366,7 @@ export interface CreateTaskRequest {
   title?: string; // Auto-generated if not provided
   content: string; // Task description
   acceptanceCriteria?: string[]; // Auto-generated if not provided
+  preExecutionSkills?: string[];
   postExecutionSkills?: string[];
   skillConfigs?: Record<string, Record<string, string>>;
   modelConfig?: ModelConfig;
@@ -375,6 +380,7 @@ export interface UpdateTaskRequest {
   assigned?: string | null;
   plan?: TaskPlan;
   blocked?: Partial<BlockedState>;
+  preExecutionSkills?: string[];
   postExecutionSkills?: string[];
   skillConfigs?: Record<string, Record<string, string>>;
   modelConfig?: ModelConfig;
@@ -526,6 +532,7 @@ export type PlanningAgentStatus = 'idle' | 'streaming' | 'tool_use' | 'thinking'
 export interface NewTaskFormState {
   content: string;
   selectedSkillIds: string[];
+  selectedPreSkillIds?: string[];
   modelConfig?: ModelConfig;
   skillOrder?: string[];
 }
@@ -610,5 +617,20 @@ export interface PostExecutionSkill {
   configSchema: SkillConfigField[];
 }
 
+/** Default pre-execution skills applied to new tasks when none are specified. */
+export const DEFAULT_PRE_EXECUTION_SKILLS: string[] = [];
+
 /** Default post-execution skills applied to new tasks when none are specified. */
 export const DEFAULT_POST_EXECUTION_SKILLS: string[] = ['checkpoint', 'code-review'];
+
+// =============================================================================
+// Execution Wrappers
+// =============================================================================
+
+export interface ExecutionWrapper {
+  id: string;              // directory name
+  name: string;            // human-readable name
+  description: string;     // what this wrapper does
+  preExecutionSkills: string[];   // skills to run before main execution
+  postExecutionSkills: string[];  // skills to run after main execution
+}

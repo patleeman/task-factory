@@ -61,9 +61,37 @@ export function normalizeAcceptanceCriteria(criteria: unknown): string[] {
         return '';
       }
 
+      if (typeof criterion === 'object') {
+        const parts = Object.entries(criterion as Record<string, unknown>).map(([key, value]) => {
+          const valueText = formatCriterionValue(value);
+          return valueText ? `${key}: ${valueText}` : key;
+        });
+        return parts.join(' ').trim();
+      }
+
       return String(criterion).trim();
     })
     .filter(Boolean);
+}
+
+function formatCriterionValue(value: unknown): string {
+  if (typeof value === 'string') {
+    return value.trim();
+  }
+
+  if (value == null) {
+    return '';
+  }
+
+  if (typeof value === 'object') {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+
+  return String(value).trim();
 }
 
 export function parseTaskFile(filePath: string): Task {
@@ -187,6 +215,7 @@ export function createTask(
     commits: [],
     attachments: [],
     modelConfig: resolvedDefaults.modelConfig,
+    preExecutionSkills: resolvedDefaults.preExecutionSkills,
     postExecutionSkills: resolvedDefaults.postExecutionSkills,
     skillConfigs: request.skillConfigs,
     blocked: {
@@ -230,6 +259,10 @@ export function updateTask(
 
   if (request.plan !== undefined) {
     task.frontmatter.plan = request.plan;
+  }
+
+  if (request.preExecutionSkills !== undefined) {
+    task.frontmatter.preExecutionSkills = request.preExecutionSkills;
   }
 
   if (request.postExecutionSkills !== undefined) {

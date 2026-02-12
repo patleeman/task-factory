@@ -1,4 +1,5 @@
 import {
+  DEFAULT_PRE_EXECUTION_SKILLS,
   DEFAULT_POST_EXECUTION_SKILLS,
   type CreateTaskRequest,
   type ModelConfig,
@@ -29,6 +30,7 @@ const ALLOWED_THINKING_LEVEL_SET = new Set<string>(ALLOWED_THINKING_LEVELS);
 
 const BUILT_IN_TASK_DEFAULTS: TaskDefaults = {
   modelConfig: undefined,
+  preExecutionSkills: [...DEFAULT_PRE_EXECUTION_SKILLS],
   postExecutionSkills: [...DEFAULT_POST_EXECUTION_SKILLS],
 };
 
@@ -44,6 +46,7 @@ function cloneModelConfig(modelConfig: ModelConfig | undefined): ModelConfig | u
 function cloneTaskDefaults(defaults: TaskDefaults): TaskDefaults {
   return {
     modelConfig: cloneModelConfig(defaults.modelConfig),
+    preExecutionSkills: [...defaults.preExecutionSkills],
     postExecutionSkills: [...defaults.postExecutionSkills],
   };
 }
@@ -77,9 +80,17 @@ function sanitizeModelConfig(raw: unknown): ModelConfig | undefined {
   return modelConfig;
 }
 
-function sanitizeSkillIds(raw: unknown): string[] {
+function sanitizePostSkillIds(raw: unknown): string[] {
   if (!Array.isArray(raw)) {
     return [...DEFAULT_POST_EXECUTION_SKILLS];
+  }
+
+  return raw.filter((skillId): skillId is string => typeof skillId === 'string');
+}
+
+function sanitizePreSkillIds(raw: unknown): string[] {
+  if (!Array.isArray(raw)) {
+    return [...DEFAULT_PRE_EXECUTION_SKILLS];
   }
 
   return raw.filter((skillId): skillId is string => typeof skillId === 'string');
@@ -98,7 +109,8 @@ export function resolveTaskDefaults(rawSettings: PiFactorySettings | null | unde
 
   return {
     modelConfig: sanitizeModelConfig((defaults as { modelConfig?: unknown }).modelConfig),
-    postExecutionSkills: sanitizeSkillIds((defaults as { postExecutionSkills?: unknown }).postExecutionSkills),
+    preExecutionSkills: sanitizePreSkillIds((defaults as { preExecutionSkills?: unknown }).preExecutionSkills),
+    postExecutionSkills: sanitizePostSkillIds((defaults as { postExecutionSkills?: unknown }).postExecutionSkills),
   };
 }
 
@@ -111,6 +123,7 @@ export function saveTaskDefaults(defaults: TaskDefaults): TaskDefaults {
   const current = loadPiFactorySettings() || {};
   const normalized = {
     modelConfig: cloneModelConfig(defaults.modelConfig),
+    preExecutionSkills: [...defaults.preExecutionSkills],
     postExecutionSkills: [...defaults.postExecutionSkills],
   };
 
@@ -124,11 +137,16 @@ export function saveTaskDefaults(defaults: TaskDefaults): TaskDefaults {
 
 export function applyTaskDefaultsToRequest(request: CreateTaskRequest, defaults: TaskDefaults): {
   modelConfig: ModelConfig | undefined;
+  preExecutionSkills: string[];
   postExecutionSkills: string[];
 } {
   const modelConfig = request.modelConfig !== undefined
     ? cloneModelConfig(request.modelConfig)
     : cloneModelConfig(defaults.modelConfig);
+
+  const preExecutionSkills = request.preExecutionSkills !== undefined
+    ? [...request.preExecutionSkills]
+    : [...defaults.preExecutionSkills];
 
   const postExecutionSkills = request.postExecutionSkills !== undefined
     ? [...request.postExecutionSkills]
@@ -136,6 +154,7 @@ export function applyTaskDefaultsToRequest(request: CreateTaskRequest, defaults:
 
   return {
     modelConfig,
+    preExecutionSkills,
     postExecutionSkills,
   };
 }
@@ -147,6 +166,7 @@ export function parseTaskDefaultsPayload(raw: unknown): { ok: true; value: TaskD
 
   const payload = raw as {
     modelConfig?: unknown;
+    preExecutionSkills?: unknown;
     postExecutionSkills?: unknown;
   };
 
@@ -154,10 +174,15 @@ export function parseTaskDefaultsPayload(raw: unknown): { ok: true; value: TaskD
     return { ok: false, error: 'postExecutionSkills must be an array of skill IDs' };
   }
 
-  const hasNonStringSkill = payload.postExecutionSkills.some((skillId) => typeof skillId !== 'string');
-  if (hasNonStringSkill) {
+  const hasNonStringPostSkill = payload.postExecutionSkills.some((skillId) => typeof skillId !== 'string');
+  if (hasNonStringPostSkill) {
     return { ok: false, error: 'postExecutionSkills must contain only string skill IDs' };
   }
+
+  // preExecutionSkills defaults to empty array if not provided
+  const preExecutionSkills: string[] = Array.isArray(payload.preExecutionSkills)
+    ? payload.preExecutionSkills.filter((id): id is string => typeof id === 'string')
+    : [];
 
   let modelConfig: ModelConfig | undefined;
 
@@ -199,6 +224,7 @@ export function parseTaskDefaultsPayload(raw: unknown): { ok: true; value: TaskD
     ok: true,
     value: {
       modelConfig,
+      preExecutionSkills: [...preExecutionSkills],
       postExecutionSkills: [...payload.postExecutionSkills],
     },
   };
@@ -239,12 +265,20 @@ export function validateTaskDefaults(
   }
 
   const validSkillIds = new Set(availableSkillIds);
-  const unknownSkills = defaults.postExecutionSkills.filter((skillId) => !validSkillIds.has(skillId));
 
-  if (unknownSkills.length > 0) {
+  const unknownPreSkills = defaults.preExecutionSkills.filter((skillId) => !validSkillIds.has(skillId));
+  if (unknownPreSkills.length > 0) {
     return {
       ok: false,
-      error: `Unknown post-execution skills: ${unknownSkills.join(', ')}`,
+      error: `Unknown pre-execution skills: ${unknownPreSkills.join(', ')}`,
+    };
+  }
+
+  const unknownPostSkills = defaults.postExecutionSkills.filter((skillId) => !validSkillIds.has(skillId));
+  if (unknownPostSkills.length > 0) {
+    return {
+      ok: false,
+      error: `Unknown post-execution skills: ${unknownPostSkills.join(', ')}`,
     };
   }
 
