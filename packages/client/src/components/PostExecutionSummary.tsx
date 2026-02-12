@@ -16,6 +16,7 @@ export function PostExecutionSummary({
   onSummaryUpdated,
 }: PostExecutionSummaryProps) {
   const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set())
+  const [isRegenerating, setIsRegenerating] = useState(false)
 
   const toggleFile = (filePath: string) => {
     setExpandedFiles(prev => {
@@ -29,6 +30,18 @@ export function PostExecutionSummary({
     })
   }
 
+  const handleRegenerate = async () => {
+    setIsRegenerating(true)
+    try {
+      const updated = await api.generateSummary(workspaceId, taskId)
+      onSummaryUpdated?.(updated)
+    } catch (err) {
+      console.error('Failed to regenerate summary:', err)
+    } finally {
+      setIsRegenerating(false)
+    }
+  }
+
   return (
     <div className="space-y-4">
       {/* Summary header */}
@@ -38,6 +51,16 @@ export function PostExecutionSummary({
           <span className="text-[10px] text-emerald-400 ml-auto">
             {new Date(summary.completedAt).toLocaleString()}
           </span>
+          <button
+            onClick={handleRegenerate}
+            disabled={isRegenerating}
+            className="text-[10px] text-emerald-600 hover:text-emerald-800 font-medium disabled:opacity-50 disabled:cursor-wait flex items-center gap-1"
+            title="Regenerate summary using the agent session"
+          >
+            {isRegenerating ? (
+              <><span className="inline-block w-2.5 h-2.5 border border-emerald-500 border-t-transparent rounded-full animate-spin" />Regenerating…</>
+            ) : '↻ Regenerate'}
+          </button>
         </div>
         <p className="text-sm text-slate-700 leading-relaxed">{summary.summary}</p>
       </div>
