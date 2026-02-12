@@ -9,7 +9,6 @@
 
 export type Phase =
   | 'backlog'
-  | 'planning'
   | 'ready'
   | 'executing'
   | 'complete'
@@ -17,7 +16,6 @@ export type Phase =
 
 export const PHASES: Phase[] = [
   'backlog',
-  'planning',
   'ready',
   'executing',
   'complete',
@@ -26,7 +24,6 @@ export const PHASES: Phase[] = [
 
 export const PHASE_DISPLAY_NAMES: Record<Phase, string> = {
   backlog: 'Backlog',
-  planning: 'Planning',
   ready: 'Ready',
   executing: 'Executing',
   complete: 'Complete',
@@ -60,7 +57,6 @@ export function getDemotePhase(current: Phase): Phase | null {
 // WIP limits for each phase (null = unlimited)
 export const DEFAULT_WIP_LIMITS: Record<Phase, number | null> = {
   backlog: null,
-  planning: 3,
   ready: 5,
   executing: 1,
   complete: null,
@@ -127,7 +123,7 @@ export interface TaskFrontmatter {
   // Model configuration (per-task model selection)
   modelConfig?: ModelConfig;
 
-  // Plan (generated during planning phase)
+  // Plan (auto-generated on task creation)
   plan?: TaskPlan;
 
   // Attachments (images, files)
@@ -147,7 +143,7 @@ export interface QualityChecks {
 }
 
 // =============================================================================
-// Task Plan (generated during planning phase)
+// Task Plan (auto-generated on task creation)
 // =============================================================================
 
 export interface TaskPlan {
@@ -439,9 +435,7 @@ export interface DraftTask {
   title: string;
   content: string;         // markdown description
   acceptanceCriteria: string[];
-  type: 'feature' | 'bug' | 'refactor' | 'research' | 'spike';
-  priority: 'critical' | 'high' | 'medium' | 'low';
-  complexity: 'low' | 'medium' | 'high';
+  plan?: TaskPlan;         // optional pre-generated plan
   createdAt: string;       // ISO 8601
 }
 
@@ -466,6 +460,7 @@ export interface PlanningMessage {
   role: 'user' | 'assistant' | 'tool';
   content: string;
   timestamp: string;       // ISO 8601
+  sessionId?: string;      // UUID of the planning session this message belongs to
   metadata?: {
     toolName?: string;
     args?: Record<string, unknown>;
@@ -485,6 +480,7 @@ export type PlanningEvent =
   | { type: 'planning:thinking_end'; workspaceId: string }
   | { type: 'planning:turn_end'; workspaceId: string }
   | { type: 'planning:status'; workspaceId: string; status: PlanningAgentStatus }
+  | { type: 'planning:session_reset'; workspaceId: string; sessionId: string }
   | { type: 'shelf:updated'; workspaceId: string; shelf: Shelf }
   | { type: 'planning:task_form_updated'; workspaceId: string; formState: Partial<NewTaskFormState> };
 

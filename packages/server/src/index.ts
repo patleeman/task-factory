@@ -200,6 +200,31 @@ app.post('/api/workspaces/:id/tasks', async (req, res) => {
     createSystemEvent(workspace.id, task.id, 'task-created', `Task ${task.id} created`);
 
     res.json(task);
+
+    // Generate plan asynchronously after responding (don't block task creation)
+    if (!task.frontmatter.plan && task.content) {
+      import('./plan-service.js').then(async ({ generatePlan }) => {
+        try {
+          const plan = await generatePlan(task.content, task.frontmatter.acceptanceCriteria);
+          task.frontmatter.plan = plan;
+          task.frontmatter.updated = new Date().toISOString();
+          const { saveTaskFile } = await import('./task-service.js');
+          saveTaskFile(task);
+          broadcastToWorkspace(workspace.id, {
+            type: 'task:plan_generated',
+            taskId: task.id,
+            plan,
+          });
+          broadcastToWorkspace(workspace.id, {
+            type: 'task:updated',
+            task,
+            changes: {},
+          });
+        } catch (err) {
+          console.error('Background plan generation failed:', err);
+        }
+      });
+    }
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }
@@ -398,18 +423,6 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/move', async (req, res) => 
       kickQueue(workspace.id);
     }
 
-    // If moving to planning, start the planning agent asynchronously
-    if (toPhase === 'planning') {
-      planTask({
-        task,
-        workspaceId: workspace.id,
-        workspacePath: workspace.path,
-        broadcastToWorkspace: (event) => broadcastToWorkspace(workspace.id, event),
-      }).catch((err) => {
-        console.error('Planning agent failed:', err);
-      });
-    }
-
     res.json(task);
   } catch (err) {
     res.status(500).json({ error: String(err) });
@@ -544,16 +557,7 @@ app.post('/api/workspaces/:workspaceId/activity', async (req, res) => {
       const tasks = discoverTasks(tasksDir);
       const task = tasks.find((t) => t.id === taskId);
 
-      if (task && task.frontmatter.phase === 'planning') {
-        planTask({
-          task,
-          workspaceId: workspace.id,
-          workspacePath: workspace.path,
-          broadcastToWorkspace: (event) => broadcastToWorkspace(workspace.id, event),
-        }).catch((err) => {
-          console.error('Failed to start planning agent from chat:', err);
-        });
-      } else if (task && task.frontmatter.sessionFile) {
+      if (task && task.frontmatter.sessionFile) {
         // Task has a previous conversation — resume it for chat
         resumeChat(
           task,
@@ -778,7 +782,6 @@ app.get('/api/workspaces/:workspaceId/extensions', (req, res) => {
 
 import {
   executeTask,
-  planTask,
   stopTaskExecution,
   steerTask,
   followUpTask,
@@ -1269,6 +1272,69 @@ import {
   clearShelf,
 } from './shelf-service.js';
 
+// ─── Planning Attachments ────────────────────────────────────────────────────
+
+function getPlanningAttachmentsDir(workspace: import('@pi-factory/shared').Workspace): string {
+  return join(workspace.path, '.pi', 'planning-attachments');
+}
+
+const planningUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, _file, cb) => {
+      const workspace = getWorkspaceById(req.params.workspaceId as string);
+      if (!workspace) return cb(new Error('Workspace not found'), '');
+      const dir = getPlanningAttachmentsDir(workspace);
+      if (!fsExists(dir)) fsMkdir(dir, { recursive: true });
+      cb(null, dir);
+    },
+    filename: (_req, file, cb) => {
+      const id = crypto.randomUUID().slice(0, 8);
+      const ext = extname(file.originalname) || '';
+      cb(null, `${id}${ext}`);
+    },
+  }),
+  limits: { fileSize: 20 * 1024 * 1024 },
+});
+
+// Track planning attachments per workspace (in-memory, non-persistent — they're on disk)
+const planningAttachments = new Map<string, import('@pi-factory/shared').Attachment[]>();
+
+function getPlanningAttachmentList(workspaceId: string): import('@pi-factory/shared').Attachment[] {
+  return planningAttachments.get(workspaceId) || [];
+}
+
+app.post('/api/workspaces/:workspaceId/planning/attachments', planningUpload.array('files', 10), (req, res) => {
+  const workspace = getWorkspaceById(req.params.workspaceId as string);
+  if (!workspace) { res.status(404).json({ error: 'Workspace not found' }); return; }
+
+  const files = req.files as Express.Multer.File[];
+  if (!files || files.length === 0) { res.status(400).json({ error: 'No files provided' }); return; }
+
+  const newAttachments: import('@pi-factory/shared').Attachment[] = files.map(f => ({
+    id: f.filename.replace(extname(f.filename), ''),
+    filename: f.originalname,
+    storedName: f.filename,
+    mimeType: f.mimetype,
+    size: f.size,
+    createdAt: new Date().toISOString(),
+  }));
+
+  const existing = planningAttachments.get(workspace.id) || [];
+  planningAttachments.set(workspace.id, [...existing, ...newAttachments]);
+
+  res.json(newAttachments);
+});
+
+app.get('/api/workspaces/:workspaceId/planning/attachments/:storedName', (req, res) => {
+  const workspace = getWorkspaceById(req.params.workspaceId);
+  if (!workspace) { res.status(404).json({ error: 'Workspace not found' }); return; }
+
+  const dir = getPlanningAttachmentsDir(workspace);
+  const filePath = join(dir, req.params.storedName);
+  if (!fsExists(filePath)) { res.status(404).json({ error: 'Attachment not found' }); return; }
+  res.sendFile(filePath);
+});
+
 // Send message to planning agent
 app.post('/api/workspaces/:workspaceId/planning/message', async (req, res) => {
   const workspace = getWorkspaceById(req.params.workspaceId);
@@ -1277,18 +1343,39 @@ app.post('/api/workspaces/:workspaceId/planning/message', async (req, res) => {
     return;
   }
 
-  const { content } = req.body as { content: string };
-  if (!content) {
+  const { content, attachmentIds } = req.body as { content: string; attachmentIds?: string[] };
+  if (!content && (!attachmentIds || attachmentIds.length === 0)) {
     res.status(400).json({ error: 'Content is required' });
     return;
   }
 
   try {
+    // Load images from planning attachments if referenced
+    let images: { type: 'image'; data: string; mimeType: string }[] | undefined;
+    if (attachmentIds && attachmentIds.length > 0) {
+      const allAtts = getPlanningAttachmentList(workspace.id);
+      const dir = getPlanningAttachmentsDir(workspace);
+      images = [];
+      for (const id of attachmentIds) {
+        const att = allAtts.find(a => a.id === id);
+        if (!att || !att.mimeType.startsWith('image/')) continue;
+        const filePath = join(dir, att.storedName);
+        if (!fsExists(filePath)) continue;
+        try {
+          const { readFileSync } = await import('fs');
+          const data = readFileSync(filePath).toString('base64');
+          images.push({ type: 'image', data, mimeType: att.mimeType });
+        } catch { /* skip */ }
+      }
+      if (images.length === 0) images = undefined;
+    }
+
     // Fire and forget — response streams via WebSocket
     sendPlanningMessage(
       workspace.id,
-      content,
+      content || '(see attached images)',
       (event) => broadcastToWorkspace(workspace.id, event),
+      images,
     ).catch((err) => {
       console.error('Planning agent error:', err);
     });
@@ -1326,8 +1413,11 @@ app.post('/api/workspaces/:workspaceId/planning/reset', async (req, res) => {
     res.status(404).json({ error: 'Workspace not found' });
     return;
   }
-  await resetPlanningSession(workspace.id);
-  res.json({ ok: true });
+  const newSessionId = await resetPlanningSession(
+    workspace.id,
+    (event) => broadcastToWorkspace(workspace.id, event),
+  );
+  res.json({ ok: true, sessionId: newSessionId });
 });
 
 // =============================================================================
@@ -1477,6 +1567,14 @@ app.post('/api/workspaces/:workspaceId/shelf/drafts/:draftId/push', async (req, 
   try {
     const task = createTask(workspace.path, tasksDir, createReq, draft.title);
 
+    // If draft has a plan, set it on the task
+    if (draft.plan) {
+      task.frontmatter.plan = draft.plan;
+      task.frontmatter.updated = new Date().toISOString();
+      const { saveTaskFile } = await import('./task-service.js');
+      saveTaskFile(task);
+    }
+
     // Remove from shelf
     const shelf = removeDraftTask(workspace.id, draft.id);
     broadcastToWorkspace(workspace.id, { type: 'shelf:updated', workspaceId: workspace.id, shelf });
@@ -1487,6 +1585,31 @@ app.post('/api/workspaces/:workspaceId/shelf/drafts/:draftId/push', async (req, 
     createSystemEvent(workspace.id, task.id, 'task-created', `Task ${task.id} created from draft`);
 
     res.json(task);
+
+    // Generate plan asynchronously if draft didn't have one
+    if (!task.frontmatter.plan && task.content) {
+      import('./plan-service.js').then(async ({ generatePlan }) => {
+        try {
+          const plan = await generatePlan(task.content, task.frontmatter.acceptanceCriteria);
+          task.frontmatter.plan = plan;
+          task.frontmatter.updated = new Date().toISOString();
+          const { saveTaskFile } = await import('./task-service.js');
+          saveTaskFile(task);
+          broadcastToWorkspace(workspace.id, {
+            type: 'task:plan_generated',
+            taskId: task.id,
+            plan,
+          });
+          broadcastToWorkspace(workspace.id, {
+            type: 'task:updated',
+            task,
+            changes: {},
+          });
+        } catch (err) {
+          console.error('Background plan generation failed:', err);
+        }
+      });
+    }
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }
@@ -1521,9 +1644,42 @@ app.post('/api/workspaces/:workspaceId/shelf/push-all', async (req, res) => {
         acceptanceCriteria: draft.acceptanceCriteria,
       }, draft.title);
 
+      // If draft has a plan, set it on the task
+      if (draft.plan) {
+        task.frontmatter.plan = draft.plan;
+        task.frontmatter.updated = new Date().toISOString();
+        const { saveTaskFile } = await import('./task-service.js');
+        saveTaskFile(task);
+      }
+
       createdTasks.push(task);
       broadcastToWorkspace(workspace.id, { type: 'task:created', task });
       createSystemEvent(workspace.id, task.id, 'task-created', `Task ${task.id} created from draft`);
+
+      // Generate plan asynchronously if draft didn't have one
+      if (!task.frontmatter.plan && task.content) {
+        import('./plan-service.js').then(async ({ generatePlan }) => {
+          try {
+            const plan = await generatePlan(task.content, task.frontmatter.acceptanceCriteria);
+            task.frontmatter.plan = plan;
+            task.frontmatter.updated = new Date().toISOString();
+            const { saveTaskFile: sf } = await import('./task-service.js');
+            sf(task);
+            broadcastToWorkspace(workspace.id, {
+              type: 'task:plan_generated',
+              taskId: task.id,
+              plan,
+            });
+            broadcastToWorkspace(workspace.id, {
+              type: 'task:updated',
+              task,
+              changes: {},
+            });
+          } catch (err) {
+            console.error('Background plan generation failed:', err);
+          }
+        });
+      }
     } catch (err) {
       console.error(`Failed to create task from draft ${draft.id}:`, err);
     }

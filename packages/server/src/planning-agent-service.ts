@@ -3,8 +3,8 @@
 // =============================================================================
 // The planning agent is a general-purpose conversational agent that helps the
 // user research, decompose, and stage work before it hits the production line.
-// It maintains one conversation per workspace and can create draft tasks and
-// HTML artifacts on the shelf.
+// It maintains one conversation per workspace and can create draft tasks
+// on the production queue.
 
 import { join, dirname } from 'path';
 import { homedir } from 'os';
@@ -22,7 +22,6 @@ import {
 } from '@mariozechner/pi-coding-agent';
 import type {
   DraftTask,
-  Artifact,
   PlanningMessage,
   PlanningAgentStatus,
   ServerEvent,
@@ -31,7 +30,6 @@ import type {
 } from '@pi-factory/shared';
 import {
   addDraftTask,
-  addArtifact,
   getShelf,
   removeShelfItem,
   updateDraftTask as updateDraftTaskFn,
@@ -52,7 +50,6 @@ import {
 
 export interface ShelfCallbacks {
   createDraftTask: (args: any) => void;
-  createArtifact: (args: any) => void;
   removeItem: (itemId: string) => string;
   updateDraftTask: (draftId: string, updates: any) => string;
   getShelf: () => any;
@@ -83,22 +80,16 @@ function registerShelfCallbacks(
         acceptanceCriteria: Array.isArray(args.acceptance_criteria)
           ? args.acceptance_criteria.map(String)
           : [],
-        type: args.type || 'feature',
-        priority: args.priority || 'medium',
-        complexity: args.complexity || 'medium',
+        plan: args.plan ? {
+          goal: String(args.plan.goal || ''),
+          steps: Array.isArray(args.plan.steps) ? args.plan.steps.map(String) : [],
+          validation: Array.isArray(args.plan.validation) ? args.plan.validation.map(String) : [],
+          cleanup: Array.isArray(args.plan.cleanup) ? args.plan.cleanup.map(String) : [],
+          generatedAt: new Date().toISOString(),
+        } : undefined,
         createdAt: new Date().toISOString(),
       };
       const shelf = addDraftTask(workspaceId, draft);
-      broadcast({ type: 'shelf:updated', workspaceId, shelf });
-    },
-    createArtifact: (args: any) => {
-      const artifact: Artifact = {
-        id: `artifact-${crypto.randomUUID().slice(0, 8)}`,
-        name: String(args.name || 'Untitled Artifact'),
-        html: String(args.html || '<p>Empty artifact</p>'),
-        createdAt: new Date().toISOString(),
-      };
-      const shelf = addArtifact(workspaceId, artifact);
       broadcast({ type: 'shelf:updated', workspaceId, shelf });
     },
     removeItem: (itemId: string) => {
@@ -127,6 +118,56 @@ function registerShelfCallbacks(
 
 function unregisterShelfCallbacks(workspaceId: string): void {
   globalThis.__piFactoryShelfCallbacks?.delete(workspaceId);
+}
+
+// =============================================================================
+// Planning session ID management
+// =============================================================================
+
+function sessionIdPath(workspaceId: string): string | null {
+  const workspace = getWorkspaceById(workspaceId);
+  if (!workspace) return null;
+  const dir = join(workspace.path, '.pi');
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  return join(dir, 'planning-session-id.txt');
+}
+
+function sessionsDir(workspaceId: string): string | null {
+  const workspace = getWorkspaceById(workspaceId);
+  if (!workspace) return null;
+  const dir = join(workspace.path, '.pi', 'planning-sessions');
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+function getOrCreateSessionId(workspaceId: string): string {
+  const path = sessionIdPath(workspaceId);
+  if (path && existsSync(path)) {
+    const existing = readFileSync(path, 'utf-8').trim();
+    if (existing) return existing;
+  }
+  const newId = crypto.randomUUID();
+  if (path) {
+    const { writeFileSync } = require('fs');
+    writeFileSync(path, newId);
+  }
+  return newId;
+}
+
+function writeSessionId(workspaceId: string, sessionId: string): void {
+  const path = sessionIdPath(workspaceId);
+  if (!path) return;
+  const { writeFileSync } = require('fs');
+  writeFileSync(path, sessionId);
+}
+
+function archiveSession(workspaceId: string, sessionId: string, messages: PlanningMessage[]): void {
+  if (messages.length === 0) return;
+  const dir = sessionsDir(workspaceId);
+  if (!dir) return;
+  const archivePath = join(dir, `${sessionId}.json`);
+  const { writeFileSync } = require('fs');
+  writeFileSync(archivePath, JSON.stringify(messages, null, 2));
 }
 
 // =============================================================================
@@ -199,6 +240,8 @@ interface PlanningSession {
   broadcast: (event: ServerEvent) => void;
   /** Whether the first user message has been sent (system prompt gets prepended) */
   firstMessageSent: boolean;
+  /** UUID for the current planning session (persisted in planning-session-id.txt) */
+  sessionId: string;
 }
 
 const planningSessions = new Map<string, PlanningSession>();
@@ -233,6 +276,7 @@ async function getOrCreateSession(
     toolCallArgs: new Map(),
     broadcast,
     firstMessageSent: false,
+    sessionId: getOrCreateSessionId(workspaceId),
   };
 
   planningSessions.set(workspaceId, session);
@@ -341,17 +385,14 @@ function buildPlanningSystemPrompt(workspacePath: string, workspaceId: string): 
     } catch { /* ignore */ }
   }
 
-  // Get current shelf contents
+  // Get current production queue contents (draft tasks only)
   const shelf = getShelf(workspaceId);
   let shelfSummary = '';
-  if (shelf.items.length > 0) {
-    shelfSummary = '\n## Current Shelf\n';
-    for (const si of shelf.items) {
-      if (si.type === 'draft-task') {
-        shelfSummary += `- [draft] **${si.item.title}** (${si.item.id})\n`;
-      } else {
-        shelfSummary += `- [artifact] **${si.item.name}** (${si.item.id})\n`;
-      }
+  const drafts = shelf.items.filter(si => si.type === 'draft-task');
+  if (drafts.length > 0) {
+    shelfSummary = '\n## Current Production Queue\n';
+    for (const si of drafts) {
+      shelfSummary += `- **${si.item.title}** (${si.item.id})\n`;
     }
   }
 
@@ -362,7 +403,6 @@ function buildPlanningSystemPrompt(workspacePath: string, workspaceId: string): 
 - Research codebases, architectures, and requirements
 - Break down large goals into well-defined, small tasks
 - Create draft tasks that the user can review before committing to the backlog
-- Generate HTML artifacts (research summaries, comparison tables, diagrams, mockups)
 - Answer questions about the current state of work
 
 ## Workspace
@@ -379,22 +419,18 @@ Parameters:
 - title (string): Short descriptive title
 - content (string): Markdown description of what needs to be done
 - acceptance_criteria (string[]): List of specific, testable criteria
-- type (string): One of: feature, bug, refactor, research, spike
-- priority (string): One of: critical, high, medium, low
-- complexity (string): One of: low, medium, high
-
-### create_artifact
-Creates an HTML artifact on the shelf. Used for research summaries, comparison tables, diagrams, mockups, etc.
-Parameters:
-- name (string): Descriptive name for the artifact
-- html (string): Complete HTML document. Use inline styles. Keep it self-contained.
+- plan (object): Execution plan for the task. **Always include a plan.** Tasks with plans skip the planning phase and go straight to ready for execution.
+  - goal (string): What the agent is trying to achieve
+  - steps (string[]): Concrete implementation steps — specific enough that an agent can execute without ambiguity
+  - validation (string[]): How to verify the goal was achieved
+  - cleanup (string[]): Post-completion cleanup actions (empty array if none)
 
 ### manage_shelf
 List, remove, or update shelf items.
 Parameters:
 - action (string): "list" | "remove" | "update"
 - item_id (string, optional): ID of the item (required for remove/update)
-- updates (object, optional): Fields to update on a draft task (title, content, acceptance_criteria, type, priority, complexity)
+- updates (object, optional): Fields to update on a draft task (title, content, acceptance_criteria)
 
 ### factory_control
 Start, stop, or check the status of the factory queue (the execution pipeline that processes tasks).
@@ -402,10 +438,12 @@ Parameters:
 - action (string): "status" to check, "start" to begin processing, "stop" to pause
 
 ## Guidelines
+- When the user describes work, **always create draft tasks immediately** — don't ask for permission, just do it
+- **Always include a plan** with every draft task. Research the codebase first, then create tasks with concrete implementation steps. This lets tasks skip the planning phase entirely.
 - Keep tasks small and focused — each should be completable in a single agent session
 - Write clear acceptance criteria that are specific and testable
+- Plan steps should be concrete: reference specific files, functions, and components
 - When in doubt, ask the user for clarification
-- Use artifacts for anything that benefits from visual presentation
 - Be conversational and helpful — you're a collaborator, not just a task creator`;
 }
 
@@ -451,23 +489,19 @@ function handlePlanningEvent(
     }
 
     case 'message_end': {
-      const message = event.message;
-      let content = '';
-
-      if ('content' in message && Array.isArray(message.content)) {
-        content = message.content
-          .filter((c: any) => c.type === 'text')
-          .map((c: any) => c.text)
-          .join('\n');
-      }
+      // Use currentStreamText — it's only fed by assistant streaming deltas,
+      // so it won't include the user message / system prompt that gets sent
+      // via prompt(). Extracting from event.message would capture user messages
+      // too, leaking the system prompt into the chat.
+      const content = session.currentStreamText;
 
       if (content) {
-        const msgId = crypto.randomUUID();
         const planningMsg: PlanningMessage = {
-          id: msgId,
+          id: crypto.randomUUID(),
           role: 'assistant',
           content,
           timestamp: new Date().toISOString(),
+          sessionId: session.sessionId,
         };
         session.messages.push(planningMsg);
         persistMessages(workspaceId, session.messages);
@@ -477,7 +511,7 @@ function handlePlanningEvent(
       broadcast({
         type: 'planning:streaming_end',
         workspaceId,
-        fullText: content || session.currentStreamText,
+        fullText: content,
         messageId: crypto.randomUUID(),
       });
 
@@ -543,6 +577,7 @@ function handlePlanningEvent(
         role: 'tool',
         content: resultText,
         timestamp: new Date().toISOString(),
+        sessionId: session.sessionId,
         metadata: {
           toolName: event.toolName,
           args: toolInfo?.args || {},
@@ -575,6 +610,7 @@ async function sendToAgent(
   content: string,
   workspaceId: string,
   broadcast: (event: ServerEvent) => void,
+  images?: { type: 'image'; data: string; mimeType: string }[],
 ): Promise<void> {
   if (!session.piSession) {
     throw new Error('Planning session not initialized');
@@ -615,10 +651,11 @@ async function sendToAgent(
         }
         fullPrompt += content;
 
-        await session.piSession.prompt(fullPrompt);
+        const promptOpts = images && images.length > 0 ? { images } : undefined;
+        await session.piSession.prompt(fullPrompt, promptOpts);
         session.firstMessageSent = true;
       } else {
-        await session.piSession.followUp(content);
+        await session.piSession.followUp(content, images && images.length > 0 ? images : undefined);
       }
 
       // Turn complete
@@ -675,6 +712,7 @@ async function sendToAgent(
             role: 'assistant',
             content: 'I encountered an error and could not recover. Please try resetting the conversation.',
             timestamp: new Date().toISOString(),
+            sessionId: session.sessionId,
           };
           session.messages.push(errMsg);
           persistMessages(workspaceId, session.messages);
@@ -690,6 +728,7 @@ async function sendToAgent(
           role: 'assistant',
           content: 'Something went wrong. Please try again or reset the conversation.',
           timestamp: new Date().toISOString(),
+          sessionId: session.sessionId,
         };
         session.messages.push(errMsg);
         persistMessages(workspaceId, session.messages);
@@ -709,22 +748,25 @@ export async function sendPlanningMessage(
   workspaceId: string,
   content: string,
   broadcast: (event: ServerEvent) => void,
+  images?: { type: 'image'; data: string; mimeType: string }[],
 ): Promise<void> {
+  const session = await getOrCreateSession(workspaceId, broadcast);
+
   // Record the user message
   const userMsg: PlanningMessage = {
     id: crypto.randomUUID(),
     role: 'user',
     content,
     timestamp: new Date().toISOString(),
+    sessionId: session.sessionId,
   };
 
-  const session = await getOrCreateSession(workspaceId, broadcast);
   session.messages.push(userMsg);
   persistMessages(workspaceId, session.messages);
   broadcast({ type: 'planning:message', workspaceId, message: userMsg });
 
   // Send to the agent with retry on failure
-  await sendToAgent(session, content, workspaceId, broadcast);
+  await sendToAgent(session, content, workspaceId, broadcast, images);
 }
 
 /**
@@ -745,9 +787,21 @@ export function getPlanningStatus(workspaceId: string): PlanningAgentStatus {
 
 /**
  * Reset the planning session (start fresh conversation).
+ * Archives the old session messages and generates a new session ID.
+ * Returns the new session ID.
  */
-export async function resetPlanningSession(workspaceId: string): Promise<void> {
+export async function resetPlanningSession(
+  workspaceId: string,
+  broadcast?: (event: ServerEvent) => void,
+): Promise<string> {
   const session = planningSessions.get(workspaceId);
+  const oldSessionId = session?.sessionId || getOrCreateSessionId(workspaceId);
+  const oldMessages = session?.messages || loadPersistedMessages(workspaceId);
+
+  // Archive old session messages
+  archiveSession(workspaceId, oldSessionId, oldMessages);
+
+  // Tear down the old Pi SDK session
   if (session) {
     session.unsubscribe?.();
     try {
@@ -757,7 +811,20 @@ export async function resetPlanningSession(workspaceId: string): Promise<void> {
   planningSessions.delete(workspaceId);
   unregisterShelfCallbacks(workspaceId);
   unregisterFactoryControlCallbacks(workspaceId);
+
+  // Generate new session ID and persist
+  const newSessionId = crypto.randomUUID();
+  writeSessionId(workspaceId, newSessionId);
+
+  // Clear the active messages file
   persistMessagesSync(workspaceId, []);
+
+  // Broadcast the session reset event
+  if (broadcast) {
+    broadcast({ type: 'planning:session_reset', workspaceId, sessionId: newSessionId });
+  }
+
+  return newSessionId;
 }
 
 // =============================================================================

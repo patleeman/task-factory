@@ -33,27 +33,15 @@ export default function (pi: ExtensionAPI) {
         description: 'List of specific, testable acceptance criteria',
         minItems: 1,
       }),
-      type: Type.Union([
-        Type.Literal('feature'),
-        Type.Literal('bug'),
-        Type.Literal('refactor'),
-        Type.Literal('research'),
-        Type.Literal('spike'),
-      ], { description: 'Task type', default: 'feature' }),
-      priority: Type.Union([
-        Type.Literal('critical'),
-        Type.Literal('high'),
-        Type.Literal('medium'),
-        Type.Literal('low'),
-      ], { description: 'Priority level', default: 'medium' }),
-      complexity: Type.Union([
-        Type.Literal('low'),
-        Type.Literal('medium'),
-        Type.Literal('high'),
-      ], { description: 'Estimated complexity', default: 'medium' }),
+      plan: Type.Object({
+        goal: Type.String({ description: 'What the agent is trying to achieve' }),
+        steps: Type.Array(Type.String(), { description: 'Concrete implementation steps' }),
+        validation: Type.Array(Type.String(), { description: 'How to verify the goal was achieved' }),
+        cleanup: Type.Array(Type.String(), { description: 'Post-completion cleanup actions (empty array if none)' }),
+      }, { description: 'Execution plan — tasks with a plan skip the planning phase and go straight to ready' }),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      const { title, content, acceptance_criteria, type, priority, complexity } = params;
+      const { title, content, acceptance_criteria, plan } = params;
 
       // Find the active shelf callback (from planning agent session)
       const callbacks = globalThis.__piFactoryShelfCallbacks;
@@ -66,9 +54,7 @@ export default function (pi: ExtensionAPI) {
             title,
             content,
             acceptance_criteria,
-            type: type || 'feature',
-            priority: priority || 'medium',
-            complexity: complexity || 'medium',
+            plan,
           });
           called = true;
           break; // Only call the first one (there should only be one active)
@@ -85,7 +71,7 @@ export default function (pi: ExtensionAPI) {
       return {
         content: [{
           type: 'text' as const,
-          text: `Draft task created: "${title}" (${type}, ${priority} priority, ${complexity} complexity)\n\nAcceptance criteria:\n${acceptance_criteria.map((c, i) => `${i + 1}. ${c}`).join('\n')}\n\nThe user can review and push this to the backlog.`,
+          text: `Draft task created: "${title}"\n\nAcceptance criteria:\n${acceptance_criteria.map((c, i) => `${i + 1}. ${c}`).join('\n')}\n\nThe user can review and push this to the backlog.`,
         }],
         details: {} as Record<string, unknown>,
       };
