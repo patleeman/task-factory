@@ -7,6 +7,15 @@ metadata:
   type: loop
   max-iterations: "5"
   done-signal: HOOK_DONE
+config:
+  - key: max-iterations
+    label: Max Iterations
+    type: number
+    default: "5"
+    description: Maximum number of grind loop iterations
+    validation:
+      min: 1
+      max: 20
 ---
 
 # Grind Loop

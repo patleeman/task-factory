@@ -9,7 +9,7 @@ import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import YAML from 'yaml';
-import type { PostExecutionSkill } from '@pi-factory/shared';
+import type { PostExecutionSkill, SkillConfigField } from '@pi-factory/shared';
 import { createSystemEvent } from './activity-service.js';
 
 // =============================================================================
@@ -85,6 +85,30 @@ function parseSkillFile(skillDir: string, dirName: string): PostExecutionSkill |
     const maxIterations = parseInt(metadata['max-iterations'] || '1', 10) || 1;
     const doneSignal = metadata['done-signal'] || 'HOOK_DONE';
 
+    // Parse config schema from frontmatter
+    const configSchema: SkillConfigField[] = [];
+    if (Array.isArray(parsed.config)) {
+      for (const item of parsed.config) {
+        if (!item || typeof item !== 'object' || !item.key || !item.label || !item.type) continue;
+        const field: SkillConfigField = {
+          key: String(item.key),
+          label: String(item.label),
+          type: item.type as SkillConfigField['type'],
+          default: String(item.default ?? ''),
+          description: String(item.description ?? ''),
+        };
+        if (item.validation && typeof item.validation === 'object') {
+          const v: SkillConfigField['validation'] = {};
+          if (item.validation.min !== undefined) v.min = Number(item.validation.min);
+          if (item.validation.max !== undefined) v.max = Number(item.validation.max);
+          if (item.validation.pattern !== undefined) v.pattern = String(item.validation.pattern);
+          if (Array.isArray(item.validation.options)) v.options = item.validation.options.map(String);
+          field.validation = v;
+        }
+        configSchema.push(field);
+      }
+    }
+
     return {
       id: dirName,
       name,
@@ -95,6 +119,7 @@ function parseSkillFile(skillDir: string, dirName: string): PostExecutionSkill |
       promptTemplate: bodyContent.trim(),
       path: skillDir,
       metadata,
+      configSchema,
     };
   } catch (err) {
     console.error(`[Skills] Failed to parse ${dirName}/SKILL.md:`, err);
@@ -157,6 +182,7 @@ export interface RunSkillsContext {
   taskId: string;
   workspaceId: string;
   broadcastToWorkspace?: (event: any) => void;
+  skillConfigs?: Record<string, Record<string, string>>;
 }
 
 interface SkillSession {
@@ -170,15 +196,38 @@ interface SkillSession {
  * Each skill runs as a fresh prompt turn so tool output/events are emitted
  * and visible in the task chat timeline.
  */
+/**
+ * Apply configuration overrides from skillConfigs to a skill instance.
+ * Returns a shallow copy with overridden values.
+ */
+function applySkillConfigOverrides(
+  skill: PostExecutionSkill,
+  overrides: Record<string, string> | undefined,
+): PostExecutionSkill {
+  if (!overrides || Object.keys(overrides).length === 0) return skill;
+
+  const applied = { ...skill };
+
+  // Apply known config keys that map to skill properties
+  if (overrides['max-iterations'] !== undefined) {
+    const parsed = parseInt(overrides['max-iterations'], 10);
+    if (!isNaN(parsed) && parsed > 0) {
+      applied.maxIterations = parsed;
+    }
+  }
+
+  return applied;
+}
+
 export async function runPostExecutionSkills(
   piSession: SkillSession,
   skillIds: string[],
   ctx: RunSkillsContext,
 ): Promise<void> {
-  const { taskId, workspaceId, broadcastToWorkspace } = ctx;
+  const { taskId, workspaceId, broadcastToWorkspace, skillConfigs } = ctx;
 
   for (const skillId of skillIds) {
-    const skill = getPostExecutionSkill(skillId);
+    let skill = getPostExecutionSkill(skillId);
     if (!skill) {
       console.warn(`[Skills] Skill "${skillId}" not found, skipping`);
       const notFoundEntry = createSystemEvent(
@@ -192,6 +241,9 @@ export async function runPostExecutionSkills(
       continue;
     }
 
+    // Apply configuration overrides from task skillConfigs
+    skill = applySkillConfigOverrides(skill, skillConfigs?.[skillId]);
+
     // Broadcast that we're starting this skill
     const startEntry = createSystemEvent(
       workspaceId,
@@ -202,11 +254,24 @@ export async function runPostExecutionSkills(
     );
     broadcastToWorkspace?.({ type: 'activity:entry', entry: startEntry });
 
+    let producedOutput = false;
+
     try {
       if (skill.type === 'loop') {
-        await runLoopSkill(piSession, skill, ctx);
+        producedOutput = await runLoopSkill(piSession, skill, ctx);
       } else {
-        await runFollowUpSkill(piSession, skill, ctx);
+        producedOutput = await runFollowUpSkill(piSession, skill, ctx);
+      }
+
+      if (!producedOutput) {
+        const emptyEntry = createSystemEvent(
+          workspaceId,
+          taskId,
+          'phase-change',
+          `Post-execution skill produced no chat output: ${skill.name}`,
+          { skillId: skill.id }
+        );
+        broadcastToWorkspace?.({ type: 'activity:entry', entry: emptyEntry });
       }
     } catch (err) {
       console.error(`[Skills] Error running skill "${skillId}":`, err);
@@ -239,14 +304,19 @@ async function runFollowUpSkill(
   piSession: SkillSession,
   skill: PostExecutionSkill,
   _ctx: RunSkillsContext,
-): Promise<void> {
+): Promise<boolean> {
   console.log(`[Skills] Running follow-up skill "${skill.id}" — calling prompt()`);
+
+  const beforeMessageCount = getMessageCount(piSession);
+  const beforeLastAssistantText = getLastAssistantText(piSession);
 
   const startTime = Date.now();
   await piSession.prompt(skill.promptTemplate);
   const elapsed = Date.now() - startTime;
 
   console.log(`[Skills] Follow-up skill "${skill.id}" completed in ${elapsed}ms`);
+
+  return didSessionProduceOutput(piSession, beforeMessageCount, beforeLastAssistantText);
 }
 
 /**
@@ -257,8 +327,9 @@ async function runLoopSkill(
   piSession: SkillSession,
   skill: PostExecutionSkill,
   ctx: RunSkillsContext,
-): Promise<void> {
+): Promise<boolean> {
   const { taskId, workspaceId, broadcastToWorkspace } = ctx;
+  let producedOutput = false;
 
   for (let i = 0; i < skill.maxIterations; i++) {
     const iterEntry = createSystemEvent(
@@ -270,7 +341,14 @@ async function runLoopSkill(
     );
     broadcastToWorkspace?.({ type: 'activity:entry', entry: iterEntry });
 
+    const beforeMessageCount = getMessageCount(piSession);
+    const beforeLastAssistantText = getLastAssistantText(piSession);
+
     await piSession.prompt(skill.promptTemplate);
+
+    if (didSessionProduceOutput(piSession, beforeMessageCount, beforeLastAssistantText)) {
+      producedOutput = true;
+    }
 
     // Check if the agent signaled it's done.
     const responseText = getLastAssistantText(piSession);
@@ -283,7 +361,7 @@ async function runLoopSkill(
         { skillId: skill.id, iterations: i + 1 }
       );
       broadcastToWorkspace?.({ type: 'activity:entry', entry: doneEntry });
-      return;
+      return producedOutput;
     }
   }
 
@@ -295,6 +373,62 @@ async function runLoopSkill(
     { skillId: skill.id }
   );
   broadcastToWorkspace?.({ type: 'activity:entry', entry: maxEntry });
+  return producedOutput;
+}
+
+function getMessageCount(piSession: SkillSession): number {
+  return Array.isArray(piSession.messages) ? piSession.messages.length : -1;
+}
+
+function extractTextFromMessage(message: any): string {
+  if (!message) return '';
+
+  if (typeof message.content === 'string') {
+    return message.content;
+  }
+
+  if (Array.isArray(message.content)) {
+    return message.content
+      .filter((c: any) => c.type === 'text')
+      .map((c: any) => c.text)
+      .join('\n');
+  }
+
+  return '';
+}
+
+function didSessionProduceOutput(
+  piSession: SkillSession,
+  beforeMessageCount: number,
+  beforeLastAssistantText: string,
+): boolean {
+  if (beforeMessageCount >= 0 && Array.isArray(piSession.messages)) {
+    const newMessages = piSession.messages.slice(beforeMessageCount);
+
+    for (const message of newMessages) {
+      if (message?.role === 'toolResult') {
+        if (extractTextFromMessage(message).trim().length > 0) {
+          return true;
+        }
+      }
+
+      if (message?.role === 'assistant') {
+        if (extractTextFromMessage(message).trim().length > 0) {
+          return true;
+        }
+
+        if (Array.isArray(message.content)) {
+          const hasToolCall = message.content.some((c: any) => c?.type === 'toolCall');
+          if (hasToolCall) {
+            return true;
+          }
+        }
+      }
+    }
+  }
+
+  const afterLastAssistantText = getLastAssistantText(piSession);
+  return afterLastAssistantText.trim().length > 0 && afterLastAssistantText !== beforeLastAssistantText;
 }
 
 /**

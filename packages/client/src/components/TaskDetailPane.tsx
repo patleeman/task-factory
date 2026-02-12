@@ -36,7 +36,7 @@ export function TaskDetailPane({
   const [editedTitle, setEditedTitle] = useState(task.frontmatter.title)
   const [editedContent, setEditedContent] = useState(task.content)
   const [editedCriteria, setEditedCriteria] = useState(
-    task.frontmatter.acceptanceCriteria.join('\n')
+    formatAcceptanceCriteriaForEditor(task.frontmatter.acceptanceCriteria)
   )
   const [availableSkills, setAvailableSkills] = useState<PostExecutionSkill[]>([])
   const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>(
@@ -44,6 +44,9 @@ export function TaskDetailPane({
   )
   const [editedModelConfig, setEditedModelConfig] = useState<ModelConfig | undefined>(
     task.frontmatter.modelConfig
+  )
+  const [editedSkillConfigs, setEditedSkillConfigs] = useState<Record<string, Record<string, string>>>(
+    task.frontmatter.skillConfigs || {}
   )
   const containerRef = useRef<HTMLDivElement>(null)
   const { frontmatter } = task
@@ -66,9 +69,10 @@ export function TaskDetailPane({
     setIsEditing(false)
     setEditedTitle(task.frontmatter.title)
     setEditedContent(task.content)
-    setEditedCriteria(task.frontmatter.acceptanceCriteria.join('\n'))
+    setEditedCriteria(formatAcceptanceCriteriaForEditor(task.frontmatter.acceptanceCriteria))
     setSelectedSkillIds(task.frontmatter.postExecutionSkills || [])
     setEditedModelConfig(task.frontmatter.modelConfig)
+    setEditedSkillConfigs(task.frontmatter.skillConfigs || {})
   }, [task.id])
 
 
@@ -86,6 +90,7 @@ export function TaskDetailPane({
             .map((s) => s.trim())
             .filter(Boolean),
           postExecutionSkills: selectedSkillIds,
+          skillConfigs: Object.keys(editedSkillConfigs).length > 0 ? editedSkillConfigs : undefined,
           modelConfig: editedModelConfig,
         }),
       })
@@ -199,6 +204,8 @@ export function TaskDetailPane({
           setEditedModelConfig={setEditedModelConfig}
           selectedSkillIds={selectedSkillIds}
           setSelectedSkillIds={setSelectedSkillIds}
+          editedSkillConfigs={editedSkillConfigs}
+          setEditedSkillConfigs={setEditedSkillConfigs}
           availableSkills={availableSkills}
           missingAcceptanceCriteria={missingAcceptanceCriteria}
           isPlanGenerating={isPlanGenerating}
@@ -214,9 +221,10 @@ export function TaskDetailPane({
 // Details Content — shared between tabbed and side-by-side layouts
 // =============================================================================
 
-function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditing, editedTitle, setEditedTitle, editedContent, setEditedContent, editedCriteria, setEditedCriteria, editedModelConfig, setEditedModelConfig, selectedSkillIds, setSelectedSkillIds, availableSkills, missingAcceptanceCriteria, isPlanGenerating, onSaveEdit, onDelete }: any) {
+function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditing, editedTitle, setEditedTitle, editedContent, setEditedContent, editedCriteria, setEditedCriteria, editedModelConfig, setEditedModelConfig, selectedSkillIds, setSelectedSkillIds, editedSkillConfigs, setEditedSkillConfigs, availableSkills, missingAcceptanceCriteria, isPlanGenerating, onSaveEdit, onDelete }: any) {
   const isCompleted = frontmatter.phase === 'complete' || frontmatter.phase === 'archived'
   const hasSummary = Boolean(task.frontmatter.postExecutionSummary)
+  const displayAcceptanceCriteria = normalizeAcceptanceCriteria(frontmatter.acceptanceCriteria)
   const [isRegeneratingPlan, setIsRegeneratingPlan] = useState(false)
   const [planRegenerationError, setPlanRegenerationError] = useState<string | null>(null)
 
@@ -290,7 +298,7 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
           {isEditing ? (
             <div>
               <p className="text-xs text-slate-400 mb-2">Skills run automatically after the agent completes its main work.</p>
-              <SkillSelector availableSkills={availableSkills} selectedSkillIds={selectedSkillIds} onChange={setSelectedSkillIds} />
+              <SkillSelector availableSkills={availableSkills} selectedSkillIds={selectedSkillIds} onChange={setSelectedSkillIds} skillConfigs={editedSkillConfigs} onSkillConfigChange={setEditedSkillConfigs} />
             </div>
           ) : (
             <div className="flex flex-wrap gap-1.5">
@@ -429,9 +437,9 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
             </div>
             {isEditing ? (
               <MarkdownEditor value={editedCriteria} onChange={setEditedCriteria} placeholder="One criterion per line" minHeight="160px" />
-            ) : frontmatter.acceptanceCriteria.length > 0 ? (
+            ) : displayAcceptanceCriteria.length > 0 ? (
               <ul className="space-y-1.5">
-                {frontmatter.acceptanceCriteria.map((criteria: string, i: number) => (
+                {displayAcceptanceCriteria.map((criteria: string, i: number) => (
                   <li key={i} className="flex items-start gap-2 text-sm">
                     <span className="w-5 h-5 rounded border border-slate-300 flex items-center justify-center text-[10px] text-slate-400 shrink-0 mt-0.5">{i + 1}</span>
                     <div className="prose prose-slate prose-sm max-w-none min-w-0 text-slate-700 [&>p]:m-0"><ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{criteria}</ReactMarkdown></div>
@@ -449,7 +457,7 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
       {isEditing && (
         <div className="flex items-center gap-2 pt-2 border-t border-slate-200">
           <button onClick={onSaveEdit} className="btn btn-primary text-sm py-1.5 px-4">Save Changes</button>
-          <button onClick={() => { setIsEditing(false); setEditedTitle(task.frontmatter.title); setEditedContent(task.content); setEditedCriteria(task.frontmatter.acceptanceCriteria.join('\n')); setSelectedSkillIds(task.frontmatter.postExecutionSkills || []); setEditedModelConfig(task.frontmatter.modelConfig) }} className="btn btn-secondary text-sm py-1.5 px-4">Discard</button>
+          <button onClick={() => { setIsEditing(false); setEditedTitle(task.frontmatter.title); setEditedContent(task.content); setEditedCriteria(formatAcceptanceCriteriaForEditor(task.frontmatter.acceptanceCriteria)); setSelectedSkillIds(task.frontmatter.postExecutionSkills || []); setEditedModelConfig(task.frontmatter.modelConfig) }} className="btn btn-secondary text-sm py-1.5 px-4">Discard</button>
         </div>
       )}
 
@@ -737,6 +745,56 @@ function PostExecutionSummarySection({ task, workspaceId }: { task: Task; worksp
 // =============================================================================
 // Helpers
 // =============================================================================
+
+function normalizeAcceptanceCriteria(criteria: unknown): string[] {
+  if (!Array.isArray(criteria)) return []
+
+  return criteria
+    .map((criterion) => {
+      if (typeof criterion === 'string') {
+        return criterion.trim()
+      }
+
+      if (criterion == null) {
+        return ''
+      }
+
+      if (typeof criterion === 'object') {
+        const parts = Object.entries(criterion as Record<string, unknown>).map(([key, value]) => {
+          const valueText = formatCriterionValue(value)
+          return valueText ? `${key}: ${valueText}` : key
+        })
+        return parts.join(' ').trim()
+      }
+
+      return String(criterion).trim()
+    })
+    .filter(Boolean)
+}
+
+function formatCriterionValue(value: unknown): string {
+  if (typeof value === 'string') {
+    return value.trim()
+  }
+
+  if (value == null) {
+    return ''
+  }
+
+  if (typeof value === 'object') {
+    try {
+      return JSON.stringify(value)
+    } catch {
+      return String(value)
+    }
+  }
+
+  return String(value).trim()
+}
+
+function formatAcceptanceCriteriaForEditor(criteria: unknown): string {
+  return normalizeAcceptanceCriteria(criteria).join('\n')
+}
 
 function formatDuration(seconds: number): string {
   if (seconds < 60) return `${seconds}s`

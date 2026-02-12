@@ -56,6 +56,20 @@ export interface AgentContext {
   activeExtensions: PiExtension[];
 }
 
+export interface SkillConfigField {
+  key: string;
+  label: string;
+  type: 'string' | 'number' | 'boolean' | 'select';
+  default: string;
+  description: string;
+  validation?: {
+    min?: number;
+    max?: number;
+    pattern?: string;
+    options?: string[];
+  };
+}
+
 export interface PostExecutionSkill {
   id: string;
   name: string;
@@ -66,4 +80,5 @@ export interface PostExecutionSkill {
   promptTemplate: string;
   path: string;
   metadata: Record<string, string>;
+  configSchema: SkillConfigField[];
 }

@@ -241,7 +241,7 @@ export function WorkspacePage() {
   }, [subscribe])
 
   // Create task
-  const handleCreateTask = async (data: { content: string; postExecutionSkills?: string[]; modelConfig?: import('@pi-factory/shared').ModelConfig; pendingFiles?: File[] }) => {
+  const handleCreateTask = async (data: { content: string; postExecutionSkills?: string[]; skillConfigs?: Record<string, Record<string, string>>; modelConfig?: import('@pi-factory/shared').ModelConfig; pendingFiles?: File[] }) => {
     if (!workspaceId) return
     try {
       const { pendingFiles, ...taskData } = data

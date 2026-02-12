@@ -122,6 +122,9 @@ export interface TaskFrontmatter {
   // Post-execution skills (run after main agent execution)
   postExecutionSkills?: string[];
 
+  // Skill configuration overrides (skillId -> { key -> value })
+  skillConfigs?: Record<string, Record<string, string>>;
+
   // Model configuration (per-task model selection)
   modelConfig?: ModelConfig;
 
@@ -360,6 +363,7 @@ export interface CreateTaskRequest {
   content: string; // Task description
   acceptanceCriteria?: string[]; // Auto-generated if not provided
   postExecutionSkills?: string[];
+  skillConfigs?: Record<string, Record<string, string>>;
   modelConfig?: ModelConfig;
 }
 
@@ -372,6 +376,7 @@ export interface UpdateTaskRequest {
   plan?: TaskPlan;
   blocked?: Partial<BlockedState>;
   postExecutionSkills?: string[];
+  skillConfigs?: Record<string, Record<string, string>>;
   modelConfig?: ModelConfig;
 }
 
@@ -578,6 +583,20 @@ export interface SortOptions {
 // Post-Execution Skills (Agent Skills spec compliant)
 // =============================================================================
 
+export interface SkillConfigField {
+  key: string;
+  label: string;
+  type: 'string' | 'number' | 'boolean' | 'select';
+  default: string;
+  description: string;
+  validation?: {
+    min?: number;
+    max?: number;
+    pattern?: string;
+    options?: string[];  // for 'select' type
+  };
+}
+
 export interface PostExecutionSkill {
   id: string;              // directory name, matches frontmatter `name`
   name: string;            // from frontmatter
@@ -588,6 +607,7 @@ export interface PostExecutionSkill {
   promptTemplate: string;  // SKILL.md body (markdown after frontmatter)
   path: string;            // absolute path to skill directory
   metadata: Record<string, string>;
+  configSchema: SkillConfigField[];
 }
 
 /** Default post-execution skills applied to new tasks when none are specified. */

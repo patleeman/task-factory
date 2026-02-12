@@ -1,10 +1,13 @@
 import { useState, useRef, useCallback } from 'react'
 import type { PostExecutionSkill } from '../types/pi'
+import { SkillConfigModal } from './SkillConfigModal'
 
 interface SkillSelectorProps {
   availableSkills: PostExecutionSkill[]
   selectedSkillIds: string[]
   onChange: (skillIds: string[]) => void
+  skillConfigs?: Record<string, Record<string, string>>
+  onSkillConfigChange?: (skillConfigs: Record<string, Record<string, string>>) => void
 }
 
 /**
@@ -14,10 +17,18 @@ interface SkillSelectorProps {
  * - Click to toggle skills on/off
  * - Drag selected skills to reorder them
  * - See execution order numbers
+ * - Click config icon to configure skill settings
  */
-export function SkillSelector({ availableSkills, selectedSkillIds, onChange }: SkillSelectorProps) {
+export function SkillSelector({
+  availableSkills,
+  selectedSkillIds,
+  onChange,
+  skillConfigs = {},
+  onSkillConfigChange,
+}: SkillSelectorProps) {
   const [dragIndex, setDragIndex] = useState<number | null>(null)
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
+  const [configSkillId, setConfigSkillId] = useState<string | null>(null)
   const dragNodeRef = useRef<HTMLDivElement | null>(null)
 
   const selectedSkills = selectedSkillIds
@@ -26,6 +37,10 @@ export function SkillSelector({ availableSkills, selectedSkillIds, onChange }: S
 
   const unselectedSkills = availableSkills.filter(s => !selectedSkillIds.includes(s.id))
 
+  const configSkill = configSkillId
+    ? availableSkills.find(s => s.id === configSkillId) ?? null
+    : null
+
   const toggleSkill = (skillId: string) => {
     if (selectedSkillIds.includes(skillId)) {
       onChange(selectedSkillIds.filter(id => id !== skillId))
@@ -33,6 +48,18 @@ export function SkillSelector({ availableSkills, selectedSkillIds, onChange }: S
       onChange([...selectedSkillIds, skillId])
     }
   }
+
+  const handleConfigSave = useCallback((values: Record<string, string>) => {
+    if (!configSkillId || !onSkillConfigChange) return
+    const updated = { ...skillConfigs }
+    if (Object.keys(values).length === 0) {
+      delete updated[configSkillId]
+    } else {
+      updated[configSkillId] = values
+    }
+    onSkillConfigChange(updated)
+    setConfigSkillId(null)
+  }, [configSkillId, skillConfigs, onSkillConfigChange])
 
   // --- Drag-and-drop handlers for reordering selected skills ---
 
@@ -85,6 +112,12 @@ export function SkillSelector({ availableSkills, selectedSkillIds, onChange }: S
     handleDragEnd()
   }, [dragIndex, selectedSkillIds, onChange, handleDragEnd])
 
+  const hasConfig = (skill: PostExecutionSkill) =>
+    skill.configSchema && skill.configSchema.length > 0
+
+  const hasCustomConfig = (skillId: string) =>
+    skillConfigs[skillId] && Object.keys(skillConfigs[skillId]).length > 0
+
   return (
     <div className="space-y-2">
       {/* Selected skills (ordered, draggable) */}
@@ -133,6 +166,23 @@ export function SkillSelector({ availableSkills, selectedSkillIds, onChange }: S
                     {skill.description}
                   </div>
                 </div>
+                {/* Config button (only if skill has configSchema) */}
+                {hasConfig(skill) && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setConfigSkillId(skill.id)
+                    }}
+                    className={`w-6 h-6 rounded-full flex items-center justify-center text-xs shrink-0 transition-colors ${
+                      hasCustomConfig(skill.id)
+                        ? 'text-blue-600 bg-blue-50 hover:bg-blue-100'
+                        : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'
+                    }`}
+                    title={`Configure ${skill.name}`}
+                  >
+                    ⚙
+                  </button>
+                )}
                 {/* Remove button */}
                 <button
                   onClick={(e) => {
@@ -181,6 +231,16 @@ export function SkillSelector({ availableSkills, selectedSkillIds, onChange }: S
             </div>
           ))}
         </div>
+      )}
+
+      {/* Config Modal */}
+      {configSkill && hasConfig(configSkill) && (
+        <SkillConfigModal
+          skill={configSkill}
+          savedValues={skillConfigs[configSkill.id] ?? {}}
+          onSave={handleConfigSave}
+          onClose={() => setConfigSkillId(null)}
+        />
       )}
     </div>
   )

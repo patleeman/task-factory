@@ -11,6 +11,7 @@ import type { PostExecutionSkill } from '../types/pi'
 export interface CreateTaskData {
   content: string
   postExecutionSkills?: string[]
+  skillConfigs?: Record<string, Record<string, string>>
   modelConfig?: ModelConfig
   pendingFiles?: File[]
 }
@@ -37,6 +38,7 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [availableSkills, setAvailableSkills] = useState<PostExecutionSkill[]>([])
   const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>(initialDraft.selectedSkillIds)
+  const [skillConfigs, setSkillConfigs] = useState<Record<string, Record<string, string>>>({})
   const [modelConfig, setModelConfig] = useState<ModelConfig | undefined>(initialDraft.modelConfig as ModelConfig | undefined)
   const [taskDefaults, setTaskDefaults] = useState<TaskDefaults>({
     modelConfig: undefined,
@@ -133,6 +135,7 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
   const handleClearForm = useCallback(() => {
     setContent('')
     setSelectedSkillIds([...taskDefaults.postExecutionSkills])
+    setSkillConfigs({})
     setModelConfig(taskDefaults.modelConfig ? { ...taskDefaults.modelConfig } : undefined)
     setPendingFiles([])
     clearDraft()
@@ -172,9 +175,12 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
   const handleSubmit = async () => {
     if (!content.trim()) return
     setIsSubmitting(true)
+    // Only include skillConfigs if there are actual overrides
+    const hasSkillConfigs = Object.keys(skillConfigs).length > 0
     await onSubmit({
       content,
       postExecutionSkills: selectedSkillIds,
+      skillConfigs: hasSkillConfigs ? skillConfigs : undefined,
       modelConfig,
       pendingFiles: pendingFiles.length > 0 ? pendingFiles : undefined,
     })
@@ -305,6 +311,8 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
         availableSkills={availableSkills}
         selectedSkillIds={selectedSkillIds}
         onChange={setSelectedSkillIds}
+        skillConfigs={skillConfigs}
+        onSkillConfigChange={setSkillConfigs}
       />
     </div>
   ) : null

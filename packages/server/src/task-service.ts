@@ -166,6 +166,7 @@ export function createTask(
     attachments: [],
     modelConfig: resolvedDefaults.modelConfig,
     postExecutionSkills: resolvedDefaults.postExecutionSkills,
+    skillConfigs: request.skillConfigs,
     blocked: {
       isBlocked: false,
     },
@@ -211,6 +212,10 @@ export function updateTask(
 
   if (request.postExecutionSkills !== undefined) {
     task.frontmatter.postExecutionSkills = request.postExecutionSkills;
+  }
+
+  if (request.skillConfigs !== undefined) {
+    task.frontmatter.skillConfigs = request.skillConfigs;
   }
 
   if (request.modelConfig !== undefined) {

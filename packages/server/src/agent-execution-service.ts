@@ -672,6 +672,7 @@ async function handleAgentTurnEnd(
         taskId: task.id,
         workspaceId,
         broadcastToWorkspace: session.broadcastToWorkspace,
+        skillConfigs: task.frontmatter.skillConfigs,
       });
     } catch (hookErr) {
       console.error('Post-execution skills error:', hookErr);
