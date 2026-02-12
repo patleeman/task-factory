@@ -95,7 +95,7 @@ describe('shouldResumeInterruptedPlanning', () => {
 });
 
 describe('task ordering', () => {
-  it('creates new backlog tasks at the start (left)', () => {
+  it('creates new backlog tasks at the end (right)', () => {
     const { workspacePath, tasksDir } = createTempWorkspace();
 
     const first = createTaskFile(workspacePath, tasksDir, {
@@ -110,13 +110,14 @@ describe('task ordering', () => {
       acceptanceCriteria: ['done'],
     });
 
-    expect(second.frontmatter.order).toBeLessThan(first.frontmatter.order);
+    expect(first.frontmatter.order).toBe(0);
+    expect(second.frontmatter.order).toBe(first.frontmatter.order + 1);
 
     const backlogIds = discoverTasks(tasksDir)
       .filter((task) => task.frontmatter.phase === 'backlog')
       .map((task) => task.id);
 
-    expect(backlogIds).toEqual([second.id, first.id]);
+    expect(backlogIds).toEqual([first.id, second.id]);
   });
 
   it('inserts moved tasks at the start of the destination phase', () => {

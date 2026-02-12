@@ -159,14 +159,14 @@ export function createTask(
   const fileName = `${id.toLowerCase()}.md`;
   const filePath = join(tasksDir, fileName);
 
-  // Assign order at the START of backlog (leftmost card in the UI).
+  // Assign order at the END of backlog (rightmost card in the UI).
   const existingTasks = discoverTasks(tasksDir);
-  const backlogTasks = existingTasks.filter(t => t.frontmatter.phase === 'backlog');
-  const minOrder = backlogTasks.reduce(
-    (min, t) => Math.min(min, t.frontmatter.order ?? 0),
-    Number.POSITIVE_INFINITY,
+  const backlogTasks = existingTasks.filter((t) => t.frontmatter.phase === 'backlog');
+  const maxOrder = backlogTasks.reduce(
+    (max, t) => Math.max(max, t.frontmatter.order ?? 0),
+    Number.NEGATIVE_INFINITY,
   );
-  const nextOrder = Number.isFinite(minOrder) ? minOrder - 1 : 0;
+  const nextOrder = Number.isFinite(maxOrder) ? maxOrder + 1 : 0;
 
   const taskDefaults = loadTaskDefaults();
   const resolvedDefaults = applyTaskDefaultsToRequest(request, taskDefaults);
