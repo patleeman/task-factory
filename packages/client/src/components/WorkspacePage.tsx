@@ -534,7 +534,7 @@ export function WorkspacePage() {
         <div className="flex-1 flex overflow-hidden min-h-0">
           {/* Left pane — Chat (planning or task, depending on mode) */}
           <div
-            className={`overflow-hidden shrink-0 ${mode === 'task' ? 'bg-orange-50/30' : 'bg-slate-50'}`}
+            className={`overflow-hidden shrink-0 transition-colors duration-200 ${mode === 'task' ? 'bg-orange-50/30' : 'bg-slate-50'}`}
             style={{ width: leftPaneWidth }}
           >
             {mode === 'planning' ? (

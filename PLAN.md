@@ -449,20 +449,20 @@ pi-factory/
 - [x] Planning agent: create draft tasks → shelf
 - [x] Planning agent: generate HTML artifacts → shelf
 
-### Phase 2: Mode Switching Polish
-- [ ] Visual differentiation between planning and task modes
-- [ ] Header context bar (agent name / task ID)
-- [ ] Input placeholder changes per mode
-- [ ] Smooth transitions when switching modes
-- [ ] Preserve planning conversation when switching to task and back
-- [ ] Back-to-general navigation from task mode
+### Phase 2: Mode Switching Polish ✅
+- [x] Visual differentiation between planning and task modes
+- [x] Header context bar (agent name / task ID)
+- [x] Input placeholder changes per mode
+- [x] Smooth transitions when switching modes
+- [x] Preserve planning conversation when switching to task and back
+- [x] Back-to-general navigation from task mode
 
-### Phase 3: Planning Agent Capabilities
-- [ ] Web research integration
-- [ ] Codebase analysis (read workspace files)
-- [ ] Task decomposition prompts and patterns
-- [ ] Batch push from shelf to backlog
-- [ ] Status awareness (summarize current work, blockers)
+### Phase 3: Planning Agent Capabilities ✅
+- [x] Web research integration (via Pi SDK web_search/web_fetch tools)
+- [x] Codebase analysis (via Pi SDK read/bash/edit tools)
+- [x] Task decomposition prompts and patterns (system prompt guides decomposition)
+- [x] Batch push from shelf to backlog (push-all endpoint + UI button)
+- [x] Status awareness (system prompt includes current tasks and shelf state)
 
 ### Phase 4: Quality & Metrics
 - [ ] Quality gates implementation
