@@ -19,6 +19,9 @@ function validateField(field: SkillConfigField, value: string): string | null {
     if (value.trim() === '' || isNaN(num)) {
       return `${field.label} must be a valid number`
     }
+    if (!Number.isInteger(num)) {
+      return `${field.label} must be a whole number`
+    }
     if (field.validation?.min !== undefined && num < field.validation.min) {
       return `${field.label} must be at least ${field.validation.min}`
     }
@@ -173,6 +176,7 @@ export function SkillConfigModal({ skill, savedValues, onSave, onClose }: SkillC
                     onChange={(e) => handleChange(field.key, e.target.value)}
                     min={field.validation?.min}
                     max={field.validation?.max}
+                    step={field.type === 'number' ? 1 : undefined}
                     className={`w-full rounded-lg border px-3 py-2 text-sm ${
                       error ? 'border-red-300 bg-red-50' : 'border-slate-200'
                     } focus:outline-none focus:ring-2 focus:ring-blue-500`}

@@ -113,7 +113,7 @@ export function SkillSelector({
   }, [dragIndex, selectedSkillIds, onChange, handleDragEnd])
 
   const hasConfig = (skill: PostExecutionSkill) =>
-    skill.configSchema && skill.configSchema.length > 0
+    onSkillConfigChange && skill.configSchema && skill.configSchema.length > 0
 
   const hasCustomConfig = (skillId: string) =>
     skillConfigs[skillId] && Object.keys(skillConfigs[skillId]).length > 0

@@ -457,7 +457,7 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
       {isEditing && (
         <div className="flex items-center gap-2 pt-2 border-t border-slate-200">
           <button onClick={onSaveEdit} className="btn btn-primary text-sm py-1.5 px-4">Save Changes</button>
-          <button onClick={() => { setIsEditing(false); setEditedTitle(task.frontmatter.title); setEditedContent(task.content); setEditedCriteria(formatAcceptanceCriteriaForEditor(task.frontmatter.acceptanceCriteria)); setSelectedSkillIds(task.frontmatter.postExecutionSkills || []); setEditedModelConfig(task.frontmatter.modelConfig) }} className="btn btn-secondary text-sm py-1.5 px-4">Discard</button>
+          <button onClick={() => { setIsEditing(false); setEditedTitle(task.frontmatter.title); setEditedContent(task.content); setEditedCriteria(formatAcceptanceCriteriaForEditor(task.frontmatter.acceptanceCriteria)); setSelectedSkillIds(task.frontmatter.postExecutionSkills || []); setEditedSkillConfigs(task.frontmatter.skillConfigs || {}); setEditedModelConfig(task.frontmatter.modelConfig) }} className="btn btn-secondary text-sm py-1.5 px-4">Discard</button>
         </div>
       )}
 
