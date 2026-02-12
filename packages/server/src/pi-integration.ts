@@ -9,10 +9,8 @@ import {
   readdirSync,
   mkdirSync,
   writeFileSync,
-  accessSync,
-  constants,
 } from 'fs';
-import { join, resolve, isAbsolute } from 'path';
+import { join, dirname } from 'path';
 import { homedir } from 'os';
 import type { TaskDefaults } from '@pi-factory/shared';
 
@@ -305,8 +303,10 @@ export function loadPiSkill(skillId: string): PiSkill | null {
 }
 
 // =============================================================================
-// Global + Workspace Rules (AGENTS.md)
+// Global Rules + Workspace Shared Context
 // =============================================================================
+
+export const WORKSPACE_SHARED_CONTEXT_REL_PATH = '.pi/workspace-context.md';
 
 export function loadGlobalAgentsMd(): string | null {
   const agentsPath = join(PI_AGENT_DIR, 'AGENTS.md');
@@ -323,76 +323,54 @@ export function loadGlobalAgentsMd(): string | null {
   }
 }
 
-function resolveWorkspaceAgentsMdPath(workspacePath: string, agentsMdPath: string): string {
-  if (isAbsolute(agentsMdPath)) {
-    return agentsMdPath;
-  }
-
-  return resolve(workspacePath, agentsMdPath);
+export function getWorkspaceSharedContextPath(workspacePath: string): string {
+  return join(workspacePath, WORKSPACE_SHARED_CONTEXT_REL_PATH);
 }
 
-/**
- * Load workspace-specific AGENTS.md content.
- * Relative paths are resolved from the workspace root.
- */
-export function loadWorkspaceAgentsMd(workspacePath: string, agentsMdPath?: string | null): string | null {
-  if (!agentsMdPath) {
-    return null;
-  }
+export function loadWorkspaceSharedContext(workspacePath: string): string | null {
+  const contextPath = getWorkspaceSharedContextPath(workspacePath);
 
-  const resolvedPath = resolveWorkspaceAgentsMdPath(workspacePath, agentsMdPath);
-
-  if (!existsSync(resolvedPath)) {
-    console.warn(
-      `[PiIntegration] Workspace AGENTS.md not found: ${resolvedPath} (configured as "${agentsMdPath}")`,
-    );
+  if (!existsSync(contextPath)) {
     return null;
   }
 
   try {
-    accessSync(resolvedPath, constants.R_OK);
-    return readFileSync(resolvedPath, 'utf-8');
+    return readFileSync(contextPath, 'utf-8');
   } catch (err) {
     console.warn(
-      `[PiIntegration] Workspace AGENTS.md is not readable: ${resolvedPath} (${String(err)})`,
+      `[PiIntegration] Failed to load workspace shared context: ${contextPath} (${String(err)})`,
     );
     return null;
   }
 }
 
-function mergeAgentsMd(globalAgentsMd: string, workspaceAgentsMd: string | null): string {
-  if (!workspaceAgentsMd || workspaceAgentsMd.trim().length === 0) {
+export function saveWorkspaceSharedContext(workspacePath: string, content: string): void {
+  const contextPath = getWorkspaceSharedContextPath(workspacePath);
+  const contextDir = dirname(contextPath);
+
+  if (!existsSync(contextDir)) {
+    mkdirSync(contextDir, { recursive: true });
+  }
+
+  writeFileSync(contextPath, content, 'utf-8');
+}
+
+function mergeGlobalRulesWithWorkspaceContext(globalAgentsMd: string, workspaceContext: string | null): string {
+  const normalizedContext = workspaceContext?.trim();
+
+  if (!normalizedContext) {
     return globalAgentsMd;
   }
 
+  const contextSection =
+    `## Workspace Shared Context (${WORKSPACE_SHARED_CONTEXT_REL_PATH})\n` +
+    `${normalizedContext}\n`;
+
   if (!globalAgentsMd || globalAgentsMd.trim().length === 0) {
-    return workspaceAgentsMd;
+    return contextSection;
   }
 
-  return `${globalAgentsMd.trimEnd()}\n\n${workspaceAgentsMd.trimStart()}`;
-}
-
-function loadWorkspaceAgentsMdPathFromConfig(workspacePath: string): string | undefined {
-  const workspaceConfigPath = join(workspacePath, '.pi', 'factory.json');
-
-  if (!existsSync(workspaceConfigPath)) {
-    return undefined;
-  }
-
-  try {
-    const raw = readFileSync(workspaceConfigPath, 'utf-8');
-    const parsed = JSON.parse(raw) as { agentsMdPath?: unknown };
-
-    if (typeof parsed.agentsMdPath === 'string' && parsed.agentsMdPath.trim().length > 0) {
-      return parsed.agentsMdPath;
-    }
-  } catch (err) {
-    console.warn(
-      `[PiIntegration] Failed to parse workspace config at ${workspaceConfigPath}: ${String(err)}`,
-    );
-  }
-
-  return undefined;
+  return `${globalAgentsMd.trimEnd()}\n\n${contextSection}`;
 }
 
 function loadWorkspacePathFromRegistry(workspaceId: string): string | undefined {
@@ -543,15 +521,11 @@ export function buildAgentContext(
     resolvedWorkspacePath = loadWorkspacePathFromRegistry(workspaceId);
   }
 
-  const workspaceAgentsMdPath = resolvedWorkspacePath
-    ? loadWorkspaceAgentsMdPathFromConfig(resolvedWorkspacePath)
-    : undefined;
-
-  const workspaceAgentsMd = resolvedWorkspacePath
-    ? loadWorkspaceAgentsMd(resolvedWorkspacePath, workspaceAgentsMdPath)
+  const workspaceContext = resolvedWorkspacePath
+    ? loadWorkspaceSharedContext(resolvedWorkspacePath)
     : null;
 
-  const globalRules = mergeAgentsMd(globalAgentsMd, workspaceAgentsMd);
+  const globalRules = mergeGlobalRulesWithWorkspaceContext(globalAgentsMd, workspaceContext);
 
   // Load skills - either specified ones or enabled for workspace
   let availableSkills: PiSkill[];

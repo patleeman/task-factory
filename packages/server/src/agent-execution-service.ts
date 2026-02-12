@@ -19,7 +19,12 @@ import {
 } from '@mariozechner/pi-coding-agent';
 import type { Task, TaskPlan, Attachment } from '@pi-factory/shared';
 import { createTaskSeparator, createChatMessage, createSystemEvent } from './activity-service.js';
-import { buildAgentContext, type PiSkill } from './pi-integration.js';
+import {
+  buildAgentContext,
+  loadWorkspaceSharedContext,
+  WORKSPACE_SHARED_CONTEXT_REL_PATH,
+  type PiSkill,
+} from './pi-integration.js';
 import { moveTaskToPhase, updateTask, saveTaskFile } from './task-service.js';
 import { runPostExecutionSkills } from './post-execution-skills.js';
 import { withTimeout } from './with-timeout.js';
@@ -265,7 +270,26 @@ export function getAllActiveSessions(): TaskSession[] {
 // Build Agent Prompt
 // =============================================================================
 
-function buildTaskPrompt(task: Task, skills: PiSkill[], attachmentSection: string): string {
+function buildWorkspaceSharedContextSection(workspaceSharedContext: string | null): string {
+  const normalized = workspaceSharedContext?.trim();
+  if (!normalized) {
+    return '';
+  }
+
+  let section = `## Workspace Shared Context\n`;
+  section += `Shared file: \`${WORKSPACE_SHARED_CONTEXT_REL_PATH}\`\n`;
+  section += `This file is collaboratively edited by the user and agent.\n\n`;
+  section += `${normalized}\n\n`;
+
+  return section;
+}
+
+function buildTaskPrompt(
+  task: Task,
+  skills: PiSkill[],
+  attachmentSection: string,
+  workspaceSharedContext: string | null,
+): string {
   const { frontmatter, content } = task;
 
   let prompt = `# Task: ${frontmatter.title}\n\n`;
@@ -289,6 +313,11 @@ function buildTaskPrompt(task: Task, skills: PiSkill[], attachmentSection: strin
 
   if (content) {
     prompt += `## Description\n${content}\n\n`;
+  }
+
+  const sharedContextSection = buildWorkspaceSharedContextSection(workspaceSharedContext);
+  if (sharedContextSection) {
+    prompt += sharedContextSection;
   }
 
   // Add attachments section (images are sent separately as ImageContent)
@@ -323,7 +352,12 @@ function buildTaskPrompt(task: Task, skills: PiSkill[], attachmentSection: strin
 // Build Rework Prompt (for re-execution with existing conversation)
 // =============================================================================
 
-function buildReworkPrompt(task: Task, skills: PiSkill[], attachmentSection: string): string {
+function buildReworkPrompt(
+  task: Task,
+  skills: PiSkill[],
+  attachmentSection: string,
+  workspaceSharedContext: string | null,
+): string {
   const { frontmatter, content } = task;
 
   let prompt = `# Rework: ${frontmatter.title}\n\n`;
@@ -341,6 +375,11 @@ function buildReworkPrompt(task: Task, skills: PiSkill[], attachmentSection: str
 
   if (content) {
     prompt += `## Description\n${content}\n\n`;
+  }
+
+  const sharedContextSection = buildWorkspaceSharedContextSection(workspaceSharedContext);
+  if (sharedContextSection) {
+    prompt += sharedContextSection;
   }
 
   if (attachmentSection) {
@@ -376,8 +415,9 @@ export async function executeTask(options: ExecuteTaskOptions): Promise<TaskSess
   const { task, workspaceId, workspacePath, onOutput, onComplete, broadcastToWorkspace } = options;
 
   // Get enabled skills for this workspace
-  const agentContext = buildAgentContext(workspaceId);
+  const agentContext = buildAgentContext(workspaceId, undefined, workspacePath);
   const skills = agentContext.availableSkills;
+  const workspaceSharedContext = loadWorkspaceSharedContext(workspacePath);
 
   // Create session
   const session: TaskSession = {
@@ -525,8 +565,8 @@ export async function executeTask(options: ExecuteTaskOptions): Promise<TaskSess
 
     // Build prompt — use a rework prompt if resuming, otherwise the full task prompt
     const prompt = isResumingSession
-      ? buildReworkPrompt(task, skills, attachmentSection)
-      : buildTaskPrompt(task, skills, attachmentSection);
+      ? buildReworkPrompt(task, skills, attachmentSection, workspaceSharedContext)
+      : buildTaskPrompt(task, skills, attachmentSection, workspaceSharedContext);
     runAgentExecution(session, prompt, workspaceId, task, onOutput, onComplete, taskImages);
 
   } catch (err) {
@@ -1162,7 +1202,13 @@ export async function resumeChat(
 
     // Send the user's message as a new prompt (not followUp — there's no
     // active agent turn to follow up on since we just reopened the session).
-    await piSession.prompt(content, images && images.length > 0 ? { images } : undefined);
+    const workspaceSharedContext = loadWorkspaceSharedContext(workspacePath);
+    const sharedContextSection = buildWorkspaceSharedContextSection(workspaceSharedContext);
+    const promptContent = sharedContextSection
+      ? `${sharedContextSection}## User Message\n${content}`
+      : content;
+
+    await piSession.prompt(promptContent, images && images.length > 0 ? { images } : undefined);
 
     // Prompt resolved — go idle (no auto-advance for non-executing tasks)
     session.status = 'idle';
@@ -1263,7 +1309,12 @@ export async function startChat(
     });
 
     // Build context about the task for the initial prompt
-    const taskContext = `You are chatting about task ${task.id}: "${task.frontmatter.title}"\n` +
+    const workspaceSharedContext = loadWorkspaceSharedContext(workspacePath);
+    const sharedContextSection = buildWorkspaceSharedContextSection(workspaceSharedContext);
+
+    const taskContext =
+      (sharedContextSection || '') +
+      `You are chatting about task ${task.id}: "${task.frontmatter.title}"\n` +
       (task.content ? `Task description: ${task.content}\n` : '') +
       (task.frontmatter.plan ? `This task has a plan with goal: ${task.frontmatter.plan.goal}\n` : '') +
       `Current phase: ${task.frontmatter.phase}\n\n` +

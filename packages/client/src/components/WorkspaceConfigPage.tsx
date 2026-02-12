@@ -23,7 +23,9 @@ export function WorkspaceConfigPage() {
     skills: { enabled: [], config: {} },
     extensions: { enabled: [], config: {} },
   })
-  const [activeTab, setActiveTab] = useState<'skills' | 'extensions'>('skills')
+  const [sharedContext, setSharedContext] = useState('')
+  const [sharedContextPath, setSharedContextPath] = useState('.pi/workspace-context.md')
+  const [activeTab, setActiveTab] = useState<'skills' | 'extensions' | 'shared-context'>('skills')
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'error'>('idle')
@@ -42,14 +44,17 @@ export function WorkspaceConfigPage() {
       fetch('/api/pi/skills').then(r => r.json()),
       fetch('/api/pi/extensions').then(r => r.json()),
       fetch(`/api/workspaces/${workspaceId}/pi-config`).then(r => r.json()),
+      fetch(`/api/workspaces/${workspaceId}/shared-context`).then(r => r.json()),
       api.getWorkspace(workspaceId),
-    ]).then(([skillsData, extensionsData, configData, workspace]) => {
+    ]).then(([skillsData, extensionsData, configData, sharedContextData, workspace]) => {
       setAllSkills(skillsData)
       setAllExtensions(extensionsData)
       setConfig({
         skills: configData.skills || { enabled: [], config: {} },
         extensions: configData.extensions || { enabled: [], config: {} },
       })
+      setSharedContext(sharedContextData.content || '')
+      setSharedContextPath(sharedContextData.relativePath || '.pi/workspace-context.md')
       // Use folder name from path as the display name
       const folderName = workspace.path.split('/').filter(Boolean).pop() || workspace.name
       setWorkspaceName(folderName)
@@ -131,11 +136,23 @@ export function WorkspaceConfigPage() {
     if (!workspaceId) return
     setIsSaving(true)
     try {
-      await fetch(`/api/workspaces/${workspaceId}/pi-config`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(config),
-      })
+      const [configRes, sharedContextRes] = await Promise.all([
+        fetch(`/api/workspaces/${workspaceId}/pi-config`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(config),
+        }),
+        fetch(`/api/workspaces/${workspaceId}/shared-context`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: sharedContext }),
+        }),
+      ])
+
+      if (!configRes.ok || !sharedContextRes.ok) {
+        throw new Error('Save failed')
+      }
+
       setSaveStatus('saved')
     } catch (err) {
       console.error('Failed to save config:', err)
@@ -223,6 +240,16 @@ export function WorkspaceConfigPage() {
               }`}
             >
               Extensions ({config.extensions.enabled.length}/{allExtensions.length})
+            </button>
+            <button
+              onClick={() => setActiveTab('shared-context')}
+              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === 'shared-context'
+                  ? 'border-safety-orange text-safety-orange'
+                  : 'border-transparent text-slate-600 hover:text-slate-800'
+              }`}
+            >
+              Shared Context
             </button>
           </div>
 
@@ -346,6 +373,31 @@ export function WorkspaceConfigPage() {
                   No extensions found in ~/.pi/agent/extensions/
                 </p>
               )}
+            </div>
+          )}
+
+          {activeTab === 'shared-context' && (
+            <div className="space-y-3">
+              <div className="rounded-lg border border-slate-200 bg-white p-4">
+                <p className="text-sm text-slate-600 mb-2">
+                  Shared markdown context included in every agent run for this workspace.
+                  Both you and the agent can update this file.
+                </p>
+                <p className="text-xs text-slate-500 font-mono bg-slate-50 border border-slate-200 rounded px-2 py-1 inline-block">
+                  {sharedContextPath}
+                </p>
+              </div>
+
+              <textarea
+                value={sharedContext}
+                onChange={(e) => {
+                  setSharedContext(e.target.value)
+                  setSaveStatus('idle')
+                }}
+                placeholder="Add persistent workspace notes, constraints, architecture decisions, or conventions..."
+                className="w-full min-h-[360px] p-3 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-safety-orange focus:border-safety-orange font-mono"
+                spellCheck={false}
+              />
             </div>
           )}
 
