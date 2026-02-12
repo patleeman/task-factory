@@ -53,7 +53,7 @@ export function DraftTaskCard({ draft, onPush, onRemove, onUpdate }: DraftTaskCa
         className="flex items-center gap-2 px-3 py-2.5 cursor-pointer"
         onClick={() => !isEditing && setIsExpanded(!isExpanded)}
       >
-        <span className="text-sm">📋</span>
+        <span className="text-[10px] font-semibold text-slate-400 uppercase">draft</span>
         <div className="flex-1 min-w-0">
           {isEditing ? (
             <input

@@ -120,9 +120,9 @@ export function SkillSelector({ availableSkills, selectedSkillIds, onChange }: S
                 <span className="w-5 h-5 rounded-full bg-safety-orange text-white text-[10px] font-bold flex items-center justify-center shrink-0">
                   {index + 1}
                 </span>
-                {/* Skill icon */}
-                <span className="text-sm shrink-0">
-                  {skill.type === 'loop' ? '🔄' : '🛡️'}
+                {/* Skill type */}
+                <span className="text-[10px] text-slate-400 font-mono shrink-0">
+                  {skill.type === 'loop' ? 'loop' : 'gate'}
                 </span>
                 {/* Skill info */}
                 <div className="min-w-0 flex-1">
@@ -165,8 +165,8 @@ export function SkillSelector({ availableSkills, selectedSkillIds, onChange }: S
               className="flex items-center justify-between p-2.5 rounded-lg border border-slate-200 hover:border-slate-300 cursor-pointer transition-colors"
             >
               <div className="flex items-center gap-2.5 min-w-0">
-                <span className="text-sm shrink-0">
-                  {skill.type === 'loop' ? '🔄' : '🛡️'}
+                <span className="text-[10px] text-slate-400 font-mono shrink-0">
+                  {skill.type === 'loop' ? 'loop' : 'gate'}
                 </span>
                 <div className="min-w-0">
                   <div className="text-sm font-medium text-slate-800 truncate">

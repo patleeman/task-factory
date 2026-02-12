@@ -241,7 +241,7 @@ function buildPlanningSystemPrompt(workspacePath: string, workspaceId: string): 
           taskSummary += `### ${phase} (${phaseTasks.length})\n`;
           for (const t of phaseTasks.slice(0, 10)) {
             const extras: string[] = [];
-            if (t.frontmatter.blocked?.isBlocked) extras.push('⛔ BLOCKED');
+            if (t.frontmatter.blocked?.isBlocked) extras.push('BLOCKED');
             if (t.frontmatter.cycleTime) extras.push(`${Math.round(t.frontmatter.cycleTime / 60)}m`);
             const suffix = extras.length > 0 ? ` (${extras.join(', ')})` : '';
             taskSummary += `- **${t.id}**: ${t.frontmatter.title}${suffix}\n`;
@@ -262,9 +262,9 @@ function buildPlanningSystemPrompt(workspacePath: string, workspaceId: string): 
     shelfSummary = '\n## Current Shelf\n';
     for (const si of shelf.items) {
       if (si.type === 'draft-task') {
-        shelfSummary += `- 📋 Draft: **${si.item.title}** (${si.item.id})\n`;
+        shelfSummary += `- [draft] **${si.item.title}** (${si.item.id})\n`;
       } else {
-        shelfSummary += `- 📄 Artifact: **${si.item.name}** (${si.item.id})\n`;
+        shelfSummary += `- [artifact] **${si.item.name}** (${si.item.id})\n`;
       }
     }
   }

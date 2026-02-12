@@ -532,17 +532,17 @@ export function WorkspacePage() {
           )}
           <button
             onClick={() => navigate(`/workspace/${workspaceId}/config`)}
-            className="text-slate-400 hover:text-white transition-colors"
+            className="text-xs text-slate-400 hover:text-white transition-colors font-medium"
             title="Workspace Configuration"
           >
-            🛠️
+            Config
           </button>
           <button
             onClick={() => navigate('/settings')}
-            className="text-slate-400 hover:text-white transition-colors"
+            className="text-xs text-slate-400 hover:text-white transition-colors font-medium"
             title="Pi Settings"
           >
-            ⚙️
+            Settings
           </button>
         </div>
       </header>
@@ -553,9 +553,9 @@ export function WorkspacePage() {
           <span>{toast}</span>
           <button
             onClick={() => setToast(null)}
-            className="ml-4 text-red-400 hover:text-red-600 font-medium"
+            className="ml-4 text-red-400 hover:text-red-600 text-xs font-medium"
           >
-            ✕
+            Dismiss
           </button>
         </div>
       )}
@@ -579,12 +579,12 @@ export function WorkspacePage() {
             ) : (
               /* Task mode: show task chat in left pane */
               <div className="flex flex-col h-full">
-                <div className="flex items-center gap-2 px-4 py-2.5 border-b border-slate-100 bg-slate-50 shrink-0">
+                <div className="flex items-center gap-2 px-4 py-2.5 border-b border-slate-200 bg-slate-50 shrink-0">
                   <button
                     onClick={() => setMainPane({ type: 'empty' })}
-                    className="text-slate-400 hover:text-slate-600 transition-colors text-sm"
+                    className="text-slate-400 hover:text-slate-600 transition-colors text-xs font-medium"
                   >
-                    ← General
+                    ← Planning
                   </button>
                   <div className="h-4 w-px bg-slate-200" />
                   <span className="font-mono text-[10px] text-slate-400">{selectedTask?.id}</span>
@@ -679,7 +679,6 @@ export function WorkspacePage() {
 function EmptyState({ onCreateTask }: { onCreateTask: () => void }) {
   return (
     <div className="flex flex-col items-center justify-center h-full text-slate-400">
-      <div className="text-5xl mb-5 opacity-50">📋</div>
       <h3 className="text-base font-medium text-slate-500 mb-1.5">No task selected</h3>
       <p className="text-sm mb-6">Select a task from the pipeline below</p>
       <button

@@ -186,7 +186,7 @@ export function CreateTaskPane({ onCancel, onSubmit }: CreateTaskPaneProps) {
                     className="w-8 h-8 rounded object-cover shrink-0"
                   />
                 ) : (
-                  <span className="w-8 h-8 rounded bg-slate-200 flex items-center justify-center text-sm shrink-0">📄</span>
+                  <span className="w-8 h-8 rounded bg-slate-200 flex items-center justify-center text-[9px] text-slate-400 font-mono shrink-0">file</span>
                 )}
                 <div className="min-w-0 flex-1">
                   <div className="text-sm text-slate-700 truncate">{file.name}</div>
@@ -293,7 +293,6 @@ export function CreateTaskPane({ onCancel, onSubmit }: CreateTaskPaneProps) {
       {restoredFromDraft && (
         <div className="flex items-center justify-between px-5 py-2 bg-blue-50 border-b border-blue-200 text-blue-800 text-sm shrink-0">
           <span className="flex items-center gap-2">
-            <span>📝</span>
             <span>Draft restored from your previous session</span>
           </span>
           <button

@@ -63,19 +63,16 @@ export function ChatPane({
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-100 shrink-0">
-        <div className="flex items-center gap-2">
-          <span className="text-sm">🏭</span>
-          <h2 className="font-semibold text-xs text-slate-700 uppercase tracking-wide">
-            Pi Factory Agent
-          </h2>
-        </div>
+      <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-200 bg-slate-50 shrink-0">
+        <h2 className="font-semibold text-xs text-slate-500 uppercase tracking-wide">
+          Planning Agent
+        </h2>
         <button
           onClick={onReset}
           className="text-[10px] text-slate-400 hover:text-slate-600 font-mono transition-colors"
           title="Reset conversation"
         >
-          ↻ reset
+          reset
         </button>
       </div>
 
@@ -92,8 +89,7 @@ export function ChatPane({
         <div className="px-4 py-3 space-y-3 text-[14px] leading-relaxed">
           {messages.length === 0 && !busy && (
             <div className="text-center py-16 text-slate-400">
-              <div className="text-3xl mb-3 opacity-50">🏭</div>
-              <p className="text-sm font-medium text-slate-500 mb-1">Pi Factory Agent</p>
+              <p className="text-sm font-medium text-slate-500 mb-1">Planning Agent</p>
               <p className="text-xs">
                 Ask me to research, plan, or decompose work into tasks
               </p>
@@ -191,12 +187,6 @@ function MessageBubble({ message }: { message: PlanningMessage }) {
 
 function ToolCallBlock({ toolCall }: { toolCall: PlanningToolCallState }) {
   const isShelfTool = toolCall.toolName === 'create_draft_task' || toolCall.toolName === 'create_artifact'
-  const icon = toolCall.toolName === 'create_draft_task' ? '📋'
-    : toolCall.toolName === 'create_artifact' ? '📄'
-    : toolCall.toolName === 'bash' ? '$'
-    : toolCall.toolName === 'read' ? '📄'
-    : toolCall.toolName === 'web_search' ? '🔍'
-    : '🔧'
 
   return (
     <div className={`-mx-4 border-l-2 ${
@@ -205,7 +195,6 @@ function ToolCallBlock({ toolCall }: { toolCall: PlanningToolCallState }) {
       : 'bg-slate-50 border-slate-300'
     }`}>
       <div className="px-4 py-2 flex items-center gap-2 font-mono text-[13px]">
-        <span className="shrink-0">{icon}</span>
         <span className={`${isShelfTool ? 'text-emerald-700' : 'text-amber-600'} font-semibold`}>
           {toolCall.toolName}
         </span>

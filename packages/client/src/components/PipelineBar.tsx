@@ -317,7 +317,7 @@ export function PipelineBar({
               : 'border-slate-200 bg-slate-50 hover:border-slate-300 hover:bg-slate-100'
           }`}
         >
-          <span className="text-lg">📦</span>
+          <span className="text-xs text-slate-400 font-semibold uppercase">Archive</span>
           <span className={`text-xs ${dragOverArchive ? 'text-blue-500' : 'text-slate-400'}`}>
             {dragOverArchive ? 'Drop to archive' : `${archivedTasks.length} archived`}
           </span>
@@ -452,10 +452,10 @@ function PipelineCard({
                 e.stopPropagation()
                 onMoveTask(task, 'archived')
               }}
-              className="text-[11px] px-1.5 py-0.5 rounded hover:bg-white/60 text-slate-400 transition-colors"
+              className="text-[10px] px-1.5 py-0.5 rounded hover:bg-white/60 text-slate-400 transition-colors font-medium"
               title="Archive"
             >
-              📦
+              Archive
             </button>
             <button
               onClick={(e) => {

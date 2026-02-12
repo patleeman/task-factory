@@ -236,7 +236,7 @@ export function TaskDetailPane({
       {/* Move error banner */}
       {moveError && (
         <div className="flex items-center gap-2 px-4 py-2.5 bg-amber-50 border-b border-amber-200 text-amber-800 text-sm shrink-0">
-          <span className="text-amber-500 shrink-0">⚠️</span>
+          <span className="text-amber-600 shrink-0 text-xs font-semibold">!</span>
           <span>{moveError}</span>
         </div>
       )}
@@ -308,7 +308,7 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
               </span>
               {frontmatter.modelConfig.thinkingLevel && (
                 <span className="inline-flex items-center px-2 py-1 rounded-md bg-purple-50 border border-purple-200 text-xs font-medium text-purple-700">
-                  🧠 {frontmatter.modelConfig.thinkingLevel}
+                  reasoning: {frontmatter.modelConfig.thinkingLevel}
                 </span>
               )}
             </div>
@@ -332,7 +332,7 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
                 return (
                   <span key={skillId} className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-orange-50 border border-orange-200 text-xs font-medium text-orange-700">
                     <span className="text-[10px] text-orange-400 font-bold">{index + 1}.</span>
-                    {skill?.type === 'loop' ? '🔄' : '🛡️'}
+                    <span className="text-[10px] text-slate-400 font-mono">{skill?.type === 'loop' ? 'loop' : 'gate'}</span>
                     {skill?.name || skillId}
                   </span>
                 )
@@ -346,7 +346,6 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
       {frontmatter.plan && (
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-3">
           <div className="flex items-center gap-2">
-            <span className="text-blue-600 text-sm">📋</span>
             <h3 className="text-xs font-semibold text-blue-700 uppercase tracking-wide">Plan</h3>
             <span className="text-[10px] text-blue-400 ml-auto">Generated {new Date(frontmatter.plan.generatedAt).toLocaleString()}</span>
           </div>
@@ -382,7 +381,7 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
               <h4 className="text-xs font-semibold text-slate-600 mb-1">Cleanup</h4>
               <ul className="space-y-1.5">
                 {frontmatter.plan.cleanup.map((item: string, i: number) => (
-                  <li key={i} className="flex items-start gap-2 text-sm text-slate-700"><span className="text-slate-400 shrink-0 mt-0.5">🧹</span><div className="prose prose-slate prose-sm max-w-none min-w-0 [&>p]:m-0"><ReactMarkdown>{item}</ReactMarkdown></div></li>
+                  <li key={i} className="flex items-start gap-2 text-sm text-slate-700"><span className="text-slate-400 shrink-0 mt-0.5 text-xs">—</span><div className="prose prose-slate prose-sm max-w-none min-w-0 [&>p]:m-0"><ReactMarkdown>{item}</ReactMarkdown></div></li>
                 ))}
               </ul>
             </div>
@@ -414,7 +413,7 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
       <div className={missingAcceptanceCriteria ? 'rounded-lg border-2 border-red-300 bg-red-50 p-3 -mx-1' : ''}>
         <div className="flex items-center justify-between mb-2">
           <h3 className={`text-xs font-semibold uppercase tracking-wide ${missingAcceptanceCriteria ? 'text-red-600' : 'text-slate-500'}`}>
-            {missingAcceptanceCriteria && <span className="mr-1">⚠</span>}Acceptance Criteria
+            {missingAcceptanceCriteria && <span className="mr-1 text-red-500">!</span>}Acceptance Criteria
           </h3>
           {!isEditing && (
             <button onClick={onRegenerateCriteria} disabled={isRegeneratingCriteria} className="text-xs text-blue-600 hover:text-blue-800 font-medium disabled:opacity-50 disabled:cursor-wait flex items-center gap-1" title="Regenerate acceptance criteria using task description and plan">
@@ -587,7 +586,7 @@ function AttachmentsSection({ task, workspaceId }: { task: Task; workspaceId: st
               : 'border-slate-200 bg-slate-50 hover:border-slate-300'
           }`}
         >
-          <div className="text-slate-400 text-2xl mb-1">📎</div>
+          <div className="text-slate-300 text-sm font-medium mb-1">No files</div>
           <p className="text-sm text-slate-500">
             {isDragOver ? 'Drop files here' : 'Drag & drop files or click "Add Files"'}
           </p>
@@ -631,7 +630,7 @@ function AttachmentsSection({ task, workspaceId }: { task: Task; workspaceId: st
                     rel="noopener noreferrer"
                     className="flex flex-col items-center justify-center w-full aspect-square p-2"
                   >
-                    <span className="text-2xl mb-1">📄</span>
+                    <span className="text-xs text-slate-400 font-mono mb-1">FILE</span>
                     <span className="text-[10px] text-slate-500 text-center truncate w-full px-1">
                       {att.filename}
                     </span>
@@ -708,16 +707,16 @@ function QualityGatesSection({
   }
 
   const gates = [
-    { key: 'testsPass' as const, label: 'Tests Pass', icon: '🧪' },
-    { key: 'lintPass' as const, label: 'Lint Clean', icon: '✨' },
-    { key: 'reviewDone' as const, label: 'Reviewed', icon: '👁️' },
+    { key: 'testsPass' as const, label: 'Tests' },
+    { key: 'lintPass' as const, label: 'Lint' },
+    { key: 'reviewDone' as const, label: 'Review' },
   ]
 
   return (
     <div>
       <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Quality Gates</h3>
       <div className="flex gap-2">
-        {gates.map(({ key, label, icon }) => {
+        {gates.map(({ key, label }) => {
           const passed = qualityChecks[key]
           return (
             <button
@@ -729,9 +728,8 @@ function QualityGatesSection({
                   : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'
               }`}
             >
-              <span>{icon}</span>
               <span>{label}</span>
-              {passed && <span className="text-green-500">✓</span>}
+              {passed && <span className="text-green-600 font-semibold">✓</span>}
             </button>
           )
         })}

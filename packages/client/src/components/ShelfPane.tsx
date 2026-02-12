@@ -29,14 +29,15 @@ export function ShelfPane({
     return (
       <div className="flex flex-col h-full">
         <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-200 bg-slate-50 shrink-0">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 min-w-0">
             <button
               onClick={() => setFocusedArtifact(null)}
-              className="text-slate-400 hover:text-slate-600 transition-colors text-sm"
+              className="text-slate-400 hover:text-slate-600 transition-colors text-xs font-medium"
             >
-              ←
+              ← Back
             </button>
-            <span className="text-sm font-medium text-slate-700">{focusedArtifact.name}</span>
+            <div className="h-4 w-px bg-slate-200" />
+            <span className="text-xs font-medium text-slate-700 truncate">{focusedArtifact.name}</span>
           </div>
           <button
             onClick={() => {
@@ -89,7 +90,6 @@ export function ShelfPane({
       <div className="flex-1 overflow-y-auto min-h-0">
         {shelf.items.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-slate-400 px-6">
-            <div className="text-3xl mb-3 opacity-40">📋</div>
             <p className="text-sm font-medium text-slate-500 mb-1">Shelf is empty</p>
             <p className="text-xs text-center">
               Chat with the planning agent to create draft tasks and artifacts
@@ -119,7 +119,7 @@ export function ShelfPane({
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2 min-w-0">
-                        <span className="text-sm">📄</span>
+                        <span className="text-[10px] font-semibold text-slate-400 uppercase">artifact</span>
                         <span className="text-sm font-medium text-slate-700 truncate">
                           {artifact.name}
                         </span>
@@ -130,9 +130,9 @@ export function ShelfPane({
                             e.stopPropagation()
                             onRemoveItem(artifact.id)
                           }}
-                          className="text-xs text-red-500 hover:text-red-700 px-1"
+                          className="text-xs text-red-500 hover:text-red-700 px-1 font-medium"
                         >
-                          ✕
+                          Remove
                         </button>
                       </div>
                     </div>

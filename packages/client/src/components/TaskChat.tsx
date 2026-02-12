@@ -507,8 +507,7 @@ export function TaskChat({
         {isDragOver && (
           <div className="absolute inset-0 flex items-center justify-center bg-blue-50/80 z-10 pointer-events-none">
             <div className="text-center">
-              <span className="text-3xl">📎</span>
-              <p className="text-sm text-blue-600 font-medium mt-1">Drop files to attach</p>
+              <p className="text-sm text-blue-600 font-medium">Drop files to attach</p>
             </div>
           </div>
         )}
@@ -578,7 +577,7 @@ export function TaskChat({
                               rel="noopener noreferrer"
                               className="inline-flex items-center gap-1.5 px-2 py-1 rounded bg-blue-100 border border-blue-200 text-xs text-blue-700 hover:bg-blue-200 transition-colors"
                             >
-                              📄 {att.filename}
+                              {att.filename}
                             </a>
                           )
                         })}
@@ -682,7 +681,7 @@ export function TaskChat({
                       className="w-6 h-6 rounded object-cover shrink-0"
                     />
                   ) : (
-                    <span className="w-6 h-6 rounded bg-slate-200 flex items-center justify-center text-[10px] shrink-0">📄</span>
+                    <span className="w-6 h-6 rounded bg-slate-200 flex items-center justify-center text-[9px] text-slate-400 font-mono shrink-0">file</span>
                   )}
                   <span className="text-slate-600 truncate">{file.name}</span>
                   <button
@@ -703,10 +702,10 @@ export function TaskChat({
           <button
             onClick={() => fileInputRef.current?.click()}
             disabled={isUploading}
-            className="text-slate-400 hover:text-slate-600 transition-colors py-2 px-1 shrink-0 disabled:opacity-50"
+            className="text-[10px] font-medium text-slate-400 hover:text-slate-600 transition-colors py-2 px-1.5 shrink-0 disabled:opacity-50"
             title="Attach files"
           >
-            📎
+            Attach
           </button>
           <input
             ref={fileInputRef}

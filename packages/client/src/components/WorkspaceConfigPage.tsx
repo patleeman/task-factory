@@ -239,7 +239,7 @@ export function WorkspaceConfigPage() {
                     }`}
                   >
                     <div className="flex items-center gap-3">
-                      <span className="text-lg">🛠️</span>
+                      <span className="text-xs font-semibold text-slate-400 uppercase">Ext</span>
                       <div>
                         <div className="font-medium text-slate-800">{skill.name}</div>
                         <div className="text-xs text-slate-500">{skill.id}</div>
@@ -297,7 +297,7 @@ export function WorkspaceConfigPage() {
                     }`}
                   >
                     <div className="flex items-center gap-3">
-                      <span className="text-lg">🔌</span>
+                      <span className="text-xs font-semibold text-slate-400 uppercase">Plug</span>
                       <div>
                         <div className="font-medium text-slate-800">{ext.name}</div>
                         <div className="text-xs text-slate-500">v{ext.version}</div>

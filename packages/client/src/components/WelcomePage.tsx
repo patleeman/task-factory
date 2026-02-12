@@ -71,7 +71,7 @@ function FolderBrowser({ onSelect, onCancel }: { onSelect: (path: string) => voi
               onClick={() => browse(f.path)}
               className="w-full text-left px-4 py-2 text-sm hover:bg-slate-50 text-slate-700 flex items-center gap-2 border-b border-slate-50"
             >
-              <span className="text-slate-400">📁</span>
+              <span className="text-xs text-slate-400 font-mono">/</span>
               <span className="truncate">{f.name}</span>
             </button>
           ))

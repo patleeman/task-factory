@@ -83,7 +83,7 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
             {providerModels.map(model => (
               <option key={`${model.provider}/${model.id}`} value={`${model.provider}/${model.id}`}>
                 {model.name || model.id}
-                {model.reasoning ? ' 🧠' : ''}
+                {model.reasoning ? ' (reasoning)' : ''}
               </option>
             ))}
           </optgroup>
