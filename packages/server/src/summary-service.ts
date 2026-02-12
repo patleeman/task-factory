@@ -188,20 +188,24 @@ function buildSummaryPrompt(task: Task): string {
   prompt += `You just completed task **${task.id}**: "${task.frontmatter.title}"\n\n`;
   prompt += `Now provide a post-execution summary by calling the \`save_summary\` tool.\n\n`;
 
-  prompt += `## What to include in the summary\n`;
-  prompt += `Write a concise but informative description of what you actually did:\n`;
-  prompt += `- What files were changed and why\n`;
-  prompt += `- Key implementation decisions\n`;
-  prompt += `- Any notable challenges or trade-offs\n`;
-  prompt += `- Keep it to 2-4 sentences\n\n`;
+  prompt += `## Summary guidelines\n`;
+  prompt += `Write 2-4 sentences describing what was accomplished from a reviewer's perspective.\n`;
+  prompt += `Focus on:\n`;
+  prompt += `- The outcome: what capability was added, what problem was fixed, what changed for the user\n`;
+  prompt += `- Key decisions: important trade-offs or design choices worth knowing\n`;
+  prompt += `- Anything surprising or incomplete\n\n`;
+  prompt += `Do NOT write a changelog of files or types. Do NOT list every file touched.\n`;
+  prompt += `Write like you're explaining to a teammate what you did and why.\n\n`;
 
   if (task.frontmatter.acceptanceCriteria.length > 0) {
     prompt += `## Acceptance Criteria to Validate\n`;
-    prompt += `For each criterion, set status to "pass", "fail", or "pending" with specific evidence:\n\n`;
+    prompt += `For each criterion below, evaluate whether it was met.\n`;
+    prompt += `Set status to "pass" if met, "fail" if not, or "pending" if you can't determine.\n`;
+    prompt += `For evidence, write a brief sentence — not a code reference, just what you observed.\n\n`;
     task.frontmatter.acceptanceCriteria.forEach((c, i) => {
       prompt += `${i + 1}. ${c}\n`;
     });
-    prompt += `\nCopy each criterion text exactly, then provide your assessment.\n\n`;
+    prompt += `\nCopy each criterion text exactly into the criteriaValidation array.\n\n`;
   }
 
   prompt += `Call \`save_summary\` with taskId "${task.id}" now.\n`;

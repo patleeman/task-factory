@@ -1,5 +1,5 @@
-import { useState, useCallback } from 'react'
-import type { PostExecutionSummary as PostExecutionSummaryType, CriterionStatus, FileDiff, DiffHunk, CriterionValidation, SummaryArtifact } from '@pi-factory/shared'
+import { useState } from 'react'
+import type { PostExecutionSummary as PostExecutionSummaryType, FileDiff, DiffHunk, CriterionValidation, SummaryArtifact } from '@pi-factory/shared'
 import { api } from '../api'
 
 interface PostExecutionSummaryProps {
@@ -155,9 +155,6 @@ export function GenerateSummaryButton({ workspaceId, taskId, onGenerated }: Gene
 
 function CriteriaValidationSection({
   criteria,
-  workspaceId,
-  taskId,
-  onSummaryUpdated,
 }: {
   criteria: CriterionValidation[]
   workspaceId: string
@@ -167,111 +164,51 @@ function CriteriaValidationSection({
   const passCount = criteria.filter(c => c.status === 'pass').length
   const failCount = criteria.filter(c => c.status === 'fail').length
   const pendingCount = criteria.filter(c => c.status === 'pending').length
+  const total = criteria.length
 
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
         <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
-          Acceptance Criteria Validation
+          Acceptance Criteria
         </h3>
-        <div className="flex items-center gap-2 text-[10px]">
-          {passCount > 0 && <span className="text-emerald-600 font-medium">{passCount} pass</span>}
-          {failCount > 0 && <span className="text-red-600 font-medium">{failCount} fail</span>}
-          {pendingCount > 0 && <span className="text-amber-600 font-medium">{pendingCount} pending</span>}
-        </div>
+        <span className="text-xs font-medium">
+          {failCount > 0 ? (
+            <span className="text-red-600">{passCount}/{total} passing</span>
+          ) : pendingCount > 0 ? (
+            <span className="text-amber-600">{passCount}/{total} passing</span>
+          ) : (
+            <span className="text-emerald-600">{passCount}/{total} passing</span>
+          )}
+        </span>
       </div>
-      <ul className="space-y-2">
+      <ul className="space-y-1.5">
         {criteria.map((cv, index) => (
-          <CriterionRow
-            key={index}
-            criterion={cv}
-            index={index}
-            workspaceId={workspaceId}
-            taskId={taskId}
-            onSummaryUpdated={onSummaryUpdated}
-          />
+          <CriterionRow key={index} criterion={cv} />
         ))}
       </ul>
     </div>
   )
 }
 
-function CriterionRow({
-  criterion,
-  index,
-  workspaceId,
-  taskId,
-  onSummaryUpdated,
-}: {
-  criterion: CriterionValidation
-  index: number
-  workspaceId: string
-  taskId: string
-  onSummaryUpdated?: (summary: PostExecutionSummaryType) => void
-}) {
-  const [isUpdating, setIsUpdating] = useState(false)
-
-  const handleStatusChange = useCallback(async (newStatus: CriterionStatus) => {
-    setIsUpdating(true)
-    try {
-      const updated = await api.updateCriterionStatus(workspaceId, taskId, index, newStatus, criterion.evidence)
-      onSummaryUpdated?.(updated)
-    } catch (err) {
-      console.error('Failed to update criterion status:', err)
-    } finally {
-      setIsUpdating(false)
-    }
-  }, [workspaceId, taskId, index, criterion.evidence, onSummaryUpdated])
-
-  const statusIcon = criterion.status === 'pass'
-    ? '✓' : criterion.status === 'fail'
-    ? '✗' : '○'
-
-  const statusColor = criterion.status === 'pass'
-    ? 'text-emerald-600 bg-emerald-50 border-emerald-200'
-    : criterion.status === 'fail'
-    ? 'text-red-600 bg-red-50 border-red-200'
-    : 'text-amber-600 bg-amber-50 border-amber-200'
-
-  const iconBg = criterion.status === 'pass'
-    ? 'bg-emerald-500 text-white'
-    : criterion.status === 'fail'
-    ? 'bg-red-500 text-white'
-    : 'bg-amber-100 text-amber-600 border border-amber-300'
+function CriterionRow({ criterion }: { criterion: CriterionValidation }) {
+  const isPassing = criterion.status === 'pass'
+  const isFailing = criterion.status === 'fail'
 
   return (
-    <li className={`flex items-start gap-2 p-2.5 rounded-lg border ${statusColor} transition-colors`}>
-      <div className="flex flex-col items-center gap-1 shrink-0 pt-0.5">
-        <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold ${iconBg}`}>
-          {statusIcon}
-        </span>
-      </div>
+    <li className="flex items-start gap-2.5 py-1.5">
+      <span className={`shrink-0 mt-0.5 text-sm ${
+        isPassing ? 'text-emerald-500' : isFailing ? 'text-red-500' : 'text-slate-300'
+      }`}>
+        {isPassing ? '✓' : isFailing ? '✗' : '○'}
+      </span>
       <div className="flex-1 min-w-0">
-        <p className="text-sm text-slate-700">{criterion.criterion}</p>
+        <p className={`text-sm ${isFailing ? 'text-red-700' : 'text-slate-700'}`}>
+          {criterion.criterion}
+        </p>
         {criterion.evidence && (
-          <p className="text-xs text-slate-500 mt-1 italic">{criterion.evidence}</p>
+          <p className="text-xs text-slate-400 mt-0.5">{criterion.evidence}</p>
         )}
-      </div>
-      <div className="flex items-center gap-1 shrink-0">
-        {(['pass', 'fail', 'pending'] as CriterionStatus[]).map(s => (
-          <button
-            key={s}
-            onClick={() => handleStatusChange(s)}
-            disabled={isUpdating || s === criterion.status}
-            className={`text-[10px] px-1.5 py-0.5 rounded font-medium transition-colors ${
-              s === criterion.status
-                ? 'opacity-40 cursor-default'
-                : s === 'pass'
-                ? 'text-emerald-600 hover:bg-emerald-100'
-                : s === 'fail'
-                ? 'text-red-600 hover:bg-red-100'
-                : 'text-amber-600 hover:bg-amber-100'
-            } disabled:opacity-30`}
-            title={`Mark as ${s}`}
-          >
-            {s}
-          </button>
-        ))}
       </div>
     </li>
   )
