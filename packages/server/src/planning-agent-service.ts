@@ -27,6 +27,10 @@ import type {
   ServerEvent,
   Task,
   Shelf,
+  QAQuestion,
+  QARequest,
+  QAAnswer,
+  QAResponse,
 } from '@pi-factory/shared';
 import {
   addDraftTask,
@@ -38,6 +42,10 @@ import { getWorkspaceById } from './workspace-service.js';
 import { discoverTasks } from './task-service.js';
 import { getTasksDir } from './workspace-service.js';
 import { getRepoExtensionPaths } from './agent-execution-service.js';
+import {
+  loadWorkspaceSharedContext,
+  WORKSPACE_SHARED_CONTEXT_REL_PATH,
+} from './pi-integration.js';
 import {
   startQueueProcessing,
   stopQueueProcessing,
@@ -118,6 +126,123 @@ function registerShelfCallbacks(
 
 function unregisterShelfCallbacks(workspaceId: string): void {
   globalThis.__piFactoryShelfCallbacks?.delete(workspaceId);
+}
+
+// =============================================================================
+// QA callback registry — used by ask_questions extension tool
+// =============================================================================
+
+export interface QACallbacks {
+  askQuestions: (requestId: string, questions: { id: string; text: string; options: string[] }[]) => Promise<QAAnswer[]>;
+}
+
+declare global {
+  var __piFactoryQACallbacks: Map<string, QACallbacks> | undefined;
+}
+
+function ensureQACallbackRegistry(): Map<string, QACallbacks> {
+  if (!globalThis.__piFactoryQACallbacks) {
+    globalThis.__piFactoryQACallbacks = new Map();
+  }
+  return globalThis.__piFactoryQACallbacks;
+}
+
+/** Pending QA request resolvers keyed by requestId */
+const pendingQARequests = new Map<string, {
+  resolve: (answers: QAAnswer[]) => void;
+  reject: (err: Error) => void;
+}>();
+
+function registerQACallbacks(
+  workspaceId: string,
+  broadcast: (event: ServerEvent) => void,
+  getSession: () => PlanningSession | undefined,
+): void {
+  const registry = ensureQACallbackRegistry();
+  registry.set(workspaceId, {
+    askQuestions: (requestId, questions) => {
+      return new Promise<QAAnswer[]>((resolve, reject) => {
+        // Store the resolver so the HTTP endpoint can complete it
+        pendingQARequests.set(requestId, { resolve, reject });
+
+        const session = getSession();
+
+        // Update status to awaiting_qa
+        if (session) {
+          session.status = 'awaiting_qa';
+          broadcast({ type: 'planning:status', workspaceId, status: 'awaiting_qa' });
+        }
+
+        const qaRequest: QARequest = {
+          requestId,
+          questions: questions.map((q) => ({
+            id: q.id,
+            text: q.text,
+            options: q.options,
+          })),
+        };
+
+        // Persist the QA request as a planning message
+        if (session) {
+          const qaMsg: PlanningMessage = {
+            id: crypto.randomUUID(),
+            role: 'qa',
+            content: questions.map((q) => `**${q.text}**\n${q.options.map((o, i) => `  ${i + 1}. ${o}`).join('\n')}`).join('\n\n'),
+            timestamp: new Date().toISOString(),
+            sessionId: session.sessionId,
+            metadata: { qaRequest },
+          };
+          session.messages.push(qaMsg);
+          persistMessages(workspaceId, session.messages);
+          broadcast({ type: 'planning:message', workspaceId, message: qaMsg });
+        }
+
+        // Broadcast the QA request event to the workspace
+        broadcast({ type: 'qa:request', workspaceId, request: qaRequest });
+      });
+    },
+  });
+}
+
+function unregisterQACallbacks(workspaceId: string): void {
+  globalThis.__piFactoryQACallbacks?.delete(workspaceId);
+}
+
+/**
+ * Resolve a pending QA request with user answers.
+ * Called from the HTTP endpoint when the user submits the QADialog.
+ */
+export function resolveQARequest(
+  workspaceId: string,
+  requestId: string,
+  answers: QAAnswer[],
+  broadcast: (event: ServerEvent) => void,
+): boolean {
+  const pending = pendingQARequests.get(requestId);
+  if (!pending) return false;
+
+  pendingQARequests.delete(requestId);
+
+  // Persist the QA response as a planning message
+  const session = planningSessions.get(workspaceId);
+  if (session) {
+    const qaResponse: QAResponse = { requestId, answers };
+    const responseMsg: PlanningMessage = {
+      id: crypto.randomUUID(),
+      role: 'qa',
+      content: answers.map((a) => `**${a.questionId}**: ${a.selectedOption}`).join('\n'),
+      timestamp: new Date().toISOString(),
+      sessionId: session.sessionId,
+      metadata: { qaResponse },
+    };
+    session.messages.push(responseMsg);
+    persistMessages(workspaceId, session.messages);
+    broadcast({ type: 'planning:message', workspaceId, message: responseMsg });
+  }
+
+  // Resolve the Promise — the agent tool resumes
+  pending.resolve(answers);
+  return true;
 }
 
 // =============================================================================
@@ -307,6 +432,7 @@ async function getOrCreateSession(
     // Register callbacks so extension tools can interact with the factory
     registerShelfCallbacks(workspaceId, broadcast);
     registerFactoryControlCallbacks(workspaceId, broadcast);
+    registerQACallbacks(workspaceId, broadcast, () => planningSessions.get(workspaceId));
 
     // Subscribe to streaming events
     session.unsubscribe = piSession.subscribe((event: AgentSessionEvent) => {
@@ -392,6 +518,16 @@ function buildPlanningSystemPrompt(workspacePath: string, workspaceId: string): 
     }
   }
 
+  // Shared workspace context edited by user + agents
+  const workspaceSharedContext = loadWorkspaceSharedContext(workspacePath);
+  let sharedContextSummary = '';
+  if (workspaceSharedContext && workspaceSharedContext.trim().length > 0) {
+    sharedContextSummary =
+      `\n## Workspace Shared Context\n` +
+      `Source: \`${WORKSPACE_SHARED_CONTEXT_REL_PATH}\`\n\n` +
+      `${workspaceSharedContext.trim()}\n`;
+  }
+
   return `You are the Foreman — the Pi-Factory planning agent. You help the user plan, research, and decompose work into tasks.
 
 ## Your Role
@@ -403,11 +539,20 @@ function buildPlanningSystemPrompt(workspacePath: string, workspaceId: string): 
 
 ## Workspace
 - Path: ${workspacePath}
-${taskSummary}${shelfSummary}
+${taskSummary}${shelfSummary}${sharedContextSummary}
 
 ## Tools
 
-You have access to two special tools for creating items on the shelf:
+You have access to the following special tools:
+
+### ask_questions
+Ask the user multiple-choice questions to clarify ambiguity before proceeding.
+**Always call this tool FIRST** if the user's request is vague, under-specified, or could be interpreted in more than one way. Do not guess — ask.
+Parameters:
+- questions (array): List of questions, each with:
+  - id (string): Unique identifier (e.g. "q1", "q2")
+  - text (string): The question to ask
+  - options (string[]): 2–6 concrete answer choices
 
 ### create_draft_task
 Creates a draft task on the shelf. The user can review and push it to the backlog.
@@ -434,12 +579,13 @@ Parameters:
 - action (string): "status" to check, "start" to begin processing, "stop" to pause
 
 ## Guidelines
+- **If the user's request is ambiguous, use \`ask_questions\` first** to disambiguate before creating tasks. Present concrete multiple-choice options so the user can quickly clarify intent.
 - When the user describes work, **always create draft tasks immediately** — don't ask for permission, just do it
 - **Always include a plan** with every draft task. Research the codebase first, then create tasks with concrete implementation steps. This lets tasks skip the planning phase entirely.
 - Keep tasks small and focused — each should be completable in a single agent session
 - Write clear acceptance criteria that are specific and testable
 - Plan steps should be concrete: reference specific files, functions, and components
-- When in doubt, ask the user for clarification
+- When in doubt, ask the user for clarification using \`ask_questions\`
 - Be conversational and helpful — you're a collaborator, not just a task creator`;
 }
 
@@ -693,6 +839,7 @@ async function sendToAgent(
           session.piSession = piSession;
           registerShelfCallbacks(workspaceId, broadcast);
           registerFactoryControlCallbacks(workspaceId, broadcast);
+          registerQACallbacks(workspaceId, broadcast, () => planningSessions.get(workspaceId));
           session.unsubscribe = piSession.subscribe((event: AgentSessionEvent) => {
             handlePlanningEvent(event, session);
           });
@@ -807,6 +954,7 @@ export async function resetPlanningSession(
   planningSessions.delete(workspaceId);
   unregisterShelfCallbacks(workspaceId);
   unregisterFactoryControlCallbacks(workspaceId);
+  unregisterQACallbacks(workspaceId);
 
   // Generate new session ID and persist
   const newSessionId = crypto.randomUUID();

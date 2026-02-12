@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, memo, useMemo, useCallback } from 'react'
-import type { ActivityEntry, Attachment, AgentExecutionStatus, Phase } from '@pi-factory/shared'
+import type { ActivityEntry, Attachment, Phase } from '@pi-factory/shared'
 import type { AgentStreamState, ToolCallState } from '../hooks/useAgentStreaming'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -25,9 +25,11 @@ interface TaskChatProps {
   getAttachmentUrl?: (storedName: string) => string
   title?: string
   emptyState?: { title: string; subtitle: string }
+  /** Optional element rendered above the input area (e.g. QADialog) */
+  bottomSlot?: React.ReactNode
 }
 
-const STATUS_CONFIG: Record<AgentExecutionStatus, { label: string; color: string; pulse?: boolean }> = {
+const STATUS_CONFIG: Record<string, { label: string; color: string; pulse?: boolean }> = {
   idle: { label: 'Waiting for input', color: 'bg-amber-400' },
   streaming: { label: 'Generating', color: 'bg-blue-500', pulse: true },
   tool_use: { label: 'Running tool', color: 'bg-amber-500', pulse: true },
@@ -35,6 +37,7 @@ const STATUS_CONFIG: Record<AgentExecutionStatus, { label: string; color: string
   completed: { label: 'Done', color: 'bg-green-500' },
   error: { label: 'Error', color: 'bg-red-500' },
   'post-hooks': { label: 'Running post-execution skills', color: 'bg-orange-500', pulse: true },
+  awaiting_qa: { label: 'Waiting for your answers', color: 'bg-amber-500' },
 }
 
 const TOOL_PREVIEW_LINES = 2
@@ -370,6 +373,7 @@ export function TaskChat({
   getAttachmentUrl: getAttachmentUrlProp,
   title,
   emptyState,
+  bottomSlot,
 }: TaskChatProps) {
   const [input, setInput] = useState('')
   const [isComposing, setIsComposing] = useState(false)
@@ -686,6 +690,9 @@ export function TaskChat({
           <div ref={bottomRef} />
         </div>
       </div>
+
+      {/* Optional slot above the input (e.g. QADialog) */}
+      {bottomSlot}
 
       {/* Input */}
       <div className="shrink-0 border-t border-slate-200 bg-white">

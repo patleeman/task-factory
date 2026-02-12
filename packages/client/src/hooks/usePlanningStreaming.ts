@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import type { ServerEvent, PlanningMessage, ActivityEntry, Shelf } from '@pi-factory/shared'
+import type { ServerEvent, PlanningMessage, ActivityEntry, Shelf, QARequest } from '@pi-factory/shared'
 import type { AgentStreamState, ToolCallState } from './useAgentStreaming'
 
 export interface PlanningStreamState {
@@ -9,6 +9,8 @@ export interface PlanningStreamState {
   entries: ActivityEntry[]
   /** Shelf state */
   shelf: Shelf | null
+  /** Active QA request (if agent is awaiting user answers) */
+  activeQARequest: QARequest | null
 }
 
 const INITIAL_AGENT_STREAM: AgentStreamState = {
@@ -41,6 +43,22 @@ function messagesToEntries(messages: PlanningMessage[]): ActivityEntry[] {
         },
       }
     }
+    if (msg.role === 'qa') {
+      // QA messages render as agent messages with qa metadata
+      const isResponse = !!msg.metadata?.qaResponse
+      return {
+        type: 'chat-message',
+        id: msg.id,
+        taskId: PLANNING_TASK_ID,
+        role: isResponse ? 'user' : 'agent',
+        content: msg.content,
+        timestamp: msg.timestamp,
+        metadata: {
+          qaRequest: msg.metadata?.qaRequest,
+          qaResponse: msg.metadata?.qaResponse,
+        },
+      }
+    }
     return {
       type: 'chat-message',
       id: msg.id,
@@ -67,12 +85,14 @@ export function usePlanningStreaming(
   const [messages, setMessages] = useState<PlanningMessage[]>([])
   const [agentStream, setAgentStream] = useState<AgentStreamState>(INITIAL_AGENT_STREAM)
   const [shelf, setShelf] = useState<Shelf | null>(null)
+  const [activeQARequest, setActiveQARequest] = useState<QARequest | null>(null)
   const workspaceIdRef = useRef(workspaceId)
   workspaceIdRef.current = workspaceId
 
   useEffect(() => {
     setMessages([])
     setAgentStream(INITIAL_AGENT_STREAM)
+    setActiveQARequest(null)
   }, [workspaceId])
 
   // Seed with initial messages loaded from server, or clear on reset
@@ -98,8 +118,16 @@ export function usePlanningStreaming(
           setAgentStream((prev) => ({
             ...prev,
             status: msg.status as any,
-            isActive: msg.status !== 'idle' && msg.status !== 'error',
+            isActive: msg.status !== 'idle' && msg.status !== 'error' && msg.status !== 'awaiting_qa',
           }))
+          // Clear QA dialog when agent resumes (not awaiting anymore)
+          if (msg.status !== 'awaiting_qa') {
+            setActiveQARequest(null)
+          }
+          break
+
+        case 'qa:request':
+          setActiveQARequest(msg.request)
           break
 
         case 'planning:message':
@@ -185,6 +213,7 @@ export function usePlanningStreaming(
           // Server has reset the session — clear all local state
           setMessages([])
           setAgentStream(INITIAL_AGENT_STREAM)
+          setActiveQARequest(null)
           break
 
         case 'shelf:updated':
@@ -197,7 +226,21 @@ export function usePlanningStreaming(
   // Convert messages to entries for TaskChat
   const entries = messagesToEntries(messages)
 
-  return { agentStream, entries, shelf }
+  // Restore active QA request from persisted messages on load
+  // (if the last qa message is a request without a matching response)
+  useEffect(() => {
+    if (messages.length === 0) return
+    // Find the last QA request message that doesn't have a corresponding response
+    const qaMessages = messages.filter((m) => m.role === 'qa')
+    if (qaMessages.length === 0) return
+
+    const lastQA = qaMessages[qaMessages.length - 1]
+    if (lastQA.metadata?.qaRequest && !lastQA.metadata?.qaResponse) {
+      setActiveQARequest(lastQA.metadata.qaRequest as QARequest)
+    }
+  }, [initialMessages]) // Only on initial load
+
+  return { agentStream, entries, shelf, activeQARequest }
 }
 
 export const PLANNING_TASK_ID = '__planning__'

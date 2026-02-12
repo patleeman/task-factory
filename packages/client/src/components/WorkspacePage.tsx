@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate, useMatch } from 'react-router-dom'
-import type { Task, Workspace, ActivityEntry, Phase, QueueStatus, Shelf, PlanningMessage } from '@pi-factory/shared'
+import type { Task, Workspace, ActivityEntry, Phase, QueueStatus, Shelf, PlanningMessage, QAAnswer } from '@pi-factory/shared'
 import { api } from '../api'
 import { PipelineBar } from './PipelineBar'
 import { TaskDetailPane } from './TaskDetailPane'
@@ -12,6 +12,7 @@ import { useAgentStreaming } from '../hooks/useAgentStreaming'
 import { usePlanningStreaming, PLANNING_TASK_ID } from '../hooks/usePlanningStreaming'
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts'
 import { TaskChat } from './TaskChat'
+import { QADialog } from './QADialog'
 
 const LEFT_PANE_MIN = 320
 const LEFT_PANE_MAX = 1400
@@ -345,6 +346,17 @@ export function WorkspacePage() {
     }
   }
 
+  // Q&A disambiguation handler
+  const handleQASubmit = async (answers: QAAnswer[]) => {
+    if (!workspaceId || !planningStream.activeQARequest) return
+    try {
+      await api.submitQAResponse(workspaceId, planningStream.activeQARequest.requestId, answers)
+    } catch (err) {
+      console.error('Failed to submit Q&A response:', err)
+      showToast('Failed to submit answers')
+    }
+  }
+
   // Shelf handlers
   const handlePushDraft = async (draftId: string) => {
     if (!workspaceId) return
@@ -581,6 +593,14 @@ export function WorkspacePage() {
                 onReset={handleResetPlanning}
                 title="Foreman"
                 emptyState={{ title: 'Foreman', subtitle: 'Ask me to research, plan, or decompose work into tasks' }}
+                bottomSlot={
+                  planningStream.activeQARequest ? (
+                    <QADialog
+                      request={planningStream.activeQARequest}
+                      onSubmit={handleQASubmit}
+                    />
+                  ) : undefined
+                }
               />
             ) : (
               /* Task mode: show task chat in left pane */

@@ -1,4 +1,4 @@
-import type { Task, Workspace, ActivityEntry, Phase, Attachment, QueueStatus, PlanningMessage, PlanningAgentStatus, Shelf, DraftTask, TaskDefaults, PostExecutionSummary, CriterionStatus } from '@pi-factory/shared'
+import type { Task, Workspace, ActivityEntry, Phase, Attachment, QueueStatus, PlanningMessage, PlanningAgentStatus, Shelf, DraftTask, TaskDefaults, PostExecutionSummary, CriterionStatus, QAAnswer } from '@pi-factory/shared'
 
 export interface AvailableModel {
   provider: string
@@ -120,18 +120,6 @@ export const api = {
 
   getAttachmentUrl(workspaceId: string, taskId: string, storedName: string): string {
     return `/api/workspaces/${workspaceId}/tasks/${taskId}/attachments/${storedName}`
-  },
-
-  async regenerateCriteria(workspaceId: string, taskId: string): Promise<string[]> {
-    const res = await fetch(`/api/workspaces/${workspaceId}/tasks/${taskId}/regenerate-criteria`, {
-      method: 'POST',
-    })
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: 'Regeneration failed' }))
-      throw new Error(err.error || `Regeneration failed (${res.status})`)
-    }
-    const data = await res.json()
-    return data.criteria
   },
 
   async getAvailableModels(): Promise<AvailableModel[]> {
@@ -345,5 +333,21 @@ export const api = {
       throw new Error(err.error || `Failed (${res.status})`)
     }
     return res.json()
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Q&A Disambiguation
+  // ─────────────────────────────────────────────────────────────────────────
+
+  async submitQAResponse(workspaceId: string, requestId: string, answers: QAAnswer[]): Promise<void> {
+    const res = await fetch(`/api/workspaces/${workspaceId}/qa/respond`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requestId, answers }),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Submit failed' }))
+      throw new Error(err.error || `Submit failed (${res.status})`)
+    }
   },
 }

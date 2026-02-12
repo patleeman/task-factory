@@ -285,10 +285,6 @@ export interface WorkspaceConfig {
   taskLocations: string[]; // directory paths
   defaultTaskLocation: string;
 
-  // Optional workspace-specific AGENTS.md path
-  // Relative paths are resolved from the workspace root.
-  agentsMdPath?: string;
-
   // WIP limits (override defaults)
   wipLimits?: Partial<Record<Phase, number | null>>;
 
@@ -489,7 +485,7 @@ export interface Shelf {
 // Planning agent chat message
 export interface PlanningMessage {
   id: string;
-  role: 'user' | 'assistant' | 'tool';
+  role: 'user' | 'assistant' | 'tool' | 'qa';
   content: string;
   timestamp: string;       // ISO 8601
   sessionId?: string;      // UUID of the planning session this message belongs to
@@ -497,6 +493,8 @@ export interface PlanningMessage {
     toolName?: string;
     args?: Record<string, unknown>;
     isError?: boolean;
+    qaRequest?: QARequest;
+    qaResponse?: QAResponse;
   };
 }
 
@@ -514,9 +512,10 @@ export type PlanningEvent =
   | { type: 'planning:status'; workspaceId: string; status: PlanningAgentStatus }
   | { type: 'planning:session_reset'; workspaceId: string; sessionId: string }
   | { type: 'shelf:updated'; workspaceId: string; shelf: Shelf }
-  | { type: 'planning:task_form_updated'; workspaceId: string; formState: Partial<NewTaskFormState> };
+  | { type: 'planning:task_form_updated'; workspaceId: string; formState: Partial<NewTaskFormState> }
+  | { type: 'qa:request'; workspaceId: string; request: QARequest };
 
-export type PlanningAgentStatus = 'idle' | 'streaming' | 'tool_use' | 'thinking' | 'error';
+export type PlanningAgentStatus = 'idle' | 'streaming' | 'tool_use' | 'thinking' | 'error' | 'awaiting_qa';
 
 // New task form state (managed by planning agent)
 export interface NewTaskFormState {
@@ -524,6 +523,31 @@ export interface NewTaskFormState {
   selectedSkillIds: string[];
   modelConfig?: ModelConfig;
   skillOrder?: string[];
+}
+
+// =============================================================================
+// Q&A Disambiguation
+// =============================================================================
+
+export interface QAQuestion {
+  id: string;
+  text: string;
+  options: string[];
+}
+
+export interface QARequest {
+  requestId: string;
+  questions: QAQuestion[];
+}
+
+export interface QAAnswer {
+  questionId: string;
+  selectedOption: string;
+}
+
+export interface QAResponse {
+  requestId: string;
+  answers: QAAnswer[];
 }
 
 // =============================================================================

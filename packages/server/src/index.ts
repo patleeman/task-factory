@@ -228,12 +228,6 @@ app.post('/api/workspaces/:id/tasks', async (req, res) => {
       title = await generateTitle(request.content, request.acceptanceCriteria || []);
     }
 
-    // Generate acceptance criteria if not provided
-    if ((!request.acceptanceCriteria || request.acceptanceCriteria.length === 0) && request.content) {
-      const { generateAcceptanceCriteria } = await import('./acceptance-criteria-service.js');
-      request.acceptanceCriteria = await generateAcceptanceCriteria(request.content);
-    }
-
     const task = createTask(workspace.path, tasksDir, request, title);
 
     // Broadcast to subscribers
@@ -304,14 +298,6 @@ app.patch('/api/workspaces/:workspaceId/tasks/:taskId', async (req, res) => {
 
   try {
     const request = req.body as UpdateTaskRequest;
-
-    // Auto-generate acceptance criteria when description changes and criteria not explicitly provided
-    const descriptionChanged = request.content !== undefined && request.content !== task.content;
-    const criteriaNotProvided = request.acceptanceCriteria === undefined;
-    if (descriptionChanged && criteriaNotProvided && request.content) {
-      const { generateAcceptanceCriteria } = await import('./acceptance-criteria-service.js');
-      request.acceptanceCriteria = await generateAcceptanceCriteria(request.content);
-    }
 
     task = updateTask(task, request);
 
@@ -738,7 +724,7 @@ app.get('/api/pi/themes', (_req, res) => {
   res.json(themes);
 });
 
-// Get AGENTS.md (global + optional workspace override)
+// Get AGENTS.md + workspace shared context (combined prompt rules)
 app.get('/api/pi/agents-md', (req, res) => {
   const workspaceId = req.query.workspace as string | undefined;
 
@@ -777,6 +763,10 @@ import {
   saveWorkspacePiConfig,
   getEnabledSkillsForWorkspace,
   getEnabledExtensionsForWorkspace,
+  getWorkspaceSharedContextPath,
+  loadWorkspaceSharedContext,
+  saveWorkspaceSharedContext,
+  WORKSPACE_SHARED_CONTEXT_REL_PATH,
   type PiFactorySettings,
   type WorkspacePiConfig,
 } from './pi-integration.js';
@@ -871,6 +861,54 @@ app.post('/api/workspaces/:workspaceId/pi-config', (req, res) => {
   }
 });
 
+// Get workspace shared context (user + agent collaboration store)
+app.get('/api/workspaces/:workspaceId/shared-context', (req, res) => {
+  const workspace = getWorkspaceById(req.params.workspaceId);
+
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return;
+  }
+
+  const content = loadWorkspaceSharedContext(workspace.path) || '';
+  const absolutePath = getWorkspaceSharedContextPath(workspace.path);
+
+  res.json({
+    relativePath: WORKSPACE_SHARED_CONTEXT_REL_PATH,
+    absolutePath,
+    content,
+  });
+});
+
+// Save workspace shared context (last write wins)
+app.put('/api/workspaces/:workspaceId/shared-context', (req, res) => {
+  const workspace = getWorkspaceById(req.params.workspaceId);
+
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return;
+  }
+
+  const content = (req.body as { content?: unknown }).content;
+  if (typeof content !== 'string') {
+    res.status(400).json({ error: 'content must be a string' });
+    return;
+  }
+
+  try {
+    saveWorkspaceSharedContext(workspace.path, content);
+
+    res.json({
+      success: true,
+      relativePath: WORKSPACE_SHARED_CONTEXT_REL_PATH,
+      absolutePath: getWorkspaceSharedContextPath(workspace.path),
+      content,
+    });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
 // Get enabled skills for workspace
 app.get('/api/workspaces/:workspaceId/skills', (req, res) => {
   const skills = getEnabledSkillsForWorkspace(req.params.workspaceId);
@@ -897,7 +935,6 @@ import {
   getAllActiveSessions,
   getRepoExtensionPaths,
   reloadRepoExtensions,
-  regenerateAcceptanceCriteriaForTask,
   loadAttachmentsByIds,
   planTask,
   startChat,
@@ -1070,37 +1107,6 @@ app.get('/api/workspaces/:workspaceId/tasks/:taskId/execution', (req, res) => {
     endTime: session.endTime,
     output: session.output,
   });
-});
-
-// Regenerate acceptance criteria
-app.post('/api/workspaces/:workspaceId/tasks/:taskId/regenerate-criteria', async (req, res) => {
-  const workspace = getWorkspaceById(req.params.workspaceId);
-
-  if (!workspace) {
-    res.status(404).json({ error: 'Workspace not found' });
-    return;
-  }
-
-  const tasksDir = getTasksDir(workspace);
-  const tasks = discoverTasks(tasksDir);
-  const task = tasks.find(t => t.id === req.params.taskId);
-
-  if (!task) {
-    res.status(404).json({ error: 'Task not found' });
-    return;
-  }
-
-  try {
-    const criteria = await regenerateAcceptanceCriteriaForTask(
-      task,
-      workspace.id,
-      (event) => broadcastToWorkspace(workspace.id, event),
-    );
-
-    res.json({ criteria });
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
 });
 
 // =============================================================================
@@ -1459,6 +1465,7 @@ import {
   resetPlanningSession,
   registerTaskFormCallbacks,
   unregisterTaskFormCallbacks,
+  resolveQARequest,
 } from './planning-agent-service.js';
 
 import {
@@ -1618,6 +1625,39 @@ app.post('/api/workspaces/:workspaceId/planning/reset', async (req, res) => {
     (event) => broadcastToWorkspace(workspace.id, event),
   );
   res.json({ ok: true, sessionId: newSessionId });
+});
+
+// Submit Q&A response (user answers to agent's ask_questions call)
+app.post('/api/workspaces/:workspaceId/qa/respond', (req, res) => {
+  const workspace = getWorkspaceById(req.params.workspaceId);
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return;
+  }
+
+  const { requestId, answers } = req.body as {
+    requestId: string;
+    answers: { questionId: string; selectedOption: string }[];
+  };
+
+  if (!requestId || !Array.isArray(answers)) {
+    res.status(400).json({ error: 'requestId and answers[] are required' });
+    return;
+  }
+
+  const resolved = resolveQARequest(
+    workspace.id,
+    requestId,
+    answers,
+    (event) => broadcastToWorkspace(workspace.id, event),
+  );
+
+  if (!resolved) {
+    res.status(404).json({ error: 'No pending Q&A request found for this requestId' });
+    return;
+  }
+
+  res.json({ ok: true });
 });
 
 // =============================================================================
