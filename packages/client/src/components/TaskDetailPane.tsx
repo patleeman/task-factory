@@ -19,6 +19,7 @@ interface TaskDetailPaneProps {
   workspaceId: string
   moveError: string | null
   isPlanGenerating?: boolean
+  isAgentRunning?: boolean
   onClose: () => void
   onMove: (phase: Phase) => void
   onDelete?: () => void
@@ -31,6 +32,7 @@ export function TaskDetailPane({
   onMove,
   moveError,
   isPlanGenerating,
+  isAgentRunning,
   onDelete,
 }: TaskDetailPaneProps) {
   const [showMoveMenu, setShowMoveMenu] = useState(false)
@@ -128,6 +130,12 @@ export function TaskDetailPane({
           <span className={`phase-badge phase-badge-${frontmatter.phase}`}>
             {PHASE_DISPLAY_NAMES[frontmatter.phase]}
           </span>
+          {isAgentRunning && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-orange-100 text-orange-700 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide">
+              <span className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-pulse" />
+              Running
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-1.5">
           {/* Demote button */}

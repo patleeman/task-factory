@@ -87,16 +87,12 @@ export function WorkspacePage() {
 
   useEffect(() => {
     setRunningExecutionTaskIds((prev) => {
-      const executingTaskIds = new Set(
-        tasks
-          .filter((task) => task.frontmatter.phase === 'executing')
-          .map((task) => task.id),
-      )
+      const existingTaskIds = new Set(tasks.map((task) => task.id))
 
       let changed = false
       const next = new Set<string>()
       for (const taskId of prev) {
-        if (executingTaskIds.has(taskId)) {
+        if (existingTaskIds.has(taskId)) {
           next.add(taskId)
         } else {
           changed = true
@@ -158,15 +154,11 @@ export function WorkspacePage() {
         setShelf(shelfData)
         setPlanningMessages(planningMsgs)
 
-        const executingTaskIds = new Set(
-          tasksData
-            .filter((task) => task.frontmatter.phase === 'executing')
-            .map((task) => task.id),
-        )
+        const taskIds = new Set(tasksData.map((task) => task.id))
 
         setRunningExecutionTaskIds(new Set(
           activeExecutions
-            .filter((session) => session.isRunning && executingTaskIds.has(session.taskId))
+            .filter((session) => session.isRunning && taskIds.has(session.taskId))
             .map((session) => session.taskId),
         ))
         setIsLoading(false)
@@ -217,27 +209,11 @@ export function WorkspacePage() {
           setTasks((prev) =>
             prev.map((t) => (t.id === msg.task.id ? msg.task : t))
           )
-          if (msg.task.frontmatter.phase !== 'executing') {
-            setRunningExecutionTaskIds((prev) => {
-              if (!prev.has(msg.task.id)) return prev
-              const next = new Set(prev)
-              next.delete(msg.task.id)
-              return next
-            })
-          }
           break
         case 'task:moved':
           setTasks((prev) =>
             prev.map((t) => (t.id === msg.task.id ? msg.task : t))
           )
-          if (msg.to !== 'executing') {
-            setRunningExecutionTaskIds((prev) => {
-              if (!prev.has(msg.task.id)) return prev
-              const next = new Set(prev)
-              next.delete(msg.task.id)
-              return next
-            })
-          }
           break
         case 'task:plan_generated': {
           setTasks((prev) =>
@@ -278,12 +254,16 @@ export function WorkspacePage() {
           setQueueStatus(msg.status)
           break
         case 'agent:execution_status': {
-          const task = tasksByIdRef.current.get(msg.taskId)
-          const isExecutingTask = task?.frontmatter.phase === 'executing'
+          const taskExists = tasksByIdRef.current.has(msg.taskId)
 
           setRunningExecutionTaskIds((prev) => {
             const next = new Set(prev)
-            if (isExecutionStatusRunning(msg.status) && isExecutingTask) {
+            if (!taskExists) {
+              next.delete(msg.taskId)
+              return next
+            }
+
+            if (isExecutionStatusRunning(msg.status)) {
               next.add(msg.taskId)
             } else {
               next.delete(msg.taskId)
@@ -344,7 +324,7 @@ export function WorkspacePage() {
       },
     }
     setTasks((prev) => prev.map((t) => (t.id === task.id ? updatedTask : t)))
-    if (toPhase !== 'executing') {
+    if (task.frontmatter.phase === 'executing' && toPhase !== 'executing') {
       setRunningExecutionTaskIds((prev) => {
         if (!prev.has(task.id)) return prev
         const next = new Set(prev)
@@ -600,9 +580,10 @@ export function WorkspacePage() {
               acc[p] = (acc[p] || 0) + 1
               return acc
             }, {} as Record<string, number>)
+            const runningCount = nonArchivedTasks.filter((task) => runningTaskIds.has(task.id)).length
             return (
               <span className="text-xs text-slate-500 font-mono">
-                {counts.executing > 0 && <span className="text-orange-400">{counts.executing} running</span>}
+                {runningCount > 0 && <span className="text-orange-400">{runningCount} running</span>}
                 {counts.ready > 0 && <span className="text-blue-400 ml-2">{counts.ready} ready</span>}
                 {counts.complete > 0 && <span className="text-emerald-400 ml-2">{counts.complete} done</span>}
               </span>
@@ -780,6 +761,7 @@ export function WorkspacePage() {
                 workspaceId={workspaceId || ''}
                 moveError={moveError}
                 isPlanGenerating={planGeneratingTaskIds.has(selectedTask.id)}
+                isAgentRunning={runningTaskIds.has(selectedTask.id)}
                 onClose={() => navigate(workspaceRootPath)}
                 onMove={(phase) => handleMoveTask(selectedTask, phase)}
                 onDelete={() => {
