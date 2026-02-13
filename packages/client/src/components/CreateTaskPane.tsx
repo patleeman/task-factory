@@ -315,13 +315,20 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
     </div>
   )
 
-  const handleWrapperChange = (wrapperId: string) => {
-    setSelectedWrapperId(wrapperId)
-    if (!wrapperId) return
-    const wrapper = availableWrappers.find(w => w.id === wrapperId)
-    if (wrapper) {
-      setSelectedPreSkillIds([...wrapper.preExecutionSkills])
-      setSelectedSkillIds([...wrapper.postExecutionSkills])
+  const handleWrapperToggle = (wrapperId: string) => {
+    if (selectedWrapperId === wrapperId) {
+      // Deselect — clear wrapper and reset skills to defaults
+      setSelectedWrapperId('')
+      setSelectedPreSkillIds([...taskDefaults.preExecutionSkills])
+      setSelectedSkillIds([...taskDefaults.postExecutionSkills])
+    } else {
+      // Select — apply wrapper's skill arrays
+      setSelectedWrapperId(wrapperId)
+      const wrapper = availableWrappers.find(w => w.id === wrapperId)
+      if (wrapper) {
+        setSelectedPreSkillIds([...wrapper.preExecutionSkills])
+        setSelectedSkillIds([...wrapper.postExecutionSkills])
+      }
     }
   }
 
@@ -331,18 +338,57 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
         Execution Wrapper
       </label>
       <p className="text-xs text-slate-400 mb-2">
-        Pre-configured skill pairs that wrap execution.
+        Pre-configured skill pairs that wrap execution. Click to apply.
       </p>
-      <select
-        value={selectedWrapperId}
-        onChange={(e) => handleWrapperChange(e.target.value)}
-        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent"
-      >
-        <option value="">None (manual skill selection)</option>
-        {availableWrappers.map(w => (
-          <option key={w.id} value={w.id}>{w.name} — {w.description}</option>
-        ))}
-      </select>
+      <div className="space-y-1.5">
+        {availableWrappers.map(w => {
+          const isSelected = selectedWrapperId === w.id
+          return (
+            <div
+              key={w.id}
+              onClick={() => handleWrapperToggle(w.id)}
+              className={`flex items-center justify-between p-2.5 rounded-lg border cursor-pointer transition-colors ${
+                isSelected
+                  ? 'border-violet-400 bg-violet-50'
+                  : 'border-slate-200 hover:border-slate-300'
+              }`}
+            >
+              <div className="flex items-center gap-2.5 min-w-0">
+                <span className="text-[10px] text-slate-400 font-mono shrink-0">wrap</span>
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-slate-800 truncate">
+                    {w.name}
+                  </div>
+                  <div className="text-xs text-slate-500 truncate">
+                    {w.description}
+                  </div>
+                  {isSelected && (
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {w.preExecutionSkills.length > 0 && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-600">
+                          pre: {w.preExecutionSkills.join(', ')}
+                        </span>
+                      )}
+                      {w.postExecutionSkills.length > 0 && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-100 text-orange-600">
+                          post: {w.postExecutionSkills.join(', ')}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 text-[10px] transition-colors ${
+                isSelected
+                  ? 'border-violet-500 bg-violet-500 text-white'
+                  : 'border-slate-300'
+              }`}>
+                {isSelected && '✓'}
+              </div>
+            </div>
+          )
+        })}
+      </div>
     </div>
   ) : null
 
