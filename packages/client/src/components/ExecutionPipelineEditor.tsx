@@ -1,6 +1,8 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { GripVertical, Settings2, X } from 'lucide-react'
 import type { ExecutionWrapper } from '@pi-factory/shared'
 import type { PostExecutionSkill } from '../types/pi'
+import { AppIcon } from './AppIcon'
 import { SkillConfigModal } from './SkillConfigModal'
 
 type Lane = 'pre' | 'post'
@@ -14,8 +16,9 @@ interface ExecutionPipelineEditorProps {
   onPreSkillsChange: (skillIds: string[]) => void
   onPostSkillsChange: (skillIds: string[]) => void
   onWrapperChange: (wrapperId: string) => void
-  skillConfigs: Record<string, Record<string, string>>
-  onSkillConfigChange: (skillConfigs: Record<string, Record<string, string>>) => void
+  skillConfigs?: Record<string, Record<string, string>>
+  onSkillConfigChange?: (skillConfigs: Record<string, Record<string, string>>) => void
+  showSkillConfigControls?: boolean
 }
 
 interface DragPayload {
@@ -70,8 +73,9 @@ export function ExecutionPipelineEditor({
   onPreSkillsChange,
   onPostSkillsChange,
   onWrapperChange,
-  skillConfigs,
+  skillConfigs = {},
   onSkillConfigChange,
+  showSkillConfigControls = true,
 }: ExecutionPipelineEditorProps) {
   const [selection, setSelection] = useState('')
   const [dragSource, setDragSource] = useState<DragPayload | null>(null)
@@ -118,6 +122,12 @@ export function ExecutionPipelineEditor({
     }
   }, [configSkillId, selectedSkillIds])
 
+  const clearWrapperIfNeeded = useCallback(() => {
+    if (selectedWrapperId) {
+      onWrapperChange('')
+    }
+  }, [onWrapperChange, selectedWrapperId])
+
   const resetDragState = useCallback(() => {
     if (dragNodeRef.current) {
       dragNodeRef.current.style.removeProperty('opacity')
@@ -147,6 +157,7 @@ export function ExecutionPipelineEditor({
 
       if (insertAt === sourceIndex) return
       reordered.splice(insertAt, 0, movedSkillId)
+      clearWrapperIfNeeded()
 
       if (toLane === 'pre') {
         onPreSkillsChange(reordered)
@@ -162,6 +173,7 @@ export function ExecutionPipelineEditor({
     const targetAfterInsert = [...targetSkills]
     const insertAt = Math.max(0, Math.min(toIndex, targetAfterInsert.length))
     targetAfterInsert.splice(insertAt, 0, payload.skillId)
+    clearWrapperIfNeeded()
 
     if (payload.fromLane === 'pre') {
       onPreSkillsChange(sourceAfterRemoval)
@@ -170,7 +182,7 @@ export function ExecutionPipelineEditor({
       onPostSkillsChange(sourceAfterRemoval)
       onPreSkillsChange(targetAfterInsert)
     }
-  }, [onPostSkillsChange, onPreSkillsChange, selectedPreSkillIds, selectedSkillIds])
+  }, [clearWrapperIfNeeded, onPostSkillsChange, onPreSkillsChange, selectedPreSkillIds, selectedSkillIds])
 
   const readDragPayload = useCallback((e: React.DragEvent): DragPayload | null => {
     const raw = e.dataTransfer.getData(DRAG_MIME)
@@ -240,12 +252,13 @@ export function ExecutionPipelineEditor({
   }, [getCardDropIndex, moveSkill, readDragPayload, resetDragState])
 
   const handleRemoveSkill = useCallback((lane: Lane, index: number) => {
+    clearWrapperIfNeeded()
     if (lane === 'pre') {
       onPreSkillsChange(selectedPreSkillIds.filter((_, i) => i !== index))
     } else {
       onPostSkillsChange(selectedSkillIds.filter((_, i) => i !== index))
     }
-  }, [onPostSkillsChange, onPreSkillsChange, selectedPreSkillIds, selectedSkillIds])
+  }, [clearWrapperIfNeeded, onPostSkillsChange, onPreSkillsChange, selectedPreSkillIds, selectedSkillIds])
 
   const handleAddSelection = useCallback(() => {
     const parsed = parseSelection(selection)
@@ -253,6 +266,7 @@ export function ExecutionPipelineEditor({
 
     if (parsed.type === 'skill') {
       if (!selectedSkillSet.has(parsed.id)) {
+        clearWrapperIfNeeded()
         onPostSkillsChange([...selectedSkillIds, parsed.id])
       }
       setSelection('')
@@ -266,10 +280,10 @@ export function ExecutionPipelineEditor({
     onPreSkillsChange(dedupeSkillIds(wrapper.preExecutionSkills))
     onPostSkillsChange(dedupeSkillIds(wrapper.postExecutionSkills))
     setSelection('')
-  }, [onPostSkillsChange, onPreSkillsChange, onWrapperChange, selection, selectedSkillIds, selectedSkillSet, wrapperById])
+  }, [clearWrapperIfNeeded, onPostSkillsChange, onPreSkillsChange, onWrapperChange, selection, selectedSkillIds, selectedSkillSet, wrapperById])
 
   const handleConfigSave = useCallback((values: Record<string, string>) => {
-    if (!configSkillId) return
+    if (!configSkillId || !onSkillConfigChange) return
 
     const updated = { ...skillConfigs }
     if (Object.keys(values).length === 0) {
@@ -301,7 +315,13 @@ export function ExecutionPipelineEditor({
   const renderSkillCard = (lane: Lane, skillId: string, index: number) => {
     const skill = skillById.get(skillId)
     const isPostLane = lane === 'post'
-    const hasConfig = Boolean(skill && skill.configSchema.length > 0)
+    const hasConfig = Boolean(
+      showSkillConfigControls
+      && isPostLane
+      && onSkillConfigChange
+      && skill
+      && skill.configSchema.length > 0,
+    )
     const isConfigured = Boolean(skillConfigs[skillId] && Object.keys(skillConfigs[skillId]).length > 0)
     const isDragging = dragSource?.fromLane === lane && dragSource.fromIndex === index
 
@@ -320,10 +340,10 @@ export function ExecutionPipelineEditor({
         } ${isDragging ? 'opacity-40' : ''}`}
       >
         <span
-          className="w-4 text-center text-xs text-slate-400 select-none"
+          className="w-4 text-center text-xs text-slate-400 select-none flex items-center justify-center"
           title="Drag to reorder"
         >
-          ⋮⋮
+          <AppIcon icon={GripVertical} size="sm" />
         </span>
 
         <span className={`w-5 h-5 rounded-full text-[10px] font-bold text-white flex items-center justify-center ${
@@ -345,21 +365,22 @@ export function ExecutionPipelineEditor({
           </div>
         </div>
 
-        {isPostLane && hasConfig && (
+        {hasConfig && (
           <button
             type="button"
             onClick={(e) => {
               e.stopPropagation()
               setConfigSkillId(skillId)
             }}
-            className={`shrink-0 rounded-md border px-2 py-1 text-[11px] font-medium transition-colors ${
+            className={`shrink-0 rounded-md border px-2 py-1 text-[11px] font-medium transition-colors inline-flex items-center gap-1 ${
               isConfigured
                 ? 'border-blue-200 bg-blue-100 text-blue-700 hover:bg-blue-200'
                 : 'border-slate-200 bg-slate-100 text-slate-500 hover:bg-slate-200'
             }`}
             title={`Configure ${skill?.name ?? skillId}`}
           >
-            {isConfigured ? '⚙ Configured' : '⚙ Configure'}
+            <AppIcon icon={Settings2} size="xs" />
+            {isConfigured ? 'Configured' : 'Configure'}
           </button>
         )}
 
@@ -375,8 +396,9 @@ export function ExecutionPipelineEditor({
               : 'text-orange-400 hover:text-red-500 hover:bg-red-50'
           }`}
           title="Remove skill"
+          aria-label="Remove skill"
         >
-          ×
+          <AppIcon icon={X} size="xs" />
         </button>
       </div>
     )
@@ -424,6 +446,18 @@ export function ExecutionPipelineEditor({
   }
 
   const canAdd = selection.trim().length > 0
+
+  const executionCore = (
+    <div className={selectedWrapper ? 'ml-3 border-l border-violet-200/80 pl-3 space-y-3' : 'space-y-3'}>
+      {renderLane('pre')}
+
+      <div className="rounded-xl border-2 border-dashed border-slate-300 bg-white px-3 py-6 text-center text-sm font-medium text-slate-500">
+        Task Execution
+      </div>
+
+      {renderLane('post')}
+    </div>
+  )
 
   return (
     <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-3">
@@ -490,13 +524,7 @@ export function ExecutionPipelineEditor({
         </div>
       )}
 
-      {renderLane('pre')}
-
-      <div className="rounded-xl border-2 border-dashed border-slate-300 bg-white px-3 py-6 text-center text-sm font-medium text-slate-500">
-        Task Execution
-      </div>
-
-      {renderLane('post')}
+      {executionCore}
 
       {selectedWrapper && (
         <div className="rounded-lg border border-violet-200 bg-violet-50 px-3 py-2">
@@ -504,7 +532,7 @@ export function ExecutionPipelineEditor({
         </div>
       )}
 
-      {configSkill && (
+      {configSkill && showSkillConfigControls && onSkillConfigChange && (
         <SkillConfigModal
           skill={configSkill}
           savedValues={skillConfigs[configSkill.id] ?? {}}

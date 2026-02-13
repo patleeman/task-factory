@@ -49,7 +49,7 @@ export default function (pi: ExtensionAPI) {
       if (action === 'status') {
         const status = cb.getStatus();
         const lines = [
-          `**Factory:** ${status.enabled ? '🟢 Running' : '⏸️ Stopped'}`,
+          `**Factory:** ${status.enabled ? 'Running' : 'Stopped'}`,
           `**Tasks in ready queue:** ${status.tasksInReady}`,
           `**Tasks executing:** ${status.tasksInExecuting}`,
         ];

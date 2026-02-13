@@ -1,5 +1,7 @@
 import { useState, useRef, useCallback } from 'react'
+import { GripVertical, Settings2, X } from 'lucide-react'
 import type { PostExecutionSkill } from '../types/pi'
+import { AppIcon } from './AppIcon'
 import { SkillConfigModal } from './SkillConfigModal'
 
 interface SkillSelectorProps {
@@ -146,8 +148,8 @@ export function SkillSelector({
                 } ${isDragging ? 'opacity-40' : ''}`}
               >
                 {/* Drag handle */}
-                <span className="text-slate-400 text-xs select-none shrink-0 w-4 text-center" title="Drag to reorder">
-                  ⋮⋮
+                <span className="text-slate-400 text-xs select-none shrink-0 w-4 text-center flex items-center justify-center" title="Drag to reorder">
+                  <AppIcon icon={GripVertical} size="sm" />
                 </span>
                 {/* Order number */}
                 <span className="w-5 h-5 rounded-full bg-safety-orange text-white text-[10px] font-bold flex items-center justify-center shrink-0">
@@ -173,14 +175,15 @@ export function SkillSelector({
                       e.stopPropagation()
                       setConfigSkillId(skill.id)
                     }}
-                    className={`shrink-0 px-2 py-1 rounded-md text-[11px] font-medium transition-colors ${
+                    className={`shrink-0 px-2 py-1 rounded-md text-[11px] font-medium transition-colors inline-flex items-center gap-1 ${
                       hasCustomConfig(skill.id)
                         ? 'text-blue-700 bg-blue-100 hover:bg-blue-200 border border-blue-200'
                         : 'text-slate-500 bg-slate-100 hover:bg-slate-200 border border-slate-200'
                     }`}
                     title={`Configure ${skill.name}`}
                   >
-                    {hasCustomConfig(skill.id) ? '⚙ Configured' : '⚙ Configure'}
+                    <AppIcon icon={Settings2} size="xs" />
+                    {hasCustomConfig(skill.id) ? 'Configured' : 'Configure'}
                   </button>
                 )}
                 {/* Remove button */}
@@ -191,8 +194,9 @@ export function SkillSelector({
                   }}
                   className="w-5 h-5 rounded-full text-orange-400 hover:text-red-500 hover:bg-red-50 flex items-center justify-center text-xs shrink-0 transition-colors"
                   title="Remove skill"
+                  aria-label="Remove skill"
                 >
-                  ×
+                  <AppIcon icon={X} size="xs" />
                 </button>
               </div>
             )
@@ -222,7 +226,10 @@ export function SkillSelector({
                   <div className="text-sm font-medium text-slate-800 truncate">
                     {skill.name}
                     {skill.configSchema && skill.configSchema.length > 0 && (
-                      <span className="ml-1.5 text-[10px] text-slate-400 font-normal">⚙ configurable</span>
+                      <span className="ml-1.5 text-[10px] text-slate-400 font-normal inline-flex items-center gap-1">
+                        <AppIcon icon={Settings2} size="xs" />
+                        configurable
+                      </span>
                     )}
                   </div>
                   <div className="text-xs text-slate-500 truncate">

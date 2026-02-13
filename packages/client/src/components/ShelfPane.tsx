@@ -1,4 +1,6 @@
+import { ArrowRight } from 'lucide-react'
 import type { Shelf, DraftTask } from '@pi-factory/shared'
+import { AppIcon } from './AppIcon'
 import { DraftTaskCard } from './DraftTaskCard'
 
 interface ShelfPaneProps {
@@ -35,9 +37,10 @@ export function ShelfPane({
             <>
               <button
                 onClick={onPushAll}
-                className="text-xs text-blue-600 hover:text-blue-800 font-medium transition-colors"
+                className="text-xs text-blue-600 hover:text-blue-800 font-medium transition-colors inline-flex items-center gap-1"
               >
-                Push all to backlog →
+                Push all to backlog
+                <AppIcon icon={ArrowRight} size="xs" />
               </button>
               <button
                 onClick={onClearShelf}

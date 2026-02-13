@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
+import { Loader2, SendHorizontal } from 'lucide-react'
 import type { QARequest, QAAnswer } from '@pi-factory/shared'
+import { AppIcon } from './AppIcon'
 
 interface QADialogProps {
   request: QARequest
@@ -146,8 +148,14 @@ export function QADialog({ request, onSubmit, onAbort }: QADialogProps) {
           className="text-sm font-medium px-3 py-1.5 rounded-md bg-amber-600 text-white
                      hover:bg-amber-700 disabled:bg-slate-200 disabled:text-slate-400
                      disabled:cursor-not-allowed transition-colors shrink-0"
+          aria-label={submitting ? 'Submitting answer' : 'Submit answer'}
+          title={submitting ? 'Submitting answer' : 'Submit answer'}
         >
-          {submitting ? '…' : '↩'}
+          {submitting ? (
+            <AppIcon icon={Loader2} size="sm" className="animate-spin" />
+          ) : (
+            <AppIcon icon={SendHorizontal} size="sm" />
+          )}
         </button>
       </div>
     </div>

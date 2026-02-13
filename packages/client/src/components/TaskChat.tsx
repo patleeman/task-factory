@@ -1,9 +1,11 @@
 import { useState, useRef, useEffect, memo, useMemo, useCallback } from 'react'
+import { CornerUpLeft, Loader2, Paperclip, PencilLine, SendHorizontal, X, Zap } from 'lucide-react'
 import type { ActivityEntry, Attachment, Phase } from '@pi-factory/shared'
 import type { AgentStreamState, ToolCallState } from '../hooks/useAgentStreaming'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { api } from '../api'
+import { AppIcon } from './AppIcon'
 import { InlineWhiteboardPanel } from './InlineWhiteboardPanel'
 import { createWhiteboardAttachmentFilename, exportWhiteboardPngFile, hasWhiteboardContent, type WhiteboardSceneSnapshot } from './whiteboard'
 
@@ -72,7 +74,7 @@ function formatToolHeader(name: string, args?: Record<string, unknown>): { prefi
     case 'task_complete': {
       const summary = String(a.summary || '')
       const preview = summary.length > 80 ? summary.slice(0, 77) + '...' : summary
-      return { prefix: '✅ complete', detail: preview || String(a.taskId || '') }
+      return { prefix: 'complete', detail: preview || String(a.taskId || '') }
     }
     case 'ask_questions': {
       const questions = Array.isArray(a.questions) ? a.questions : []
@@ -82,7 +84,7 @@ function formatToolHeader(name: string, args?: Record<string, unknown>): { prefi
         ? (firstQ.text.length > 60 ? firstQ.text.slice(0, 57) + '...' : firstQ.text)
         : ''
       const suffix = count > 1 ? ` (+${count - 1} more)` : ''
-      return { prefix: '❓ ask', detail: `${preview}${suffix}` }
+      return { prefix: 'ask', detail: `${preview}${suffix}` }
     }
     default: {
       const parts = Object.entries(a)
@@ -657,6 +659,24 @@ export function TaskChat({
                 return null
               }
 
+              const meta = entry.metadata as Record<string, unknown> | undefined
+              if (meta?.kind === 'state-transition') {
+                const to = meta.to as Record<string, unknown> | undefined
+                const from = meta.from as Record<string, unknown> | undefined
+                const toPhase = typeof to?.phase === 'string' ? to.phase : 'unknown'
+                const toMode = typeof to?.mode === 'string' ? to.mode : 'unknown'
+                const toPlanning = typeof to?.planningStatus === 'string' ? to.planningStatus : 'none'
+                const fromPhase = typeof from?.phase === 'string' ? from.phase : 'unknown'
+
+                return (
+                  <div key={entry.id} className="text-center py-1">
+                    <span className="text-[11px] font-mono text-indigo-500">
+                      state {fromPhase} to {toPhase} · {toMode} · {toPlanning}
+                    </span>
+                  </div>
+                )
+              }
+
               return (
                 <div key={entry.id} className="text-center py-1">
                   <span className="text-[11px] font-mono text-slate-400">
@@ -782,24 +802,26 @@ export function TaskChat({
           <div className="flex items-center gap-1 px-3 pt-2 pb-0">
             <button
               onClick={() => setSendMode('steer')}
-              className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded transition-colors ${
+              className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded transition-colors inline-flex items-center gap-1 ${
                 sendMode === 'steer'
                   ? 'bg-amber-100 text-amber-700'
                   : 'text-slate-400 hover:text-slate-600'
               }`}
             >
-              ⚡ steer
+              <AppIcon icon={Zap} size="xs" />
+              steer
             </button>
             {hasFollowUpHandler && (
               <button
                 onClick={() => setSendMode('followUp')}
-                className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded transition-colors ${
+                className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded transition-colors inline-flex items-center gap-1 ${
                   sendMode === 'followUp'
                     ? 'bg-blue-100 text-blue-700'
                     : 'text-slate-400 hover:text-slate-600'
                 }`}
               >
-                ↩ follow-up
+                <AppIcon icon={CornerUpLeft} size="xs" />
+                follow-up
               </button>
             )}
             <span className="text-[10px] text-slate-400 font-mono ml-auto">
@@ -831,9 +853,10 @@ export function TaskChat({
                   <button
                     onClick={() => removePendingFile(i)}
                     className="w-4 h-4 rounded-full text-slate-400 hover:text-red-500 hover:bg-red-50 flex items-center justify-center text-[10px] shrink-0 transition-colors"
-                    title="Remove"
+                    title="Remove attachment"
+                    aria-label="Remove attachment"
                   >
-                    ×
+                    <AppIcon icon={X} size="xs" />
                   </button>
                 </div>
               )
@@ -850,16 +873,18 @@ export function TaskChat({
                 disabled={isUploading}
                 className="text-[10px] font-medium text-slate-400 hover:text-slate-600 transition-colors py-2 px-1.5 shrink-0 disabled:opacity-50"
                 title="Attach files"
+                aria-label="Attach files"
               >
-                📎
+                <AppIcon icon={Paperclip} size="sm" />
               </button>
               <button
                 onClick={openWhiteboardModal}
                 disabled={isUploading || isAttachingWhiteboard}
                 className="text-[10px] font-medium text-slate-400 hover:text-slate-600 transition-colors py-2 px-1.5 shrink-0 disabled:opacity-50"
                 title="Add Excalidraw sketch"
+                aria-label="Add Excalidraw sketch"
               >
-                ✏️
+                <AppIcon icon={PencilLine} size="sm" />
               </button>
               <input
                 ref={fileInputRef}
@@ -917,8 +942,34 @@ export function TaskChat({
                 ? 'bg-amber-500 text-white hover:bg-amber-600'
                 : 'bg-slate-700 text-white hover:bg-slate-600'
             }`}
+            aria-label={
+              isUploading
+                ? 'Uploading attachments'
+                : showSteerControls && sendMode === 'steer'
+                  ? 'Send steer message'
+                  : showSteerControls && sendMode === 'followUp'
+                    ? 'Send follow-up message'
+                    : 'Send message'
+            }
+            title={
+              isUploading
+                ? 'Uploading attachments'
+                : showSteerControls && sendMode === 'steer'
+                  ? 'Send steer message'
+                  : showSteerControls && sendMode === 'followUp'
+                    ? 'Send follow-up message'
+                    : 'Send message'
+            }
           >
-            {isUploading ? '…' : showSteerControls && sendMode === 'steer' ? '⚡' : '↩'}
+            {isUploading ? (
+              <AppIcon icon={Loader2} size="sm" className="animate-spin" />
+            ) : showSteerControls && sendMode === 'steer' ? (
+              <AppIcon icon={Zap} size="sm" />
+            ) : showSteerControls && sendMode === 'followUp' ? (
+              <AppIcon icon={CornerUpLeft} size="sm" />
+            ) : (
+              <AppIcon icon={SendHorizontal} size="sm" />
+            )}
           </button>
         </div>
       </div>
@@ -937,10 +988,11 @@ export function TaskChat({
               <button
                 type="button"
                 onClick={closeWhiteboardModal}
-                className="h-7 w-7 rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                className="h-7 w-7 rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-600 flex items-center justify-center"
                 title="Close"
+                aria-label="Close whiteboard"
               >
-                ×
+                <AppIcon icon={X} size="sm" />
               </button>
             </div>
 

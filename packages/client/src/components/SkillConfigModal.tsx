@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
+import { X } from 'lucide-react'
 import type { PostExecutionSkill, SkillConfigField } from '../types/pi'
+import { AppIcon } from './AppIcon'
 
 interface SkillConfigModalProps {
   skill: PostExecutionSkill
@@ -129,8 +131,10 @@ export function SkillConfigModal({ skill, savedValues, onSave, onClose }: SkillC
           <button
             onClick={onClose}
             className="w-6 h-6 rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-200 flex items-center justify-center text-sm transition-colors"
+            aria-label="Close skill configuration"
+            title="Close"
           >
-            ×
+            <AppIcon icon={X} size="sm" />
           </button>
         </div>
 

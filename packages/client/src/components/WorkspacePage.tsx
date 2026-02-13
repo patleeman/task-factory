@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { ArrowLeft } from 'lucide-react'
 import { useParams, useNavigate, useMatch } from 'react-router-dom'
 import type { Task, Workspace, ActivityEntry, Phase, QueueStatus, Shelf, PlanningMessage, QAAnswer, AgentExecutionStatus } from '@pi-factory/shared'
 import { api } from '../api'
+import { AppIcon } from './AppIcon'
 import { PipelineBar } from './PipelineBar'
 import { TaskDetailPane } from './TaskDetailPane'
 import { CreateTaskPane } from './CreateTaskPane'
@@ -515,7 +517,7 @@ export function WorkspacePage() {
       setQueueStatus(status)
     } catch (err) {
       console.error('Failed to toggle queue:', err)
-      showToast('Failed to toggle queue processing')
+      showToast('Failed to toggle auto-execution')
     } finally {
       setQueueToggling(false)
     }
@@ -557,9 +559,10 @@ export function WorkspacePage() {
           <p className="text-slate-600 font-medium mb-4">{error || 'Workspace not found'}</p>
           <button
             onClick={() => navigate('/')}
-            className="text-sm text-safety-orange hover:underline"
+            className="text-sm text-safety-orange hover:underline inline-flex items-center gap-1"
           >
-            ← Back to workspaces
+            <AppIcon icon={ArrowLeft} size="xs" />
+            Back to workspaces
           </button>
         </div>
       </div>
@@ -605,7 +608,7 @@ export function WorkspacePage() {
                 ? 'bg-green-500/20 text-green-400 hover:bg-green-500/30'
                 : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
             } ${queueToggling ? 'opacity-50 cursor-not-allowed' : ''}`}
-            title={queueStatus?.enabled ? 'Stop queue processing' : 'Start queue processing'}
+            title={queueStatus?.enabled ? 'Pause auto-execution' : 'Auto-execute ready tasks'}
           >
             {queueToggling ? (
               <span className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
@@ -619,10 +622,10 @@ export function WorkspacePage() {
                 <path d="M3 1.5v11l9-5.5z" />
               </svg>
             )}
-            {queueStatus?.enabled ? 'Queue On' : 'Queue Off'}
+            {queueStatus?.enabled ? 'Auto' : 'Auto'}
             {queueStatus?.enabled && queueStatus.tasksInReady > 0 && (
               <span className="bg-green-500/30 text-green-300 text-xs px-1.5 py-0.5 rounded-full">
-                {queueStatus.tasksInReady} queued
+                {queueStatus.tasksInReady} ready
               </span>
             )}
           </button>
@@ -711,9 +714,10 @@ export function WorkspacePage() {
                 <div className="flex items-center gap-2 px-4 h-10 border-b border-slate-200 bg-slate-50 shrink-0">
                   <button
                     onClick={() => navigate(workspaceRootPath)}
-                    className="text-slate-400 hover:text-slate-600 transition-colors text-xs font-medium"
+                    className="text-slate-400 hover:text-slate-600 transition-colors text-xs font-medium inline-flex items-center gap-1"
                   >
-                    ← Foreman
+                    <AppIcon icon={ArrowLeft} size="xs" />
+                    Foreman
                   </button>
                   <div className="h-4 w-px bg-slate-200" />
                   <span className="font-mono text-[10px] text-slate-400">{taskId}</span>
@@ -812,9 +816,10 @@ function TaskRouteMissingState({ onBack }: { onBack: () => void }) {
       <p className="text-sm mb-6">This task may have been deleted or moved.</p>
       <button
         onClick={onBack}
-        className="btn btn-secondary text-sm"
+        className="btn btn-secondary text-sm inline-flex items-center gap-1"
       >
-        ← Back to foreman
+        <AppIcon icon={ArrowLeft} size="xs" />
+        Back to foreman
       </button>
     </div>
   )

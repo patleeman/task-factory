@@ -1,7 +1,10 @@
 import { useState, useEffect } from 'react'
+import { ArrowLeft, Check, CheckCircle2 } from 'lucide-react'
 import { useParams, useNavigate } from 'react-router-dom'
 import type { PiSkill, PiExtension } from '../types/pi'
 import { api } from '../api'
+import { AppIcon } from './AppIcon'
+import { ThemeToggle } from './ThemeToggle'
 
 interface WorkspaceConfig {
   skills: {
@@ -200,12 +203,16 @@ export function WorkspaceConfigPage() {
           <div className="h-6 w-px bg-slate-700" />
           <span className="text-sm font-medium text-slate-300">Workspace Configuration</span>
         </div>
-        <button
-          onClick={() => navigate(`/workspace/${workspaceId}`)}
-          className="text-sm text-slate-400 hover:text-white transition-colors"
-        >
-          ← Back to Workspace
-        </button>
+        <div className="flex items-center gap-3">
+          <ThemeToggle />
+          <button
+            onClick={() => navigate(`/workspace/${workspaceId}`)}
+            className="text-sm text-slate-400 hover:text-white transition-colors inline-flex items-center gap-1"
+          >
+            <AppIcon icon={ArrowLeft} size="xs" />
+            Back to Workspace
+          </button>
+        </div>
       </header>
 
       {/* Content */}
@@ -304,7 +311,7 @@ export function WorkspaceConfigPage() {
                           : 'border-slate-300'
                       }`}
                     >
-                      {isEnabled && '✓'}
+                      {isEnabled && <AppIcon icon={Check} size="xs" className="text-white" />}
                     </div>
                   </div>
                 )
@@ -362,7 +369,7 @@ export function WorkspaceConfigPage() {
                           : 'border-slate-300'
                       }`}
                     >
-                      {isEnabled && '✓'}
+                      {isEnabled && <AppIcon icon={Check} size="xs" className="text-white" />}
                     </div>
                   </div>
                 )
@@ -395,7 +402,7 @@ export function WorkspaceConfigPage() {
                   setSaveStatus('idle')
                 }}
                 placeholder="Add persistent workspace notes, constraints, architecture decisions, or conventions..."
-                className="w-full min-h-[360px] p-3 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-safety-orange focus:border-safety-orange font-mono"
+                className="w-full min-h-[360px] p-3 text-sm border border-slate-300 bg-white text-slate-800 placeholder-slate-400 rounded-lg focus:outline-none focus:ring-2 focus:ring-safety-orange focus:border-safety-orange font-mono"
                 spellCheck={false}
               />
             </div>
@@ -440,7 +447,7 @@ export function WorkspaceConfigPage() {
                       value={deleteConfirmText}
                       onChange={(e) => setDeleteConfirmText(e.target.value)}
                       placeholder={workspaceName}
-                      className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-400 focus:border-red-400 mb-3"
+                      className="w-full px-3 py-2 text-sm border border-slate-300 bg-white text-slate-800 placeholder-slate-400 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-400 focus:border-red-400 mb-3"
                       autoComplete="off"
                       spellCheck={false}
                     />
@@ -480,7 +487,10 @@ export function WorkspaceConfigPage() {
           <div className="flex items-center justify-between mt-8 pt-6 border-t border-slate-200">
             <div className="text-sm">
               {saveStatus === 'saved' && (
-                <span className="text-green-600">✓ Configuration saved</span>
+                <span className="text-green-600 inline-flex items-center gap-1">
+                  <AppIcon icon={CheckCircle2} size="xs" />
+                  Configuration saved
+                </span>
               )}
               {saveStatus === 'error' && (
                 <span className="text-red-600">Failed to save configuration</span>

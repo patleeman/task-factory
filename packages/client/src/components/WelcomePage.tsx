@@ -1,7 +1,10 @@
 import { useState, useEffect } from 'react'
+import { ArrowRight, ArrowUp } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import type { Workspace } from '@pi-factory/shared'
 import { api } from '../api'
+import { AppIcon } from './AppIcon'
+import { ThemeToggle } from './ThemeToggle'
 
 interface FolderEntry {
   name: string
@@ -55,7 +58,7 @@ function FolderBrowser({ onSelect, onCancel }: { onSelect: (path: string) => voi
             onClick={() => browse(parentPath)}
             className="w-full text-left px-4 py-2 text-sm hover:bg-slate-50 text-slate-500 flex items-center gap-2 border-b border-slate-100"
           >
-            <span>↑</span>
+            <AppIcon icon={ArrowUp} size="sm" />
             <span>..</span>
           </button>
         )}
@@ -142,10 +145,9 @@ export function WelcomePage() {
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
       {/* Header */}
-      <header className="flex items-center justify-center px-4 py-6 shrink-0">
-        <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold tracking-tight text-slate-800">PI-FACTORY</h1>
-        </div>
+      <header className="flex items-center justify-between px-4 py-6 shrink-0">
+        <h1 className="text-2xl font-bold tracking-tight text-slate-800">PI-FACTORY</h1>
+        <ThemeToggle className="border-slate-300 bg-white text-slate-700 hover:bg-slate-100 hover:text-slate-900" />
       </header>
 
       {/* Content */}
@@ -173,8 +175,8 @@ export function WelcomePage() {
                           {ws.path}
                         </div>
                       </div>
-                      <span className="text-slate-300 group-hover:text-safety-orange transition-colors text-lg ml-3 shrink-0">
-                        →
+                      <span className="text-slate-300 group-hover:text-safety-orange transition-colors ml-3 shrink-0">
+                        <AppIcon icon={ArrowRight} size="md" />
                       </span>
                     </div>
                   </button>

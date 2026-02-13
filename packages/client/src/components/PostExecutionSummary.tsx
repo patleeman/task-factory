@@ -1,6 +1,16 @@
 import { useEffect, useState } from 'react'
+import {
+  ArrowUpRight,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Circle,
+  RotateCcw,
+  XCircle,
+} from 'lucide-react'
 import type { PostExecutionSummary as PostExecutionSummaryType, FileDiff, DiffHunk, CriterionValidation, SummaryArtifact } from '@pi-factory/shared'
 import { api } from '../api'
+import { AppIcon } from './AppIcon'
 
 interface PostExecutionSummaryProps {
   summary: PostExecutionSummaryType
@@ -65,8 +75,16 @@ export function PostExecutionSummary({
             title="Regenerate summary using the agent session"
           >
             {isRegenerating ? (
-              <><span className="inline-block w-2.5 h-2.5 border border-emerald-500 border-t-transparent rounded-full animate-spin" />Regenerating…</>
-            ) : '↻ Regenerate'}
+              <>
+                <span className="inline-block w-2.5 h-2.5 border border-emerald-500 border-t-transparent rounded-full animate-spin" />
+                Regenerating…
+              </>
+            ) : (
+              <>
+                <AppIcon icon={RotateCcw} size="xs" />
+                Regenerate
+              </>
+            )}
           </button>
         </div>
         <p className="text-sm text-slate-700 leading-relaxed">{summary.summary}</p>
@@ -204,10 +222,10 @@ function CriterionRow({ criterion }: { criterion: CriterionValidation }) {
 
   return (
     <li className="flex items-start gap-2.5 py-1.5">
-      <span className={`shrink-0 mt-0.5 text-sm ${
+      <span className={`shrink-0 mt-0.5 ${
         isPassing ? 'text-emerald-500' : isFailing ? 'text-red-500' : 'text-slate-300'
       }`}>
-        {isPassing ? '✓' : isFailing ? '✗' : '○'}
+        <AppIcon icon={isPassing ? CheckCircle2 : isFailing ? XCircle : Circle} size="sm" />
       </span>
       <div className="flex-1 min-w-0">
         <p className={`text-sm ${isFailing ? 'text-red-700' : 'text-slate-700'}`}>
@@ -243,7 +261,9 @@ function FileDiffView({
         onClick={onToggle}
         className="w-full flex items-center gap-2 px-3 py-2 bg-slate-50 hover:bg-slate-100 text-left transition-colors"
       >
-        <span className="text-xs text-slate-400">{isExpanded ? '▼' : '▶'}</span>
+        <span className="text-xs text-slate-400">
+          <AppIcon icon={isExpanded ? ChevronDown : ChevronRight} size="xs" />
+        </span>
         <span className="text-xs font-mono text-slate-700 truncate flex-1">{diff.filePath}</span>
         <span className="flex items-center gap-2 shrink-0">
           {addCount > 0 && <span className="text-[10px] text-emerald-600 font-medium">+{addCount}</span>}
@@ -303,7 +323,9 @@ function ArtifactsGallery({ artifacts }: { artifacts: SummaryArtifact[] }) {
             <span className="text-sm text-slate-700 group-hover:text-blue-700 truncate">
               {artifact.name}
             </span>
-            <span className="text-slate-300 group-hover:text-blue-400 ml-auto shrink-0">→</span>
+            <span className="text-slate-300 group-hover:text-blue-400 ml-auto shrink-0">
+              <AppIcon icon={ArrowUpRight} size="sm" />
+            </span>
           </a>
         ))}
       </div>

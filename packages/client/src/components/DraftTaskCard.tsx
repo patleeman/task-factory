@@ -1,5 +1,7 @@
 import { useState } from 'react'
+import { ArrowRight } from 'lucide-react'
 import type { DraftTask } from '@pi-factory/shared'
+import { AppIcon } from './AppIcon'
 
 interface DraftTaskCardProps {
   draft: DraftTask
@@ -99,7 +101,10 @@ export function DraftTaskCard({ draft, onPush, onRemove, onUpdate }: DraftTaskCa
             </>
           ) : (
             <>
-              <button onClick={onPush} className="text-xs px-2.5 py-1 rounded bg-blue-600 text-white hover:bg-blue-700 font-medium">Push to backlog →</button>
+              <button onClick={onPush} className="text-xs px-2.5 py-1 rounded bg-blue-600 text-white hover:bg-blue-700 font-medium inline-flex items-center gap-1">
+                Push to backlog
+                <AppIcon icon={ArrowRight} size="xs" />
+              </button>
               <button onClick={() => setIsEditing(true)} className="text-xs px-2.5 py-1 rounded bg-slate-100 text-slate-600 hover:bg-slate-200 font-medium">Edit</button>
               <button onClick={onRemove} className="text-xs text-red-500 hover:text-red-700 ml-auto font-medium">Remove</button>
             </>

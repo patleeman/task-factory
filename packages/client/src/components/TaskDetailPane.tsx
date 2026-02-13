@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { ArrowLeft, ArrowRight, Check, ChevronDown, ExternalLink, RotateCcw, X } from 'lucide-react'
 import type { Task, Phase, ModelConfig, ExecutionWrapper, PostExecutionSummary as PostExecutionSummaryType } from '@pi-factory/shared'
 import { PHASES, PHASE_DISPLAY_NAMES, getPromotePhase, getDemotePhase } from '@pi-factory/shared'
+import { AppIcon } from './AppIcon'
 import { MarkdownEditor } from './MarkdownEditor'
 import { InlineWhiteboardPanel } from './InlineWhiteboardPanel'
 import { createWhiteboardAttachmentFilename, exportWhiteboardPngFile, hasWhiteboardContent, type WhiteboardSceneSnapshot } from './whiteboard'
@@ -168,9 +170,10 @@ export function TaskDetailPane({
               <button
                 onClick={() => demoteTo && onMove(demoteTo)}
                 disabled={!demoteTo}
-                className="btn text-xs py-1 px-2.5 bg-slate-100 text-slate-600 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed"
+                className="btn text-xs py-1 px-2.5 bg-slate-100 text-slate-600 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1"
               >
-                ← {demoteTo ? PHASE_DISPLAY_NAMES[demoteTo] : 'None'}
+                <AppIcon icon={ArrowLeft} size="xs" />
+                {demoteTo ? PHASE_DISPLAY_NAMES[demoteTo] : 'None'}
               </button>
             );
           })()}
@@ -181,18 +184,20 @@ export function TaskDetailPane({
               <button
                 onClick={() => promoteTo && onMove(promoteTo)}
                 disabled={!promoteTo}
-                className="btn text-xs py-1 px-2.5 bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                className="btn text-xs py-1 px-2.5 bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1"
               >
-                {promoteTo ? PHASE_DISPLAY_NAMES[promoteTo] : 'None'} →
+                {promoteTo ? PHASE_DISPLAY_NAMES[promoteTo] : 'None'}
+                <AppIcon icon={ArrowRight} size="xs" />
               </button>
             );
           })()}
           <div className="relative">
             <button
               onClick={() => setShowMoveMenu(!showMoveMenu)}
-              className="btn btn-secondary text-xs py-1 px-2.5"
+              className="btn btn-secondary text-xs py-1 px-2.5 inline-flex items-center gap-1"
             >
-              Move ▾
+              Move
+              <AppIcon icon={ChevronDown} size="xs" />
             </button>
             {showMoveMenu && (
               <div className="absolute right-0 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-10 min-w-[150px]">
@@ -472,9 +477,16 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
                 <button
                   onClick={handleRegeneratePlan}
                   disabled={isRegeneratingPlan}
-                  className="btn text-xs py-1.5 px-3 bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="btn text-xs py-1.5 px-3 bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1"
                 >
-                  {isRegeneratingPlan ? 'Regenerating…' : '↻ Regenerate Plan'}
+                  {isRegeneratingPlan ? (
+                    'Regenerating…'
+                  ) : (
+                    <>
+                      <AppIcon icon={RotateCcw} size="xs" />
+                      Regenerate Plan
+                    </>
+                  )}
                 </button>
                 {planRegenerationError && (
                   <span className="text-xs text-red-600">{planRegenerationError}</span>
@@ -515,7 +527,14 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
                   <h4 className="text-xs font-semibold text-slate-600 mb-1">Validation</h4>
                   <ul className="space-y-1.5">
                     {frontmatter.plan.validation.map((item: string, i: number) => (
-                      <li key={i} className="flex items-start gap-2 text-sm text-slate-700"><span className="text-green-500 shrink-0 mt-0.5">✓</span><div className="prose prose-slate prose-sm max-w-none min-w-0 [&>p]:m-0"><ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{item}</ReactMarkdown></div></li>
+                      <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
+                        <span className="text-green-500 shrink-0 mt-0.5">
+                          <AppIcon icon={Check} size="xs" />
+                        </span>
+                        <div className="prose prose-slate prose-sm max-w-none min-w-0 [&>p]:m-0">
+                          <ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{item}</ReactMarkdown>
+                        </div>
+                      </li>
                     ))}
                   </ul>
                 </div>
@@ -542,9 +561,16 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
                 <button
                   onClick={handleRegenerateAcceptanceCriteria}
                   disabled={isRegeneratingCriteria}
-                  className="btn text-xs py-1 px-2.5 bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="btn text-xs py-1 px-2.5 bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1"
                 >
-                  {isRegeneratingCriteria ? 'Regenerating…' : '↻ Regenerate Criteria'}
+                  {isRegeneratingCriteria ? (
+                    'Regenerating…'
+                  ) : (
+                    <>
+                      <AppIcon icon={RotateCcw} size="xs" />
+                      Regenerate Criteria
+                    </>
+                  )}
                 </button>
               )}
             </div>
@@ -612,7 +638,20 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
           </div>
         )}
         {frontmatter.branch && <div className="flex justify-between"><span>Branch</span><span className="font-mono">{frontmatter.branch}</span></div>}
-        {frontmatter.prUrl && <div className="flex justify-between"><span>PR</span><a href={frontmatter.prUrl} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">View PR →</a></div>}
+        {frontmatter.prUrl && (
+          <div className="flex justify-between">
+            <span>PR</span>
+            <a
+              href={frontmatter.prUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-500 hover:underline inline-flex items-center gap-1"
+            >
+              View PR
+              <AppIcon icon={ExternalLink} size="xs" />
+            </a>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -852,8 +891,9 @@ function AttachmentsSection({ task, workspaceId }: { task: Task; workspaceId: st
                   onClick={() => handleDelete(att.id)}
                   className="absolute top-1 right-1 w-5 h-5 rounded-full bg-red-500 text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600"
                   title="Delete attachment"
+                  aria-label="Delete attachment"
                 >
-                  ×
+                  <AppIcon icon={X} size="xs" />
                 </button>
               </div>
             )
@@ -870,8 +910,10 @@ function AttachmentsSection({ task, workspaceId }: { task: Task; workspaceId: st
           <button
             onClick={() => setPreviewUrl(null)}
             className="absolute top-4 right-4 w-8 h-8 rounded-full bg-white/20 text-white text-lg flex items-center justify-center hover:bg-white/30"
+            aria-label="Close preview"
+            title="Close preview"
           >
-            ×
+            <AppIcon icon={X} size="md" />
           </button>
           <img
             src={previewUrl}
@@ -899,8 +941,9 @@ function AttachmentsSection({ task, workspaceId }: { task: Task; workspaceId: st
                 onClick={() => setIsWhiteboardModalOpen(false)}
                 className="h-7 w-7 rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-600 flex items-center justify-center"
                 title="Close"
+                aria-label="Close whiteboard"
               >
-                ×
+                <AppIcon icon={X} size="sm" />
               </button>
             </div>
             <div className="p-4">

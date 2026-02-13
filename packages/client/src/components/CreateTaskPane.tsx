@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react'
+import { ArrowLeft, X } from 'lucide-react'
 import type { ModelConfig, NewTaskFormState, TaskDefaults, ExecutionWrapper } from '@pi-factory/shared'
 import { DEFAULT_PRE_EXECUTION_SKILLS, DEFAULT_POST_EXECUTION_SKILLS } from '@pi-factory/shared'
+import { AppIcon } from './AppIcon'
 import { MarkdownEditor } from './MarkdownEditor'
 import { ModelSelector } from './ModelSelector'
 import { ExecutionPipelineEditor } from './ExecutionPipelineEditor'
@@ -410,9 +412,10 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
                   type="button"
                   onClick={() => removeFile(i)}
                   className="w-5 h-5 rounded-full text-slate-400 hover:text-red-500 hover:bg-red-50 flex items-center justify-center text-xs shrink-0 transition-colors"
-                  title="Remove"
+                  title="Remove attachment"
+                  aria-label="Remove attachment"
                 >
-                  ×
+                  <AppIcon icon={X} size="xs" />
                 </button>
               </div>
             )
@@ -487,9 +490,10 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
         <div className="flex items-center gap-3">
           <button
             onClick={onCancel}
-            className="text-slate-400 hover:text-slate-600 transition-colors text-sm"
+            className="text-slate-400 hover:text-slate-600 transition-colors text-sm inline-flex items-center gap-1"
           >
-            ← Back
+            <AppIcon icon={ArrowLeft} size="xs" />
+            Back
           </button>
           <h2 className="font-semibold text-sm text-slate-800">New Task</h2>
         </div>
@@ -574,8 +578,9 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
                 onClick={closeWhiteboardModal}
                 className="h-7 w-7 rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-600 flex items-center justify-center"
                 title="Close"
+                aria-label="Close whiteboard"
               >
-                ×
+                <AppIcon icon={X} size="sm" />
               </button>
             </div>
             <div className="p-4">

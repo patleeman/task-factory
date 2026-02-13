@@ -1,7 +1,9 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
+import { ArrowRight, ChevronLeft, ChevronRight, Undo2 } from 'lucide-react'
 import { createPortal } from 'react-dom'
 import type { Task, Phase } from '@pi-factory/shared'
 import { PHASE_DISPLAY_NAMES } from '@pi-factory/shared'
+import { AppIcon } from './AppIcon'
 
 interface PipelineBarProps {
   tasks: Task[]
@@ -138,7 +140,7 @@ export function PipelineBar({
 
   const getAdvanceAction = (task: Task): { label: string; toPhase: Phase } | null => {
     switch (task.frontmatter.phase) {
-      case 'backlog': return { label: 'Ready →', toPhase: 'ready' }
+      case 'backlog': return { label: 'Ready', toPhase: 'ready' }
       default: return null
     }
   }
@@ -430,7 +432,6 @@ function PipelineScrollControl({
   disabled: boolean
   onClick: () => void
 }) {
-  const arrow = direction === 'left' ? '←' : '→'
   const label = direction === 'left' ? 'Scroll pipeline left' : 'Scroll pipeline right'
 
   return (
@@ -438,11 +439,12 @@ function PipelineScrollControl({
       <button
         type="button"
         aria-label={label}
+        title={label}
         onClick={onClick}
         disabled={disabled}
-        className="h-[88px] w-8 rounded-md border border-slate-200 bg-white/70 text-slate-500 hover:bg-white hover:text-slate-700 transition-colors disabled:opacity-35 disabled:cursor-default"
+        className="h-[88px] w-8 rounded-md border border-slate-200 bg-white/70 text-slate-500 hover:bg-white hover:text-slate-700 transition-colors disabled:opacity-35 disabled:cursor-default flex items-center justify-center"
       >
-        {arrow}
+        <AppIcon icon={direction === 'left' ? ChevronLeft : ChevronRight} size="sm" />
       </button>
     </div>
   )
@@ -558,9 +560,10 @@ function PipelineCard({
               e.stopPropagation()
               onMoveTask(task, advanceAction.toPhase)
             }}
-            className="text-[11px] px-2 py-0.5 rounded bg-white/60 hover:bg-white text-slate-600 font-medium transition-colors"
+            className="text-[11px] px-2 py-0.5 rounded bg-white/60 hover:bg-white text-slate-600 font-medium transition-colors inline-flex items-center gap-1"
           >
             {advanceAction.label}
+            <AppIcon icon={ArrowRight} size="xs" />
           </button>
         )}
 
@@ -638,9 +641,10 @@ function ArchivedPopover({
                 </button>
                 <button
                   onClick={(e) => { e.stopPropagation(); onRestore(task) }}
-                  className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 hover:bg-blue-100 text-slate-500 hover:text-blue-600 transition-colors shrink-0"
+                  className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 hover:bg-blue-100 text-slate-500 hover:text-blue-600 transition-colors shrink-0 inline-flex items-center gap-1"
                 >
-                  ↩ Restore
+                  <AppIcon icon={Undo2} size="xs" />
+                  Restore
                 </button>
               </div>
             ))}

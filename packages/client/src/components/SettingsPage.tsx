@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { ArrowLeft } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import {
   DEFAULT_PLANNING_GUARDRAILS,
@@ -15,6 +16,7 @@ import {
   type PiProviderAuthState,
   type PiFactorySettings,
 } from '../api'
+import { AppIcon } from './AppIcon'
 import { ExecutionPipelineEditor } from './ExecutionPipelineEditor'
 import { ModelSelector } from './ModelSelector'
 import { SkillManagementPanel } from './SkillManagementPanel'
@@ -428,9 +430,10 @@ export function SettingsPage() {
           <ThemeToggle />
           <button
             onClick={() => navigate(-1)}
-            className="text-sm text-slate-400 hover:text-white transition-colors"
+            className="text-sm text-slate-400 hover:text-white transition-colors inline-flex items-center gap-1"
           >
-            ← Back
+            <AppIcon icon={ArrowLeft} size="xs" />
+            Back
           </button>
         </div>
       </header>

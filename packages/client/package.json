@@ -20,6 +20,7 @@
     "@pi-factory/shared": "file:../shared",
     "codemirror": "^6.0.2",
     "date-fns": "^3.6.0",
+    "lucide-react": "^0.536.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-markdown": "^9.0.0",
