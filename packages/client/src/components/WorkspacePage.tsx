@@ -13,6 +13,7 @@ import { usePlanningStreaming, PLANNING_TASK_ID } from '../hooks/usePlanningStre
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts'
 import { TaskChat } from './TaskChat'
 import { QADialog } from './QADialog'
+import { ThemeToggle } from './ThemeToggle'
 
 const LEFT_PANE_MIN = 320
 const LEFT_PANE_MAX = 1400
@@ -87,12 +88,13 @@ export function WorkspacePage() {
 
   useEffect(() => {
     setRunningExecutionTaskIds((prev) => {
-      const existingTaskIds = new Set(tasks.map((task) => task.id))
+      const tasksById = new Map(tasks.map((task) => [task.id, task]))
 
       let changed = false
       const next = new Set<string>()
       for (const taskId of prev) {
-        if (existingTaskIds.has(taskId)) {
+        const task = tasksById.get(taskId)
+        if (task && task.frontmatter.phase === 'executing') {
           next.add(taskId)
         } else {
           changed = true
@@ -154,11 +156,15 @@ export function WorkspacePage() {
         setShelf(shelfData)
         setPlanningMessages(planningMsgs)
 
-        const taskIds = new Set(tasksData.map((task) => task.id))
+        const tasksById = new Map(tasksData.map((task) => [task.id, task]))
 
         setRunningExecutionTaskIds(new Set(
           activeExecutions
-            .filter((session) => session.isRunning && taskIds.has(session.taskId))
+            .filter((session) => {
+              if (!session.isRunning) return false
+              const task = tasksById.get(session.taskId)
+              return task?.frontmatter.phase === 'executing'
+            })
             .map((session) => session.taskId),
         ))
         setIsLoading(false)
@@ -254,11 +260,12 @@ export function WorkspacePage() {
           setQueueStatus(msg.status)
           break
         case 'agent:execution_status': {
-          const taskExists = tasksByIdRef.current.has(msg.taskId)
+          const task = tasksByIdRef.current.get(msg.taskId)
 
           setRunningExecutionTaskIds((prev) => {
             const next = new Set(prev)
-            if (!taskExists) {
+
+            if (!task || task.frontmatter.phase !== 'executing') {
               next.delete(msg.taskId)
               return next
             }
@@ -280,7 +287,7 @@ export function WorkspacePage() {
   }, [subscribe])
 
   // Create task
-  const handleCreateTask = async (data: { content: string; preExecutionSkills?: string[]; postExecutionSkills?: string[]; skillConfigs?: Record<string, Record<string, string>>; modelConfig?: import('@pi-factory/shared').ModelConfig; pendingFiles?: File[] }) => {
+  const handleCreateTask = async (data: { content: string; preExecutionSkills?: string[]; postExecutionSkills?: string[]; skillConfigs?: Record<string, Record<string, string>>; planningModelConfig?: import('@pi-factory/shared').ModelConfig; executionModelConfig?: import('@pi-factory/shared').ModelConfig; pendingFiles?: File[] }) => {
     if (!workspaceId) return
     try {
       const { pendingFiles, ...taskData } = data
@@ -622,6 +629,7 @@ export function WorkspacePage() {
         </div>
 
         <div className="flex items-center gap-3">
+          <ThemeToggle />
           {isConnected ? (
             <span className="flex items-center gap-1.5 text-xs text-green-400">
               <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />

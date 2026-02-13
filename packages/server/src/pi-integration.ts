@@ -12,7 +12,7 @@ import {
 } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
-import type { TaskDefaults } from '@pi-factory/shared';
+import type { TaskDefaults, PlanningGuardrails } from '@pi-factory/shared';
 
 const PI_AGENT_DIR = join(homedir(), '.pi', 'agent');
 const PI_FACTORY_DIR = join(homedir(), '.pi', 'factory');
@@ -32,6 +32,8 @@ export interface PiFactorySettings {
   theme?: string;
   // Task creation defaults
   taskDefaults?: TaskDefaults;
+  // Planning run guardrails
+  planningGuardrails?: Partial<PlanningGuardrails>;
   // Skill configuration
   skills?: {
     enabled: string[];

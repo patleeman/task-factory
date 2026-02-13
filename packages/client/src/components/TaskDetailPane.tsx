@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import type { Task, Phase, ModelConfig, PostExecutionSummary as PostExecutionSummaryType } from '@pi-factory/shared'
+import type { Task, Phase, ModelConfig, ExecutionWrapper, PostExecutionSummary as PostExecutionSummaryType } from '@pi-factory/shared'
 import { PHASES, PHASE_DISPLAY_NAMES, getPromotePhase, getDemotePhase } from '@pi-factory/shared'
 import { MarkdownEditor } from './MarkdownEditor'
 import { InlineWhiteboardPanel } from './InlineWhiteboardPanel'
 import { buildWhiteboardSceneSignature, createWhiteboardAttachmentFilename, exportWhiteboardPngFile, hasWhiteboardContent, isWhiteboardAttachmentFilename, loadStoredWhiteboardScene, loadWhiteboardSceneFromBlob, persistWhiteboardScene, type WhiteboardSceneSnapshot } from './whiteboard'
 import type { PostExecutionSkill } from '../types/pi'
-import { SkillSelector } from './SkillSelector'
 import { ModelSelector } from './ModelSelector'
+import { ExecutionPipelineEditor } from './ExecutionPipelineEditor'
 import { PostExecutionSummary, GenerateSummaryButton } from './PostExecutionSummary'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -43,14 +43,22 @@ export function TaskDetailPane({
     formatAcceptanceCriteriaForEditor(task.frontmatter.acceptanceCriteria)
   )
   const [availableSkills, setAvailableSkills] = useState<PostExecutionSkill[]>([])
+  const [availableWrappers, setAvailableWrappers] = useState<ExecutionWrapper[]>([])
   const [selectedPreSkillIds, setSelectedPreSkillIds] = useState<string[]>(
     task.frontmatter.preExecutionSkills || []
   )
   const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>(
     task.frontmatter.postExecutionSkills || []
   )
-  const [editedModelConfig, setEditedModelConfig] = useState<ModelConfig | undefined>(
-    task.frontmatter.modelConfig
+  const [selectedWrapperId, setSelectedWrapperId] = useState<string>('')
+  const [editedPlanningModelConfig, setEditedPlanningModelConfig] = useState<ModelConfig | undefined>(
+    task.frontmatter.planningModelConfig
+      ?? task.frontmatter.executionModelConfig
+      ?? task.frontmatter.modelConfig
+  )
+  const [editedExecutionModelConfig, setEditedExecutionModelConfig] = useState<ModelConfig | undefined>(
+    task.frontmatter.executionModelConfig
+      ?? task.frontmatter.modelConfig
   )
   const [editedSkillConfigs, setEditedSkillConfigs] = useState<Record<string, Record<string, string>>>(
     task.frontmatter.skillConfigs || {}
@@ -63,12 +71,17 @@ export function TaskDetailPane({
     moveError?.toLowerCase().includes('acceptance criteria') &&
     frontmatter.acceptanceCriteria.length === 0
 
-  // Fetch available post-execution skills
+  // Fetch available skills and wrappers
   useEffect(() => {
     fetch('/api/factory/skills')
       .then(r => r.json())
       .then(setAvailableSkills)
       .catch(err => console.error('Failed to load post-execution skills:', err))
+
+    fetch('/api/wrappers')
+      .then(r => r.json())
+      .then(setAvailableWrappers)
+      .catch(err => console.error('Failed to load execution wrappers:', err))
   }, [])
 
   // Reset edit state when task changes
@@ -79,7 +92,16 @@ export function TaskDetailPane({
     setEditedCriteria(formatAcceptanceCriteriaForEditor(task.frontmatter.acceptanceCriteria))
     setSelectedPreSkillIds(task.frontmatter.preExecutionSkills || [])
     setSelectedSkillIds(task.frontmatter.postExecutionSkills || [])
-    setEditedModelConfig(task.frontmatter.modelConfig)
+    setSelectedWrapperId('')
+    setEditedPlanningModelConfig(
+      task.frontmatter.planningModelConfig
+        ?? task.frontmatter.executionModelConfig
+        ?? task.frontmatter.modelConfig
+    )
+    setEditedExecutionModelConfig(
+      task.frontmatter.executionModelConfig
+        ?? task.frontmatter.modelConfig
+    )
     setEditedSkillConfigs(task.frontmatter.skillConfigs || {})
   }, [task.id])
 
@@ -100,7 +122,8 @@ export function TaskDetailPane({
           preExecutionSkills: selectedPreSkillIds,
           postExecutionSkills: selectedSkillIds,
           skillConfigs: Object.keys(editedSkillConfigs).length > 0 ? editedSkillConfigs : undefined,
-          modelConfig: editedModelConfig,
+          planningModelConfig: editedPlanningModelConfig,
+          executionModelConfig: editedExecutionModelConfig,
         }),
       })
       setIsEditing(false)
@@ -215,8 +238,10 @@ export function TaskDetailPane({
           setEditedContent={setEditedContent}
           editedCriteria={editedCriteria}
           setEditedCriteria={setEditedCriteria}
-          editedModelConfig={editedModelConfig}
-          setEditedModelConfig={setEditedModelConfig}
+          editedPlanningModelConfig={editedPlanningModelConfig}
+          setEditedPlanningModelConfig={setEditedPlanningModelConfig}
+          editedExecutionModelConfig={editedExecutionModelConfig}
+          setEditedExecutionModelConfig={setEditedExecutionModelConfig}
           selectedPreSkillIds={selectedPreSkillIds}
           setSelectedPreSkillIds={setSelectedPreSkillIds}
           selectedSkillIds={selectedSkillIds}
@@ -224,6 +249,9 @@ export function TaskDetailPane({
           editedSkillConfigs={editedSkillConfigs}
           setEditedSkillConfigs={setEditedSkillConfigs}
           availableSkills={availableSkills}
+          availableWrappers={availableWrappers}
+          selectedWrapperId={selectedWrapperId}
+          setSelectedWrapperId={setSelectedWrapperId}
           missingAcceptanceCriteria={missingAcceptanceCriteria}
           isPlanGenerating={isPlanGenerating}
           onSaveEdit={handleSaveEdit}
@@ -238,17 +266,21 @@ export function TaskDetailPane({
 // Details Content — shared between tabbed and side-by-side layouts
 // =============================================================================
 
-function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditing, editedTitle, setEditedTitle, editedContent, setEditedContent, editedCriteria, setEditedCriteria, editedModelConfig, setEditedModelConfig, selectedPreSkillIds, setSelectedPreSkillIds, selectedSkillIds, setSelectedSkillIds, editedSkillConfigs, setEditedSkillConfigs, availableSkills, missingAcceptanceCriteria, isPlanGenerating, onSaveEdit, onDelete }: any) {
+function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditing, editedTitle, setEditedTitle, editedContent, setEditedContent, editedCriteria, setEditedCriteria, editedPlanningModelConfig, setEditedPlanningModelConfig, editedExecutionModelConfig, setEditedExecutionModelConfig, selectedPreSkillIds, setSelectedPreSkillIds, selectedSkillIds, setSelectedSkillIds, editedSkillConfigs, setEditedSkillConfigs, availableSkills, availableWrappers, selectedWrapperId, setSelectedWrapperId, missingAcceptanceCriteria, isPlanGenerating, onSaveEdit, onDelete }: any) {
   const isCompleted = frontmatter.phase === 'complete' || frontmatter.phase === 'archived'
   const hasSummary = Boolean(task.frontmatter.postExecutionSummary)
   const displayAcceptanceCriteria = normalizeAcceptanceCriteria(frontmatter.acceptanceCriteria)
   const [isRegeneratingPlan, setIsRegeneratingPlan] = useState(false)
   const [planRegenerationError, setPlanRegenerationError] = useState<string | null>(null)
+  const [isRegeneratingCriteria, setIsRegeneratingCriteria] = useState(false)
+  const [criteriaRegenerationError, setCriteriaRegenerationError] = useState<string | null>(null)
 
   useEffect(() => {
     setPlanRegenerationError(null)
     setIsRegeneratingPlan(false)
-  }, [task.id, frontmatter.plan?.generatedAt, frontmatter.planningStatus])
+    setCriteriaRegenerationError(null)
+    setIsRegeneratingCriteria(false)
+  }, [task.id, frontmatter.plan?.generatedAt, frontmatter.planningStatus, frontmatter.acceptanceCriteria])
 
   const handleRegeneratePlan = async () => {
     setPlanRegenerationError(null)
@@ -260,6 +292,22 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
       setPlanRegenerationError(err instanceof Error ? err.message : 'Failed to regenerate plan')
     } finally {
       setIsRegeneratingPlan(false)
+    }
+  }
+
+  const handleRegenerateAcceptanceCriteria = async () => {
+    setCriteriaRegenerationError(null)
+    setIsRegeneratingCriteria(true)
+
+    try {
+      const criteria = await api.regenerateAcceptanceCriteria(workspaceId, task.id)
+      if (criteria.length === 0) {
+        setCriteriaRegenerationError('No acceptance criteria were generated. Try again after adding more task context.')
+      }
+    } catch (err) {
+      setCriteriaRegenerationError(err instanceof Error ? err.message : 'Failed to regenerate acceptance criteria')
+    } finally {
+      setIsRegeneratingCriteria(false)
     }
   }
 
@@ -286,77 +334,90 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
       </div>
 
       {/* Model Configuration */}
-      {(isEditing || frontmatter.modelConfig) && (
-        <div>
-          <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Model</h3>
+      {(isEditing || frontmatter.planningModelConfig || frontmatter.executionModelConfig || frontmatter.modelConfig) && (
+        <div className="space-y-3">
+          <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Models</h3>
           {isEditing ? (
-            <ModelSelector value={editedModelConfig} onChange={setEditedModelConfig} />
-          ) : frontmatter.modelConfig ? (
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-blue-50 border border-blue-200 text-xs font-medium text-blue-700">
-                <span className="text-blue-400">{frontmatter.modelConfig.provider}</span>
-                <span className="text-blue-300">/</span>
-                {frontmatter.modelConfig.modelId}
-              </span>
-              {frontmatter.modelConfig.thinkingLevel && (
-                <span className="inline-flex items-center px-2 py-1 rounded-md bg-purple-50 border border-purple-200 text-xs font-medium text-purple-700">
-                  reasoning: {frontmatter.modelConfig.thinkingLevel}
-                </span>
-              )}
+            <div className="grid gap-3 md:grid-cols-2">
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Planning Model</label>
+                <ModelSelector value={editedPlanningModelConfig} onChange={setEditedPlanningModelConfig} />
+              </div>
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Execution Model</label>
+                <ModelSelector value={editedExecutionModelConfig} onChange={setEditedExecutionModelConfig} />
+              </div>
             </div>
-          ) : null}
+          ) : (
+            <div className="space-y-2">
+              <ModelBadgeRow
+                label="Planning"
+                model={frontmatter.planningModelConfig ?? frontmatter.executionModelConfig ?? frontmatter.modelConfig}
+              />
+              <ModelBadgeRow
+                label="Execution"
+                model={frontmatter.executionModelConfig ?? frontmatter.modelConfig}
+              />
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Execution Pipeline (editing) */}
+      {isEditing && (
+        <div>
+          <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Execution Pipeline</h3>
+          <p className="text-xs text-slate-400 mb-2">Add skills or wrappers, then drag cards to pre/post lanes to control execution order.</p>
+          <ExecutionPipelineEditor
+            availableSkills={availableSkills}
+            availableWrappers={availableWrappers}
+            selectedPreSkillIds={selectedPreSkillIds}
+            selectedSkillIds={selectedSkillIds}
+            selectedWrapperId={selectedWrapperId}
+            onPreSkillsChange={setSelectedPreSkillIds}
+            onPostSkillsChange={setSelectedSkillIds}
+            onWrapperChange={setSelectedWrapperId}
+            skillConfigs={editedSkillConfigs}
+            onSkillConfigChange={setEditedSkillConfigs}
+          />
         </div>
       )}
 
       {/* Pre-Execution Skills */}
-      {(isEditing ? availableSkills.length > 0 : (frontmatter.preExecutionSkills || []).length > 0) && (
+      {!isEditing && (frontmatter.preExecutionSkills || []).length > 0 && (
         <div>
           <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Pre-Execution Skills</h3>
-          {isEditing ? (
-            <div>
-              <p className="text-xs text-slate-400 mb-2">Run before the agent starts. Failure blocks execution.</p>
-              <SkillSelector availableSkills={availableSkills} selectedSkillIds={selectedPreSkillIds} onChange={setSelectedPreSkillIds} />
-            </div>
-          ) : (
-            <div className="flex flex-wrap gap-1.5">
-              {(frontmatter.preExecutionSkills || []).map((skillId: string, index: number) => {
-                const skill = availableSkills.find((s: any) => s.id === skillId)
-                return (
-                  <span key={skillId} className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-blue-50 border border-blue-200 text-xs font-medium text-blue-700">
-                    <span className="text-[10px] text-blue-400 font-bold">{index + 1}.</span>
-                    <span className="text-[10px] text-slate-400 font-mono">{skill?.type === 'loop' ? 'loop' : 'gate'}</span>
-                    {skill?.name || skillId}
-                  </span>
-                )
-              })}
-            </div>
-          )}
+          <div className="flex flex-wrap gap-1.5">
+            {(frontmatter.preExecutionSkills || []).map((skillId: string, index: number) => {
+              const skill = availableSkills.find((s: any) => s.id === skillId)
+              return (
+                <span key={skillId} className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-blue-50 border border-blue-200 text-xs font-medium text-blue-700">
+                  <span className="text-[10px] text-blue-400 font-bold">{index + 1}.</span>
+                  <span className="text-[10px] text-slate-400 font-mono">{skill?.type === 'loop' ? 'loop' : 'gate'}</span>
+                  {skill?.name || skillId}
+                </span>
+              )
+            })}
+          </div>
         </div>
       )}
 
       {/* Post-Execution Skills */}
-      {(isEditing ? availableSkills.length > 0 : (frontmatter.postExecutionSkills || []).length > 0) && (
+      {!isEditing && (frontmatter.postExecutionSkills || []).length > 0 && (
         <div>
           <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Post-Execution Skills</h3>
-          {isEditing ? (
-            <div>
-              <p className="text-xs text-slate-400 mb-2">Skills run automatically after the agent completes its main work.</p>
-              <SkillSelector availableSkills={availableSkills} selectedSkillIds={selectedSkillIds} onChange={setSelectedSkillIds} skillConfigs={editedSkillConfigs} onSkillConfigChange={setEditedSkillConfigs} />
-            </div>
-          ) : (
-            <div className="flex flex-wrap gap-1.5">
-              {(frontmatter.postExecutionSkills || []).map((skillId: string, index: number) => {
-                const skill = availableSkills.find((s: any) => s.id === skillId)
-                return (
-                  <span key={skillId} className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-orange-50 border border-orange-200 text-xs font-medium text-orange-700">
-                    <span className="text-[10px] text-orange-400 font-bold">{index + 1}.</span>
-                    <span className="text-[10px] text-slate-400 font-mono">{skill?.type === 'loop' ? 'loop' : 'gate'}</span>
-                    {skill?.name || skillId}
-                  </span>
-                )
-              })}
-            </div>
-          )}
+          <div className="flex flex-wrap gap-1.5">
+            {(frontmatter.postExecutionSkills || []).map((skillId: string, index: number) => {
+              const skill = availableSkills.find((s: any) => s.id === skillId)
+              return (
+                <span key={skillId} className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-orange-50 border border-orange-200 text-xs font-medium text-orange-700">
+                  <span className="text-[10px] text-orange-400 font-bold">{index + 1}.</span>
+                  <span className="text-[10px] text-slate-400 font-mono">{skill?.type === 'loop' ? 'loop' : 'gate'}</span>
+                  {skill?.name || skillId}
+                </span>
+              )
+            })}
+          </div>
         </div>
       )}
 
@@ -473,11 +534,23 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
           )}
 
           <div className={missingAcceptanceCriteria ? 'rounded-lg border-2 border-red-300 bg-red-50 p-3 -mx-1' : ''}>
-            <div className="mb-2">
+            <div className="mb-2 flex items-center justify-between gap-3">
               <h3 className={`text-xs font-semibold uppercase tracking-wide ${missingAcceptanceCriteria ? 'text-red-600' : 'text-slate-500'}`}>
                 {missingAcceptanceCriteria && <span className="mr-1 text-red-500">!</span>}Acceptance Criteria
               </h3>
+              {!isEditing && (
+                <button
+                  onClick={handleRegenerateAcceptanceCriteria}
+                  disabled={isRegeneratingCriteria}
+                  className="btn text-xs py-1 px-2.5 bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isRegeneratingCriteria ? 'Regenerating…' : '↻ Regenerate Criteria'}
+                </button>
+              )}
             </div>
+            {criteriaRegenerationError && !isEditing && (
+              <p className="text-xs text-red-600 mb-2">{criteriaRegenerationError}</p>
+            )}
             {isEditing ? (
               <MarkdownEditor value={editedCriteria} onChange={setEditedCriteria} placeholder="One criterion per line" minHeight="160px" />
             ) : displayAcceptanceCriteria.length > 0 ? (
@@ -500,7 +573,7 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
       {isEditing && (
         <div className="flex items-center gap-2 pt-2 border-t border-slate-200">
           <button onClick={onSaveEdit} className="btn btn-primary text-sm py-1.5 px-4">Save Changes</button>
-          <button onClick={() => { setIsEditing(false); setEditedTitle(task.frontmatter.title); setEditedContent(task.content); setEditedCriteria(formatAcceptanceCriteriaForEditor(task.frontmatter.acceptanceCriteria)); setSelectedSkillIds(task.frontmatter.postExecutionSkills || []); setEditedSkillConfigs(task.frontmatter.skillConfigs || {}); setEditedModelConfig(task.frontmatter.modelConfig) }} className="btn btn-secondary text-sm py-1.5 px-4">Discard</button>
+          <button onClick={() => { setIsEditing(false); setEditedTitle(task.frontmatter.title); setEditedContent(task.content); setEditedCriteria(formatAcceptanceCriteriaForEditor(task.frontmatter.acceptanceCriteria)); setSelectedPreSkillIds(task.frontmatter.preExecutionSkills || []); setSelectedSkillIds(task.frontmatter.postExecutionSkills || []); setSelectedWrapperId(''); setEditedSkillConfigs(task.frontmatter.skillConfigs || {}); setEditedPlanningModelConfig(task.frontmatter.planningModelConfig ?? task.frontmatter.executionModelConfig ?? task.frontmatter.modelConfig); setEditedExecutionModelConfig(task.frontmatter.executionModelConfig ?? task.frontmatter.modelConfig) }} className="btn btn-secondary text-sm py-1.5 px-4">Discard</button>
         </div>
       )}
 
@@ -541,6 +614,32 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
         {frontmatter.branch && <div className="flex justify-between"><span>Branch</span><span className="font-mono">{frontmatter.branch}</span></div>}
         {frontmatter.prUrl && <div className="flex justify-between"><span>PR</span><a href={frontmatter.prUrl} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">View PR →</a></div>}
       </div>
+    </div>
+  )
+}
+
+function ModelBadgeRow({ label, model }: { label: string; model?: ModelConfig }) {
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <span className="inline-flex items-center px-2 py-1 rounded-md bg-slate-100 border border-slate-200 text-[11px] font-semibold text-slate-600 uppercase tracking-wide">
+        {label}
+      </span>
+      {model ? (
+        <>
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-blue-50 border border-blue-200 text-xs font-medium text-blue-700">
+            <span className="text-blue-400">{model.provider}</span>
+            <span className="text-blue-300">/</span>
+            {model.modelId}
+          </span>
+          {model.thinkingLevel && (
+            <span className="inline-flex items-center px-2 py-1 rounded-md bg-purple-50 border border-purple-200 text-xs font-medium text-purple-700">
+              reasoning: {model.thinkingLevel}
+            </span>
+          )}
+        </>
+      ) : (
+        <span className="text-xs text-slate-400">Default (from settings)</span>
+      )}
     </div>
   )
 }

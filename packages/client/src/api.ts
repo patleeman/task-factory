@@ -1,4 +1,4 @@
-import type { Task, Workspace, ActivityEntry, Phase, Attachment, QueueStatus, PlanningMessage, PlanningAgentStatus, Shelf, DraftTask, TaskDefaults, PostExecutionSummary, CriterionStatus, QAAnswer, QARequest } from '@pi-factory/shared'
+import type { Task, Workspace, ActivityEntry, Phase, Attachment, QueueStatus, PlanningMessage, PlanningAgentStatus, Shelf, DraftTask, TaskDefaults, PostExecutionSummary, CriterionStatus, QAAnswer, QARequest, PlanningGuardrails } from '@pi-factory/shared'
 
 export interface AvailableModel {
   provider: string
@@ -63,6 +63,13 @@ export interface PiOAuthLoginSession {
   error?: string
 }
 
+export interface PiFactorySettings {
+  theme?: string
+  taskDefaults?: TaskDefaults
+  planningGuardrails?: Partial<PlanningGuardrails>
+  [key: string]: unknown
+}
+
 export const api = {
   async getWorkspaces(): Promise<Workspace[]> {
     const res = await fetch('/api/workspaces')
@@ -123,6 +130,18 @@ export const api = {
       const err = await res.json().catch(() => ({ error: 'Plan regeneration failed' }))
       throw new Error(err.error || `Plan regeneration failed (${res.status})`)
     }
+  },
+  async regenerateAcceptanceCriteria(workspaceId: string, taskId: string): Promise<string[]> {
+    const res = await fetch(`/api/workspaces/${workspaceId}/tasks/${taskId}/acceptance-criteria/regenerate`, {
+      method: 'POST',
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Acceptance criteria regeneration failed' }))
+      throw new Error(err.error || `Acceptance criteria regeneration failed (${res.status})`)
+    }
+
+    const data = await res.json().catch(() => ({} as { acceptanceCriteria?: string[] }))
+    return Array.isArray(data.acceptanceCriteria) ? data.acceptanceCriteria : []
   },
   async reorderTasks(workspaceId: string, phase: Phase, taskIds: string[]): Promise<void> {
     const res = await fetch(`/api/workspaces/${workspaceId}/tasks/reorder`, {
@@ -290,6 +309,27 @@ export const api = {
     }
 
     return res.json()
+  },
+
+  async getPiFactorySettings(): Promise<PiFactorySettings> {
+    const res = await fetch('/api/pi-factory/settings')
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to load settings' }))
+      throw new Error(err.error || `Failed to load settings (${res.status})`)
+    }
+    return res.json()
+  },
+
+  async savePiFactorySettings(settings: PiFactorySettings): Promise<void> {
+    const res = await fetch('/api/pi-factory/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(settings),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to save settings' }))
+      throw new Error(err.error || `Failed to save settings (${res.status})`)
+    }
   },
 
   async getTaskDefaults(): Promise<TaskDefaults> {

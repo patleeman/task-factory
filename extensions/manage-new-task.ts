@@ -37,16 +37,42 @@ export default function (pi: ExtensionAPI) {
         content: Type.Optional(Type.String({
           description: 'Markdown task description',
         })),
-        model: Type.Optional(Type.Object({
+        planningModel: Type.Optional(Type.Object({
           provider: Type.String({ description: 'Model provider (e.g. "anthropic", "openai")' }),
           modelId: Type.String({ description: 'Model ID (e.g. "claude-sonnet-4-20250514")' }),
           thinkingLevel: Type.Optional(Type.Union([
             Type.Literal('off'),
+            Type.Literal('minimal'),
             Type.Literal('low'),
             Type.Literal('medium'),
             Type.Literal('high'),
+            Type.Literal('xhigh'),
           ], { description: 'Thinking level for reasoning models' })),
-        }, { description: 'Model configuration' })),
+        }, { description: 'Planning model configuration' })),
+        executionModel: Type.Optional(Type.Object({
+          provider: Type.String({ description: 'Model provider (e.g. "anthropic", "openai")' }),
+          modelId: Type.String({ description: 'Model ID (e.g. "claude-sonnet-4-20250514")' }),
+          thinkingLevel: Type.Optional(Type.Union([
+            Type.Literal('off'),
+            Type.Literal('minimal'),
+            Type.Literal('low'),
+            Type.Literal('medium'),
+            Type.Literal('high'),
+            Type.Literal('xhigh'),
+          ], { description: 'Thinking level for reasoning models' })),
+        }, { description: 'Execution model configuration' })),
+        model: Type.Optional(Type.Object({
+          provider: Type.String({ description: 'Legacy alias for execution model provider' }),
+          modelId: Type.String({ description: 'Legacy alias for execution model ID' }),
+          thinkingLevel: Type.Optional(Type.Union([
+            Type.Literal('off'),
+            Type.Literal('minimal'),
+            Type.Literal('low'),
+            Type.Literal('medium'),
+            Type.Literal('high'),
+            Type.Literal('xhigh'),
+          ], { description: 'Thinking level for reasoning models' })),
+        }, { description: 'Legacy alias for execution model configuration' })),
         selectedSkillIds: Type.Optional(Type.Array(Type.String(), {
           description: 'Post-execution skill IDs to enable, in execution order',
         })),
@@ -86,11 +112,19 @@ export default function (pi: ExtensionAPI) {
         } else {
           lines.push(`**Description:**\n${formState.content || '(empty)'}\n`);
 
-          if (formState.modelConfig) {
-            const mc = formState.modelConfig;
-            lines.push(`**Model:** ${mc.provider}/${mc.modelId}${mc.thinkingLevel ? ` (thinking: ${mc.thinkingLevel})` : ''}`);
+          const planningModel = formState.planningModelConfig;
+          const executionModel = formState.executionModelConfig || formState.modelConfig;
+
+          if (planningModel) {
+            lines.push(`**Planning Model:** ${planningModel.provider}/${planningModel.modelId}${planningModel.thinkingLevel ? ` (thinking: ${planningModel.thinkingLevel})` : ''}`);
           } else {
-            lines.push('**Model:** Default (from Pi settings)');
+            lines.push('**Planning Model:** Default (from Pi settings)');
+          }
+
+          if (executionModel) {
+            lines.push(`**Execution Model:** ${executionModel.provider}/${executionModel.modelId}${executionModel.thinkingLevel ? ` (thinking: ${executionModel.thinkingLevel})` : ''}`);
+          } else {
+            lines.push('**Execution Model:** Default (from Pi settings)');
           }
 
           lines.push(`\n**Selected Post-Execution Skills:** ${formState.selectedSkillIds?.length ? formState.selectedSkillIds.join(', ') : '(none)'}`);
@@ -129,12 +163,29 @@ export default function (pi: ExtensionAPI) {
         if (updates.content !== undefined) {
           formUpdates.content = updates.content;
         }
-        if (updates.model) {
-          formUpdates.modelConfig = {
+        if (updates.planningModel) {
+          formUpdates.planningModelConfig = {
+            provider: updates.planningModel.provider,
+            modelId: updates.planningModel.modelId,
+            thinkingLevel: updates.planningModel.thinkingLevel,
+          };
+        }
+        if (updates.executionModel) {
+          formUpdates.executionModelConfig = {
+            provider: updates.executionModel.provider,
+            modelId: updates.executionModel.modelId,
+            thinkingLevel: updates.executionModel.thinkingLevel,
+          };
+          // Keep legacy alias aligned for older consumers.
+          formUpdates.modelConfig = formUpdates.executionModelConfig;
+        } else if (updates.model) {
+          // Legacy alias updates execution model.
+          formUpdates.executionModelConfig = {
             provider: updates.model.provider,
             modelId: updates.model.modelId,
             thinkingLevel: updates.model.thinkingLevel,
           };
+          formUpdates.modelConfig = formUpdates.executionModelConfig;
         }
         if (updates.selectedSkillIds !== undefined) {
           formUpdates.selectedSkillIds = updates.selectedSkillIds;

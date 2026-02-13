@@ -74,10 +74,30 @@ export interface ModelConfig {
 }
 
 export interface TaskDefaults {
+  /** Preferred model for planning runs (acceptance criteria + plan generation). */
+  planningModelConfig?: ModelConfig;
+  /** Preferred model for execution/rework/chat runs. */
+  executionModelConfig?: ModelConfig;
+  /**
+   * Legacy single-model field. Treated as executionModelConfig when present.
+   * Kept for backward compatibility with existing settings/task files.
+   */
   modelConfig?: ModelConfig;
   preExecutionSkills: string[];
   postExecutionSkills: string[];
 }
+
+export interface PlanningGuardrails {
+  timeoutMs: number;
+  maxToolCalls: number;
+  maxReadBytes: number;
+}
+
+export const DEFAULT_PLANNING_GUARDRAILS: PlanningGuardrails = {
+  timeoutMs: 5 * 60 * 1000,
+  maxToolCalls: 40,
+  maxReadBytes: 180_000,
+};
 
 // =============================================================================
 // Task Frontmatter (YAML header in markdown files)
@@ -130,6 +150,9 @@ export interface TaskFrontmatter {
   skillConfigs?: Record<string, Record<string, string>>;
 
   // Model configuration (per-task model selection)
+  planningModelConfig?: ModelConfig;
+  executionModelConfig?: ModelConfig;
+  /** Legacy single-model field (treated as execution model). */
   modelConfig?: ModelConfig;
 
   // Plan (auto-generated on task creation)
@@ -369,6 +392,9 @@ export interface CreateTaskRequest {
   preExecutionSkills?: string[];
   postExecutionSkills?: string[];
   skillConfigs?: Record<string, Record<string, string>>;
+  planningModelConfig?: ModelConfig;
+  executionModelConfig?: ModelConfig;
+  /** Legacy single-model field (treated as execution model). */
   modelConfig?: ModelConfig;
 }
 
@@ -383,6 +409,9 @@ export interface UpdateTaskRequest {
   preExecutionSkills?: string[];
   postExecutionSkills?: string[];
   skillConfigs?: Record<string, Record<string, string>>;
+  planningModelConfig?: ModelConfig;
+  executionModelConfig?: ModelConfig;
+  /** Legacy single-model field (treated as execution model). */
   modelConfig?: ModelConfig;
 }
 
@@ -533,6 +562,9 @@ export interface NewTaskFormState {
   content: string;
   selectedSkillIds: string[];
   selectedPreSkillIds?: string[];
+  planningModelConfig?: ModelConfig;
+  executionModelConfig?: ModelConfig;
+  /** Legacy single-model field (treated as execution model). */
   modelConfig?: ModelConfig;
   skillOrder?: string[];
 }

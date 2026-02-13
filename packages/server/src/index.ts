@@ -52,6 +52,8 @@ import {
   getActivityForTask,
 } from './activity-service.js';
 import { logger } from './logger.js';
+import { buildTaskStateSnapshot } from './state-contract.js';
+import { logTaskStateTransition } from './state-transition.js';
 
 // =============================================================================
 // Configuration
@@ -384,6 +386,38 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/plan/regenerate', async (re
   });
 });
 
+// Regenerate acceptance criteria
+app.post('/api/workspaces/:workspaceId/tasks/:taskId/acceptance-criteria/regenerate', async (req, res) => {
+  const workspace = await getWorkspaceById(req.params.workspaceId);
+
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return;
+  }
+
+  const tasksDir = getTasksDir(workspace);
+  const tasks = discoverTasks(tasksDir);
+  const task = tasks.find((t) => t.id === req.params.taskId);
+
+  if (!task) {
+    res.status(404).json({ error: 'Task not found' });
+    return;
+  }
+
+  try {
+    const acceptanceCriteria = await regenerateAcceptanceCriteriaForTask(
+      task,
+      workspace.id,
+      (event: ServerEvent) => broadcastToWorkspace(workspace.id, event),
+    );
+
+    res.json({ acceptanceCriteria });
+  } catch (err) {
+    logger.error('Acceptance criteria regeneration failed:', err);
+    res.status(500).json({ error: 'Acceptance criteria regeneration failed' });
+  }
+});
+
 // Delete task
 app.delete('/api/workspaces/:workspaceId/tasks/:taskId', async (req, res) => {
   const workspace = await getWorkspaceById(req.params.workspaceId);
@@ -470,7 +504,19 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/move', async (req, res) => 
   }
 
   try {
+    const fromState = buildTaskStateSnapshot(task.frontmatter);
+
     task = moveTaskToPhase(task, toPhase, 'user', reason, tasks);
+
+    await logTaskStateTransition({
+      workspaceId: workspace.id,
+      taskId: task.id,
+      from: fromState,
+      to: buildTaskStateSnapshot(task.frontmatter),
+      source: 'task:move',
+      reason: reason || `Moved from ${fromPhase} to ${toPhase}`,
+      broadcastToWorkspace: (event) => broadcastToWorkspace(workspace.id, event),
+    });
 
     // Create system event
     await createSystemEvent(
@@ -895,6 +941,52 @@ app.get('/api/factory/skills', (_req, res) => {
   res.json(skills);
 });
 
+// Create post-execution skill
+app.post('/api/factory/skills', (req, res) => {
+  try {
+    const skillId = createFactorySkill(req.body);
+    const skills = reloadPostExecutionSkills();
+    const created = skills.find((skill) => skill.id === skillId);
+
+    if (!created) {
+      res.status(500).json({ error: 'Skill was created but could not be reloaded' });
+      return;
+    }
+
+    res.status(201).json(created);
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// Import post-execution skill from SKILL.md content
+app.post('/api/factory/skills/import', (req, res) => {
+  try {
+    const payload = req.body as { content?: unknown; overwrite?: unknown };
+    const content = typeof payload?.content === 'string' ? payload.content : '';
+    const overwrite = payload?.overwrite === true;
+
+    const skillId = importFactorySkill(content, overwrite);
+    const skills = reloadPostExecutionSkills();
+    const imported = skills.find((skill) => skill.id === skillId);
+
+    if (!imported) {
+      res.status(500).json({ error: 'Skill was imported but could not be reloaded' });
+      return;
+    }
+
+    res.status(overwrite ? 200 : 201).json(imported);
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// Reload post-execution skills
+app.post('/api/factory/skills/reload', (_req, res) => {
+  const skills = reloadPostExecutionSkills();
+  res.json({ count: skills.length, skills: skills.map(s => s.id) });
+});
+
 // Get single post-execution skill
 app.get('/api/factory/skills/:id', (req, res) => {
   const skill = getPostExecutionSkill(req.params.id);
@@ -905,16 +997,73 @@ app.get('/api/factory/skills/:id', (req, res) => {
   res.json(skill);
 });
 
-// Reload post-execution skills
-app.post('/api/factory/skills/reload', (_req, res) => {
-  const skills = reloadPostExecutionSkills();
-  res.json({ count: skills.length, skills: skills.map(s => s.id) });
+// Update post-execution skill
+app.put('/api/factory/skills/:id', (req, res) => {
+  const existing = getPostExecutionSkill(req.params.id);
+  if (!existing) {
+    res.status(404).json({ error: 'Skill not found' });
+    return;
+  }
+
+  try {
+    const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body)
+      ? req.body as Record<string, unknown>
+      : {};
+
+    const metadataFromBody = body.metadata && typeof body.metadata === 'object' && !Array.isArray(body.metadata)
+      ? body.metadata as Record<string, unknown>
+      : {};
+
+    const payload = {
+      ...body,
+      metadata: {
+        ...existing.metadata,
+        ...metadataFromBody,
+      },
+    };
+
+    const skillId = updateFactorySkill(req.params.id, payload);
+    const skills = reloadPostExecutionSkills();
+    const updated = skills.find((skill) => skill.id === skillId);
+
+    if (!updated) {
+      res.status(500).json({ error: 'Skill was updated but could not be reloaded' });
+      return;
+    }
+
+    res.json(updated);
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// Delete post-execution skill
+app.delete('/api/factory/skills/:id', (req, res) => {
+  const existing = getPostExecutionSkill(req.params.id);
+  if (!existing) {
+    res.status(404).json({ error: 'Skill not found' });
+    return;
+  }
+
+  try {
+    deleteFactorySkill(req.params.id);
+    reloadPostExecutionSkills();
+    res.json({ deleted: req.params.id });
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+  }
 });
 
 // Get execution wrappers
 app.get('/api/wrappers', (_req, res) => {
   const wrappers = discoverWrappers();
   res.json(wrappers);
+});
+
+// Reload execution wrappers
+app.post('/api/wrappers/reload', (_req, res) => {
+  const wrappers = reloadWrappers();
+  res.json({ count: wrappers.length, wrappers: wrappers.map(w => w.id) });
 });
 
 // Get single execution wrapper
@@ -925,12 +1074,6 @@ app.get('/api/wrappers/:id', (req, res) => {
     return;
   }
   res.json(wrapper);
-});
-
-// Reload execution wrappers
-app.post('/api/wrappers/reload', (_req, res) => {
-  const wrappers = reloadWrappers();
-  res.json({ count: wrappers.length, wrappers: wrappers.map(w => w.id) });
 });
 
 // Apply wrapper to a task
@@ -1217,6 +1360,8 @@ import {
   loadAttachmentsByIds,
   planTask,
   startChat,
+  createTaskConversationSession,
+  regenerateAcceptanceCriteriaForTask,
 } from './agent-execution-service.js';
 
 import {
@@ -1224,6 +1369,13 @@ import {
   getPostExecutionSkill,
   reloadPostExecutionSkills,
 } from './post-execution-skills.js';
+
+import {
+  createFactorySkill,
+  updateFactorySkill,
+  deleteFactorySkill,
+  importFactorySkill,
+} from './skill-management-service.js';
 
 import {
   discoverWrappers,
@@ -1270,7 +1422,19 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/execute', async (req, res) 
   // Move task to executing phase and broadcast the change
   const fromPhase = task.frontmatter.phase;
   if (fromPhase !== 'executing') {
+    const fromState = buildTaskStateSnapshot(task.frontmatter);
     moveTaskToPhase(task, 'executing', 'user', 'Agent started execution', tasks);
+
+    await logTaskStateTransition({
+      workspaceId: workspace.id,
+      taskId: task.id,
+      from: fromState,
+      to: buildTaskStateSnapshot(task.frontmatter),
+      source: 'task:execute',
+      reason: 'Agent started execution',
+      broadcastToWorkspace: (event) => broadcastToWorkspace(workspace.id, event),
+    });
+
     broadcastToWorkspace(workspace.id, {
       type: 'task:moved',
       task,
@@ -1290,8 +1454,22 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/execute', async (req, res) 
       },
       onComplete: (success) => {
         if (success) {
+          const fromState = buildTaskStateSnapshot(task.frontmatter);
+
           // Auto-move to complete
           moveTaskToPhase(task, 'complete', 'system', 'Execution completed');
+
+          void logTaskStateTransition({
+            workspaceId: workspace.id,
+            taskId: task.id,
+            from: fromState,
+            to: buildTaskStateSnapshot(task.frontmatter),
+            source: 'task:execute:on-complete',
+            reason: 'Execution completed',
+            broadcastToWorkspace: (event) => broadcastToWorkspace(workspace.id, event),
+          }).catch((stateErr) => {
+            logger.error('Failed to log execution completion state transition', stateErr);
+          });
         }
         
         broadcastToWorkspace(workspace.id, {
@@ -1503,60 +1681,32 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/summary/generate', async (r
   }
 
   try {
-    // Try to resume the agent session for a real summary
-    let piSession: { prompt: (content: string) => Promise<void> } | null = null;
+    let piSession: { prompt: (content: string) => Promise<void>; dispose?: () => void } | null = null;
 
-    if (task.frontmatter.sessionFile) {
+    try {
       try {
-        const {
-          createAgentSession,
-          AuthStorage,
-          DefaultResourceLoader,
-          ModelRegistry,
-          SessionManager,
-        } = await import('@mariozechner/pi-coding-agent');
-
-        const authStorage = new AuthStorage();
-        const modelRegistry = new ModelRegistry(authStorage);
-        const loader = new DefaultResourceLoader({
-          cwd: workspace.path,
-          additionalExtensionPaths: getRepoExtensionPaths(),
+        const opened = await createTaskConversationSession({
+          task,
+          workspacePath: workspace.path,
+          purpose: 'execution',
         });
-        await loader.reload();
-
-        const sessionManager = SessionManager.open(task.frontmatter.sessionFile);
-
-        const sessionOpts: any = {
-          cwd: workspace.path,
-          authStorage,
-          modelRegistry,
-          sessionManager,
-          resourceLoader: loader,
-        };
-
-        const mc = task.frontmatter.modelConfig;
-        if (mc) {
-          const resolved = modelRegistry.find(mc.provider, mc.modelId);
-          if (resolved) sessionOpts.model = resolved;
-          if (mc.thinkingLevel) sessionOpts.thinkingLevel = mc.thinkingLevel;
-        }
-
-        const { session: resumed } = await createAgentSession(sessionOpts);
-        piSession = resumed;
+        piSession = opened.session;
       } catch (err) {
-        logger.error('[SummaryGenerate] Failed to resume session, falling back:', err);
+        logger.error('[SummaryGenerate] Failed to resume task conversation, falling back:', err);
       }
+
+      const summary = await generateAndPersistSummary(task, piSession);
+
+      broadcastToWorkspace(workspace.id, {
+        type: 'task:updated',
+        task,
+        changes: {},
+      });
+
+      res.json(summary);
+    } finally {
+      piSession?.dispose?.();
     }
-
-    const summary = await generateAndPersistSummary(task, piSession);
-
-    broadcastToWorkspace(workspace.id, {
-      type: 'task:updated',
-      task,
-      changes: {},
-    });
-
-    res.json(summary);
   } catch (err) {
     logger.error('Error generating summary', err);
     res.status(500).json({ error: 'Internal Server Error' });

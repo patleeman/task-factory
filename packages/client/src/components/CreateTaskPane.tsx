@@ -15,7 +15,8 @@ export interface CreateTaskData {
   preExecutionSkills?: string[]
   postExecutionSkills?: string[]
   skillConfigs?: Record<string, Record<string, string>>
-  modelConfig?: ModelConfig
+  planningModelConfig?: ModelConfig
+  executionModelConfig?: ModelConfig
   pendingFiles?: File[]
 }
 
@@ -45,10 +46,17 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
   const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>(initialDraft.selectedSkillIds)
   const [selectedPreSkillIds, setSelectedPreSkillIds] = useState<string[]>(initialDraft.selectedPreSkillIds || [])
   const [skillConfigs, setSkillConfigs] = useState<Record<string, Record<string, string>>>({})
-  const [modelConfig, setModelConfig] = useState<ModelConfig | undefined>(initialDraft.modelConfig as ModelConfig | undefined)
+  const [planningModelConfig, setPlanningModelConfig] = useState<ModelConfig | undefined>(
+    initialDraft.planningModelConfig as ModelConfig | undefined
+  )
+  const [executionModelConfig, setExecutionModelConfig] = useState<ModelConfig | undefined>(
+    (initialDraft.executionModelConfig ?? initialDraft.modelConfig) as ModelConfig | undefined
+  )
   const [availableWrappers, setAvailableWrappers] = useState<ExecutionWrapper[]>([])
   const [selectedWrapperId, setSelectedWrapperId] = useState<string>('')
   const [taskDefaults, setTaskDefaults] = useState<TaskDefaults>({
+    planningModelConfig: undefined,
+    executionModelConfig: undefined,
     modelConfig: undefined,
     preExecutionSkills: [...DEFAULT_PRE_EXECUTION_SKILLS],
     postExecutionSkills: [...DEFAULT_POST_EXECUTION_SKILLS],
@@ -90,7 +98,18 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
 
         setSelectedPreSkillIds([...defaults.preExecutionSkills])
         setSelectedSkillIds([...defaults.postExecutionSkills])
-        setModelConfig(defaults.modelConfig ? { ...defaults.modelConfig } : undefined)
+        setPlanningModelConfig(
+          defaults.planningModelConfig
+            ? { ...defaults.planningModelConfig }
+            : undefined
+        )
+        setExecutionModelConfig(
+          defaults.executionModelConfig
+            ? { ...defaults.executionModelConfig }
+            : defaults.modelConfig
+              ? { ...defaults.modelConfig }
+              : undefined
+        )
       })
       .catch((err) => {
         console.error('Failed to load task defaults:', err)
@@ -103,7 +122,10 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
       content,
       selectedSkillIds,
       selectedPreSkillIds,
-      modelConfig,
+      planningModelConfig,
+      executionModelConfig,
+      // Keep legacy field aligned for older agent extensions.
+      modelConfig: executionModelConfig,
     }
     api.openTaskForm(workspaceId, formState).catch(() => {})
     return () => {
@@ -116,10 +138,18 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
   useEffect(() => {
     if (syncTimer.current) clearTimeout(syncTimer.current)
     syncTimer.current = setTimeout(() => {
-      api.syncTaskForm(workspaceId, { content, selectedSkillIds, selectedPreSkillIds, modelConfig }).catch(() => {})
+      api.syncTaskForm(workspaceId, {
+        content,
+        selectedSkillIds,
+        selectedPreSkillIds,
+        planningModelConfig,
+        executionModelConfig,
+        // Keep legacy field aligned for older agent extensions.
+        modelConfig: executionModelConfig,
+      }).catch(() => {})
     }, 300)
     return () => { if (syncTimer.current) clearTimeout(syncTimer.current) }
-  }, [workspaceId, content, selectedSkillIds, selectedPreSkillIds, modelConfig])
+  }, [workspaceId, content, selectedSkillIds, selectedPreSkillIds, planningModelConfig, executionModelConfig])
 
   // Apply incoming updates from the planning agent
   useEffect(() => {
@@ -132,7 +162,15 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
     if (agentFormUpdates.content !== undefined) setContent(agentFormUpdates.content)
     if (agentFormUpdates.selectedSkillIds !== undefined) setSelectedSkillIds(agentFormUpdates.selectedSkillIds)
     if (agentFormUpdates.selectedPreSkillIds !== undefined) setSelectedPreSkillIds(agentFormUpdates.selectedPreSkillIds)
-    if (agentFormUpdates.modelConfig !== undefined) setModelConfig(agentFormUpdates.modelConfig)
+    if (agentFormUpdates.planningModelConfig !== undefined) {
+      setPlanningModelConfig(agentFormUpdates.planningModelConfig)
+    }
+    if (agentFormUpdates.executionModelConfig !== undefined) {
+      setExecutionModelConfig(agentFormUpdates.executionModelConfig)
+    } else if (agentFormUpdates.modelConfig !== undefined) {
+      // Legacy update path from older agent extensions.
+      setExecutionModelConfig(agentFormUpdates.modelConfig)
+    }
     if (hasPipelineUpdate) setSelectedWrapperId('')
   }, [agentFormUpdates])
 
@@ -171,15 +209,32 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
   }, [selectedPreSkillIds, updateDraft])
 
   useEffect(() => {
-    updateDraft({ modelConfig })
-  }, [modelConfig, updateDraft])
+    updateDraft({ planningModelConfig })
+  }, [planningModelConfig, updateDraft])
+
+  useEffect(() => {
+    updateDraft({
+      executionModelConfig,
+      // Keep legacy field aligned for backward compatibility.
+      modelConfig: executionModelConfig,
+    })
+  }, [executionModelConfig, updateDraft])
 
   const handleClearForm = useCallback(() => {
     setContent('')
     setSelectedPreSkillIds([...taskDefaults.preExecutionSkills])
     setSelectedSkillIds([...taskDefaults.postExecutionSkills])
     setSkillConfigs({})
-    setModelConfig(taskDefaults.modelConfig ? { ...taskDefaults.modelConfig } : undefined)
+    setPlanningModelConfig(
+      taskDefaults.planningModelConfig ? { ...taskDefaults.planningModelConfig } : undefined
+    )
+    setExecutionModelConfig(
+      taskDefaults.executionModelConfig
+        ? { ...taskDefaults.executionModelConfig }
+        : taskDefaults.modelConfig
+          ? { ...taskDefaults.modelConfig }
+          : undefined
+    )
     setSelectedWrapperId('')
     setPendingFiles([])
     setIsWhiteboardActive(false)
@@ -263,7 +318,8 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
         preExecutionSkills: selectedPreSkillIds,
         postExecutionSkills: selectedSkillIds,
         skillConfigs: hasSkillConfigs ? skillConfigs : undefined,
-        modelConfig,
+        planningModelConfig,
+        executionModelConfig,
         pendingFiles: filesToSubmit.length > 0 ? filesToSubmit : undefined,
       })
 
@@ -403,11 +459,19 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
   )
 
   const modelSection = (
-    <div className="shrink-0">
-      <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
-        Model
-      </label>
-      <ModelSelector value={modelConfig} onChange={setModelConfig} />
+    <div className="shrink-0 space-y-3">
+      <div>
+        <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+          Planning Model
+        </label>
+        <ModelSelector value={planningModelConfig} onChange={setPlanningModelConfig} />
+      </div>
+      <div>
+        <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+          Execution Model
+        </label>
+        <ModelSelector value={executionModelConfig} onChange={setExecutionModelConfig} />
+      </div>
     </div>
   )
 

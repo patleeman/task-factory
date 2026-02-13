@@ -214,6 +214,9 @@ export function createTask(
     testingInstructions: [],
     commits: [],
     attachments: [],
+    planningModelConfig: resolvedDefaults.planningModelConfig,
+    executionModelConfig: resolvedDefaults.executionModelConfig,
+    // Keep legacy field aligned for backward compatibility.
     modelConfig: resolvedDefaults.modelConfig,
     preExecutionSkills: resolvedDefaults.preExecutionSkills,
     postExecutionSkills: resolvedDefaults.postExecutionSkills,
@@ -273,7 +276,17 @@ export function updateTask(
     task.frontmatter.skillConfigs = request.skillConfigs;
   }
 
-  if (request.modelConfig !== undefined) {
+  if (request.planningModelConfig !== undefined) {
+    task.frontmatter.planningModelConfig = request.planningModelConfig;
+  }
+
+  if (request.executionModelConfig !== undefined) {
+    task.frontmatter.executionModelConfig = request.executionModelConfig;
+    // Keep legacy field aligned for backward compatibility.
+    task.frontmatter.modelConfig = request.executionModelConfig;
+  } else if (request.modelConfig !== undefined) {
+    // Legacy field updates execution model.
+    task.frontmatter.executionModelConfig = request.modelConfig;
     task.frontmatter.modelConfig = request.modelConfig;
   }
 

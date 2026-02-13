@@ -29,6 +29,8 @@ export const ALLOWED_THINKING_LEVELS: ReadonlyArray<NonNullable<ModelConfig['thi
 const ALLOWED_THINKING_LEVEL_SET = new Set<string>(ALLOWED_THINKING_LEVELS);
 
 const BUILT_IN_TASK_DEFAULTS: TaskDefaults = {
+  planningModelConfig: undefined,
+  executionModelConfig: undefined,
   modelConfig: undefined,
   preExecutionSkills: [...DEFAULT_PRE_EXECUTION_SKILLS],
   postExecutionSkills: [...DEFAULT_POST_EXECUTION_SKILLS],
@@ -44,8 +46,14 @@ function cloneModelConfig(modelConfig: ModelConfig | undefined): ModelConfig | u
 }
 
 function cloneTaskDefaults(defaults: TaskDefaults): TaskDefaults {
+  const executionModelConfig = cloneModelConfig(defaults.executionModelConfig ?? defaults.modelConfig);
+  const planningModelConfig = cloneModelConfig(defaults.planningModelConfig);
+
   return {
-    modelConfig: cloneModelConfig(defaults.modelConfig),
+    planningModelConfig,
+    executionModelConfig,
+    // Keep legacy field aligned for backward compatibility.
+    modelConfig: cloneModelConfig(executionModelConfig),
     preExecutionSkills: [...defaults.preExecutionSkills],
     postExecutionSkills: [...defaults.postExecutionSkills],
   };
@@ -107,8 +115,16 @@ export function resolveTaskDefaults(rawSettings: PiFactorySettings | null | unde
     return getBuiltInTaskDefaults();
   }
 
+  const legacyModelConfig = sanitizeModelConfig((defaults as { modelConfig?: unknown }).modelConfig);
+  const planningModelConfig = sanitizeModelConfig((defaults as { planningModelConfig?: unknown }).planningModelConfig);
+  const executionModelConfig = sanitizeModelConfig((defaults as { executionModelConfig?: unknown }).executionModelConfig)
+    ?? legacyModelConfig;
+
   return {
-    modelConfig: sanitizeModelConfig((defaults as { modelConfig?: unknown }).modelConfig),
+    planningModelConfig,
+    executionModelConfig,
+    // Keep legacy field aligned for backward compatibility.
+    modelConfig: executionModelConfig,
     preExecutionSkills: sanitizePreSkillIds((defaults as { preExecutionSkills?: unknown }).preExecutionSkills),
     postExecutionSkills: sanitizePostSkillIds((defaults as { postExecutionSkills?: unknown }).postExecutionSkills),
   };
@@ -121,8 +137,13 @@ export function loadTaskDefaults(): TaskDefaults {
 
 export function saveTaskDefaults(defaults: TaskDefaults): TaskDefaults {
   const current = loadPiFactorySettings() || {};
-  const normalized = {
-    modelConfig: cloneModelConfig(defaults.modelConfig),
+  const executionModelConfig = cloneModelConfig(defaults.executionModelConfig ?? defaults.modelConfig);
+
+  const normalized: TaskDefaults = {
+    planningModelConfig: cloneModelConfig(defaults.planningModelConfig),
+    executionModelConfig,
+    // Keep legacy field aligned for backward compatibility.
+    modelConfig: cloneModelConfig(executionModelConfig),
     preExecutionSkills: [...defaults.preExecutionSkills],
     postExecutionSkills: [...defaults.postExecutionSkills],
   };
@@ -132,17 +153,28 @@ export function saveTaskDefaults(defaults: TaskDefaults): TaskDefaults {
     taskDefaults: normalized,
   });
 
-  return normalized;
+  return cloneTaskDefaults(normalized);
 }
 
 export function applyTaskDefaultsToRequest(request: CreateTaskRequest, defaults: TaskDefaults): {
+  planningModelConfig: ModelConfig | undefined;
+  executionModelConfig: ModelConfig | undefined;
+  /** Legacy alias for execution model. */
   modelConfig: ModelConfig | undefined;
   preExecutionSkills: string[];
   postExecutionSkills: string[];
 } {
-  const modelConfig = request.modelConfig !== undefined
-    ? cloneModelConfig(request.modelConfig)
-    : cloneModelConfig(defaults.modelConfig);
+  const resolvedExecutionDefaults = defaults.executionModelConfig ?? defaults.modelConfig;
+
+  const planningModelConfig = request.planningModelConfig !== undefined
+    ? cloneModelConfig(request.planningModelConfig)
+    : cloneModelConfig(defaults.planningModelConfig);
+
+  const executionModelConfig = request.executionModelConfig !== undefined
+    ? cloneModelConfig(request.executionModelConfig)
+    : request.modelConfig !== undefined
+      ? cloneModelConfig(request.modelConfig)
+      : cloneModelConfig(resolvedExecutionDefaults);
 
   const preExecutionSkills = request.preExecutionSkills !== undefined
     ? [...request.preExecutionSkills]
@@ -153,10 +185,96 @@ export function applyTaskDefaultsToRequest(request: CreateTaskRequest, defaults:
     : [...defaults.postExecutionSkills];
 
   return {
-    modelConfig,
+    planningModelConfig,
+    executionModelConfig,
+    // Keep legacy alias aligned to execution model.
+    modelConfig: cloneModelConfig(executionModelConfig),
     preExecutionSkills,
     postExecutionSkills,
   };
+}
+
+function parseModelConfigPayload(raw: unknown, fieldName: string):
+  { ok: true; value: ModelConfig | undefined }
+  | { ok: false; error: string } {
+  if (raw === undefined || raw === null) {
+    return { ok: true, value: undefined };
+  }
+
+  if (typeof raw !== 'object') {
+    return { ok: false, error: `${fieldName} must be an object` };
+  }
+
+  const provider = (raw as { provider?: unknown }).provider;
+  const modelId = (raw as { modelId?: unknown }).modelId;
+  const thinkingLevel = (raw as { thinkingLevel?: unknown }).thinkingLevel;
+
+  if (typeof provider !== 'string' || provider.trim().length === 0) {
+    return { ok: false, error: `${fieldName}.provider is required` };
+  }
+
+  if (typeof modelId !== 'string' || modelId.trim().length === 0) {
+    return { ok: false, error: `${fieldName}.modelId is required` };
+  }
+
+  const modelConfig: ModelConfig = {
+    provider: provider.trim(),
+    modelId: modelId.trim(),
+  };
+
+  if (thinkingLevel !== undefined) {
+    if (typeof thinkingLevel !== 'string' || !ALLOWED_THINKING_LEVEL_SET.has(thinkingLevel)) {
+      return {
+        ok: false,
+        error: `${fieldName}.thinkingLevel must be one of: off, minimal, low, medium, high, xhigh`,
+      };
+    }
+
+    modelConfig.thinkingLevel = thinkingLevel as ModelConfig['thinkingLevel'];
+  }
+
+  return { ok: true, value: modelConfig };
+}
+
+function validateModelConfig(
+  modelConfig: ModelConfig | undefined,
+  availableModels: AvailableModelForDefaults[],
+  label: string,
+): { ok: true } | { ok: false; error: string } {
+  if (!modelConfig) {
+    return { ok: true };
+  }
+
+  const selectedModel = availableModels.find(
+    (model) => model.provider === modelConfig.provider && model.id === modelConfig.modelId,
+  );
+
+  if (!selectedModel) {
+    return {
+      ok: false,
+      error: `${label} model ${modelConfig.provider}/${modelConfig.modelId} is not available for the selected provider`,
+    };
+  }
+
+  if (!modelConfig.thinkingLevel) {
+    return { ok: true };
+  }
+
+  if (!ALLOWED_THINKING_LEVEL_SET.has(modelConfig.thinkingLevel)) {
+    return {
+      ok: false,
+      error: `${label} thinking level must be one of: off, minimal, low, medium, high, xhigh`,
+    };
+  }
+
+  if (!selectedModel.reasoning) {
+    return {
+      ok: false,
+      error: `${label} thinking level is only supported for reasoning models. ${selectedModel.provider}/${selectedModel.id} is not reasoning-capable`,
+    };
+  }
+
+  return { ok: true };
 }
 
 export function parseTaskDefaultsPayload(raw: unknown): { ok: true; value: TaskDefaults } | { ok: false; error: string } {
@@ -165,6 +283,8 @@ export function parseTaskDefaultsPayload(raw: unknown): { ok: true; value: TaskD
   }
 
   const payload = raw as {
+    planningModelConfig?: unknown;
+    executionModelConfig?: unknown;
     modelConfig?: unknown;
     preExecutionSkills?: unknown;
     postExecutionSkills?: unknown;
@@ -184,46 +304,30 @@ export function parseTaskDefaultsPayload(raw: unknown): { ok: true; value: TaskD
     ? payload.preExecutionSkills.filter((id): id is string => typeof id === 'string')
     : [];
 
-  let modelConfig: ModelConfig | undefined;
-
-  if (payload.modelConfig !== undefined && payload.modelConfig !== null) {
-    if (typeof payload.modelConfig !== 'object') {
-      return { ok: false, error: 'modelConfig must be an object' };
-    }
-
-    const provider = (payload.modelConfig as { provider?: unknown }).provider;
-    const modelId = (payload.modelConfig as { modelId?: unknown }).modelId;
-    const thinkingLevel = (payload.modelConfig as { thinkingLevel?: unknown }).thinkingLevel;
-
-    if (typeof provider !== 'string' || provider.trim().length === 0) {
-      return { ok: false, error: 'modelConfig.provider is required' };
-    }
-
-    if (typeof modelId !== 'string' || modelId.trim().length === 0) {
-      return { ok: false, error: 'modelConfig.modelId is required' };
-    }
-
-    modelConfig = {
-      provider: provider.trim(),
-      modelId: modelId.trim(),
-    };
-
-    if (thinkingLevel !== undefined) {
-      if (typeof thinkingLevel !== 'string' || !ALLOWED_THINKING_LEVEL_SET.has(thinkingLevel)) {
-        return {
-          ok: false,
-          error: 'modelConfig.thinkingLevel must be one of: off, minimal, low, medium, high, xhigh',
-        };
-      }
-
-      modelConfig.thinkingLevel = thinkingLevel as ModelConfig['thinkingLevel'];
-    }
+  const parsedPlanningModelConfig = parseModelConfigPayload(payload.planningModelConfig, 'planningModelConfig');
+  if (!parsedPlanningModelConfig.ok) {
+    return parsedPlanningModelConfig;
   }
+
+  const parsedExecutionModelConfig = parseModelConfigPayload(payload.executionModelConfig, 'executionModelConfig');
+  if (!parsedExecutionModelConfig.ok) {
+    return parsedExecutionModelConfig;
+  }
+
+  const parsedLegacyModelConfig = parseModelConfigPayload(payload.modelConfig, 'modelConfig');
+  if (!parsedLegacyModelConfig.ok) {
+    return parsedLegacyModelConfig;
+  }
+
+  const executionModelConfig = parsedExecutionModelConfig.value ?? parsedLegacyModelConfig.value;
 
   return {
     ok: true,
     value: {
-      modelConfig,
+      planningModelConfig: parsedPlanningModelConfig.value,
+      executionModelConfig,
+      // Keep legacy field aligned for backward compatibility.
+      modelConfig: executionModelConfig,
       preExecutionSkills: [...preExecutionSkills],
       postExecutionSkills: [...payload.postExecutionSkills],
     },
@@ -235,33 +339,15 @@ export function validateTaskDefaults(
   availableModels: AvailableModelForDefaults[],
   availableSkillIds: string[],
 ): { ok: true } | { ok: false; error: string } {
-  if (defaults.modelConfig) {
-    const selectedModel = availableModels.find(
-      (model) => model.provider === defaults.modelConfig!.provider && model.id === defaults.modelConfig!.modelId,
-    );
+  const planningValidation = validateModelConfig(defaults.planningModelConfig, availableModels, 'Planning');
+  if (!planningValidation.ok) {
+    return planningValidation;
+  }
 
-    if (!selectedModel) {
-      return {
-        ok: false,
-        error: `Model ${defaults.modelConfig.provider}/${defaults.modelConfig.modelId} is not available for the selected provider`,
-      };
-    }
-
-    if (defaults.modelConfig.thinkingLevel) {
-      if (!ALLOWED_THINKING_LEVEL_SET.has(defaults.modelConfig.thinkingLevel)) {
-        return {
-          ok: false,
-          error: 'Thinking level must be one of: off, minimal, low, medium, high, xhigh',
-        };
-      }
-
-      if (!selectedModel.reasoning) {
-        return {
-          ok: false,
-          error: `Thinking level is only supported for reasoning models. ${selectedModel.provider}/${selectedModel.id} is not reasoning-capable`,
-        };
-      }
-    }
+  const executionModelConfig = defaults.executionModelConfig ?? defaults.modelConfig;
+  const executionValidation = validateModelConfig(executionModelConfig, availableModels, 'Execution');
+  if (!executionValidation.ok) {
+    return executionValidation;
   }
 
   const validSkillIds = new Set(availableSkillIds);

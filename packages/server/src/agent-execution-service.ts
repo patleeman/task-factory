@@ -17,10 +17,18 @@ import {
   type AgentSession,
   type AgentSessionEvent,
 } from '@mariozechner/pi-coding-agent';
-import type { Task, TaskPlan, Attachment } from '@pi-factory/shared';
+import {
+  DEFAULT_PLANNING_GUARDRAILS,
+  type Task,
+  type TaskPlan,
+  type Attachment,
+  type ModelConfig,
+  type PlanningGuardrails,
+} from '@pi-factory/shared';
 import { createTaskSeparator, createChatMessage, createSystemEvent } from './activity-service.js';
 import {
   buildAgentContext,
+  loadPiFactorySettings,
   loadWorkspaceSharedContext,
   WORKSPACE_SHARED_CONTEXT_REL_PATH,
   type PiSkill,
@@ -30,6 +38,14 @@ import { runPreExecutionSkills, runPostExecutionSkills } from './post-execution-
 import { withTimeout } from './with-timeout.js';
 import { generateAndPersistSummary } from './summary-service.js';
 import { attachTaskFileAndBroadcast, type AttachTaskFileRequest } from './task-attachment-service.js';
+import { logTaskStateTransition } from './state-transition.js';
+import {
+  buildStateContractReferenceSection,
+  buildCurrentStateContractBlock,
+  prependCurrentStateToTurn,
+  buildTaskStateSnapshot,
+  stripStateContractEcho,
+} from './state-contract.js';
 
 // =============================================================================
 // Repo-local Extension Discovery
@@ -267,6 +283,120 @@ export function getAllActiveSessions(): TaskSession[] {
   return Array.from(activeSessions.values());
 }
 
+type TaskConversationPurpose = 'planning' | 'execution';
+
+function getExecutionModelConfig(task: Task): ModelConfig | undefined {
+  return task.frontmatter.executionModelConfig ?? task.frontmatter.modelConfig;
+}
+
+function getPlanningModelConfig(task: Task): ModelConfig | undefined {
+  return task.frontmatter.planningModelConfig ?? getExecutionModelConfig(task);
+}
+
+function getModelConfigForPurpose(task: Task, purpose: TaskConversationPurpose): ModelConfig | undefined {
+  return purpose === 'planning' ? getPlanningModelConfig(task) : getExecutionModelConfig(task);
+}
+
+interface TaskConversationSessionOptions {
+  task: Task;
+  workspacePath: string;
+  settingsManager?: SettingsManager;
+  requireExistingSession?: boolean;
+  forceNewSession?: boolean;
+  purpose?: TaskConversationPurpose;
+  defaultThinkingLevel?: NonNullable<Parameters<typeof createAgentSession>[0]>['thinkingLevel'];
+}
+
+export interface TaskConversationSessionResult {
+  session: AgentSession;
+  resumed: boolean;
+}
+
+/**
+ * Open (or create) the canonical per-task conversation session.
+ * Persists sessionFile back to the task when a new session is created.
+ */
+export async function createTaskConversationSession(
+  options: TaskConversationSessionOptions,
+): Promise<TaskConversationSessionResult> {
+  const {
+    task,
+    workspacePath,
+    settingsManager,
+    requireExistingSession = false,
+    forceNewSession = false,
+    purpose = 'execution',
+    defaultThinkingLevel,
+  } = options;
+
+  const authStorage = new AuthStorage();
+  const modelRegistry = new ModelRegistry(authStorage);
+  const loader = new DefaultResourceLoader({
+    cwd: workspacePath,
+    additionalExtensionPaths: getRepoExtensionPaths(),
+  });
+  await loader.reload();
+
+  const safePath = `--${workspacePath.replace(/^[/\\]/, '').replace(/[/\\:]/g, '-')}--`;
+  const sessionDir = join(homedir(), '.pi', 'agent', 'sessions', safePath);
+  if (!existsSync(sessionDir)) {
+    mkdirSync(sessionDir, { recursive: true });
+  }
+
+  const previousSessionFile = task.frontmatter.sessionFile;
+  const hasExistingSession = !!(previousSessionFile && existsSync(previousSessionFile));
+
+  if (requireExistingSession && !hasExistingSession) {
+    throw new Error(`No existing conversation session for task ${task.id}`);
+  }
+
+  const shouldResume = !forceNewSession && hasExistingSession;
+  const sessionManager = shouldResume && previousSessionFile
+    ? SessionManager.open(previousSessionFile)
+    : SessionManager.create(workspacePath);
+
+  const sessionOpts: Parameters<typeof createAgentSession>[0] = {
+    cwd: workspacePath,
+    authStorage,
+    modelRegistry,
+    sessionManager,
+    resourceLoader: loader,
+  };
+
+  if (settingsManager) {
+    sessionOpts.settingsManager = settingsManager;
+  }
+
+  if (defaultThinkingLevel) {
+    sessionOpts.thinkingLevel = defaultThinkingLevel;
+  }
+
+  const mc = getModelConfigForPurpose(task, purpose);
+  if (mc) {
+    const resolved = modelRegistry.find(mc.provider, mc.modelId);
+    if (resolved) {
+      sessionOpts.model = resolved;
+    }
+    if (mc.thinkingLevel) {
+      sessionOpts.thinkingLevel = mc.thinkingLevel;
+    }
+  }
+
+  const { session } = await createAgentSession(sessionOpts);
+
+  const currentSessionFile = session.sessionFile;
+  if (currentSessionFile && currentSessionFile !== task.frontmatter.sessionFile) {
+    task.frontmatter.sessionFile = currentSessionFile;
+    task.frontmatter.updated = new Date().toISOString();
+    saveTaskFile(task);
+  }
+
+  return {
+    session,
+    resumed: shouldResume,
+  };
+}
+
 function broadcastActivityEntry(
   broadcastToWorkspace: ((event: any) => void) | undefined,
   entryPromise: Promise<any>,
@@ -311,6 +441,10 @@ function buildTaskPrompt(
 
   let prompt = `# Task: ${frontmatter.title}\n\n`;
   prompt += `**Task ID:** ${task.id}\n\n`;
+  const currentState = buildTaskStateSnapshot(frontmatter);
+  prompt += buildStateContractReferenceSection() + '\n';
+  prompt += `## Current State\n`;
+  prompt += `${buildCurrentStateContractBlock(currentState)}\n\n`;
 
   if (frontmatter.acceptanceCriteria.length > 0) {
     prompt += `## Acceptance Criteria\n`;
@@ -381,6 +515,10 @@ function buildReworkPrompt(
   prompt += `This task was previously completed but has been moved back for rework. `;
   prompt += `You have the full conversation history from the previous execution above.\n\n`;
   prompt += `**Task ID:** ${task.id}\n\n`;
+  const currentState = buildTaskStateSnapshot(frontmatter);
+  prompt += buildStateContractReferenceSection() + '\n';
+  prompt += `## Current State\n`;
+  prompt += `${buildCurrentStateContractBlock(currentState)}\n\n`;
 
   if (frontmatter.acceptanceCriteria.length > 0) {
     prompt += `## Current Acceptance Criteria\n`;
@@ -488,68 +626,17 @@ export async function executeTask(options: ExecuteTaskOptions): Promise<TaskSess
   );
 
   try {
-    // Initialize Pi SDK components
-    const authStorage = new AuthStorage();
-    const modelRegistry = new ModelRegistry(authStorage);
-
-    // Create resource loader with task context + repo-local extensions
-    const loader = new DefaultResourceLoader({
-      cwd: workspacePath,
-      additionalExtensionPaths: getRepoExtensionPaths(),
+    const { session: piSession, resumed: isResumingSession } = await createTaskConversationSession({
+      task,
+      workspacePath,
+      purpose: 'execution',
     });
-    await loader.reload();
 
-    // Ensure session directory exists
-    const safePath = `--${workspacePath.replace(/^[/\\]/, '').replace(/[/\\:]/g, '-')}--`;
-    const sessionDir = join(homedir(), '.pi', 'agent', 'sessions', safePath);
-    if (!existsSync(sessionDir)) {
-      mkdirSync(sessionDir, { recursive: true });
+    if (isResumingSession && task.frontmatter.sessionFile) {
+      console.log(`[ExecuteTask] Resuming previous session for task ${task.id}: ${task.frontmatter.sessionFile}`);
     }
-
-    // Check if this task has a previous session to resume (rework scenario)
-    const previousSessionFile = task.frontmatter.sessionFile;
-    const isResumingSession = previousSessionFile && existsSync(previousSessionFile);
-
-    if (isResumingSession) {
-      console.log(`[ExecuteTask] Resuming previous session for task ${task.id}: ${previousSessionFile}`);
-    }
-
-    const sessionManager = isResumingSession
-      ? SessionManager.open(previousSessionFile)
-      : SessionManager.create(workspacePath);
-
-    // Resolve per-task model config if set
-    const sessionOpts: Parameters<typeof createAgentSession>[0] = {
-      cwd: workspacePath,
-      authStorage,
-      modelRegistry,
-      sessionManager,
-      resourceLoader: loader,
-    };
-
-    const mc = task.frontmatter.modelConfig;
-    if (mc) {
-      const resolved = modelRegistry.find(mc.provider, mc.modelId);
-      if (resolved) {
-        sessionOpts.model = resolved;
-      }
-      if (mc.thinkingLevel) {
-        sessionOpts.thinkingLevel = mc.thinkingLevel;
-      }
-    }
-
-    // Create Pi agent session
-    const { session: piSession } = await createAgentSession(sessionOpts);
 
     session.piSession = piSession;
-
-    // Persist session file path on the task so future re-executions can resume
-    const currentSessionFile = piSession.sessionFile;
-    if (currentSessionFile && currentSessionFile !== task.frontmatter.sessionFile) {
-      task.frontmatter.sessionFile = currentSessionFile;
-      task.frontmatter.updated = new Date().toISOString();
-      saveTaskFile(task);
-    }
 
     // Subscribe to Pi events
     session.unsubscribe = piSession.subscribe((event: AgentSessionEvent) => {
@@ -1039,10 +1126,13 @@ function handlePiEvent(
         content = message.content;
       }
 
-      if (content && !shouldSkipToolEchoMessage(session, content)) {
+      const sanitizedContent = stripStateContractEcho(content);
+      const finalStreamText = stripStateContractEcho(sanitizedContent || session.currentStreamText);
+
+      if (sanitizedContent && !shouldSkipToolEchoMessage(session, sanitizedContent)) {
         broadcastActivityEntry(
           broadcast,
-          createChatMessage(workspaceId, taskId, 'agent', content),
+          createChatMessage(workspaceId, taskId, 'agent', sanitizedContent),
           'assistant message',
         );
       }
@@ -1050,7 +1140,7 @@ function handlePiEvent(
       broadcast?.({
         type: 'agent:streaming_end',
         taskId,
-        fullText: content || session.currentStreamText,
+        fullText: finalStreamText,
       });
 
       if (session.currentThinkingText) {
@@ -1275,7 +1365,16 @@ export async function followUpTask(taskId: string, content: string, images?: Ima
     session.agentSignaledComplete = false;
     session.completionSummary = '';
 
-    await session.piSession.prompt(content, hasImages ? { images: images! } : undefined);
+    const savePlanCallbackCleanup =
+      session.task && buildTaskStateSnapshot(session.task.frontmatter).mode === 'task_planning'
+        ? registerSavePlanCallbackForChatTurn(session.task, session.workspaceId, session.broadcastToWorkspace)
+        : undefined;
+
+    try {
+      await session.piSession.prompt(turnContent, hasImages ? { images: images! } : undefined);
+    } finally {
+      savePlanCallbackCleanup?.();
+    }
 
     // Turn resolved — check completion signal (same logic as initial prompt).
     if (session.task) {
@@ -1349,32 +1448,13 @@ export async function resumeChat(
   });
 
   try {
-    const authStorage = new AuthStorage();
-    const modelRegistry = new ModelRegistry(authStorage);
-    const loader = new DefaultResourceLoader({
-      cwd: workspacePath,
-      additionalExtensionPaths: getRepoExtensionPaths(),
+    const { session: piSession } = await createTaskConversationSession({
+      task,
+      workspacePath,
+      requireExistingSession: true,
+      purpose: 'execution',
     });
-    await loader.reload();
 
-    const sessionManager = SessionManager.open(sessionFile);
-
-    const sessionOpts: Parameters<typeof createAgentSession>[0] = {
-      cwd: workspacePath,
-      authStorage,
-      modelRegistry,
-      sessionManager,
-      resourceLoader: loader,
-    };
-
-    const mc = task.frontmatter.modelConfig;
-    if (mc) {
-      const resolved = modelRegistry.find(mc.provider, mc.modelId);
-      if (resolved) sessionOpts.model = resolved;
-      if (mc.thinkingLevel) sessionOpts.thinkingLevel = mc.thinkingLevel;
-    }
-
-    const { session: piSession } = await createAgentSession(sessionOpts);
     session.piSession = piSession;
 
     session.unsubscribe = piSession.subscribe((event: AgentSessionEvent) => {
@@ -1388,8 +1468,21 @@ export async function resumeChat(
     const promptContent = sharedContextSection
       ? `${sharedContextSection}## User Message\n${content}`
       : content;
+    const promptWithState = `${buildStateContractReferenceSection()}\n\n${prependCurrentStateToTurn(
+      promptContent,
+      buildTaskStateSnapshot(task.frontmatter),
+    )}`;
 
-    await piSession.prompt(promptContent, images && images.length > 0 ? { images } : undefined);
+    const savePlanCallbackCleanup =
+      buildTaskStateSnapshot(task.frontmatter).mode === 'task_planning'
+        ? registerSavePlanCallbackForChatTurn(task, workspaceId, broadcastToWorkspace)
+        : undefined;
+
+    try {
+      await piSession.prompt(promptWithState, images && images.length > 0 ? { images } : undefined);
+    } finally {
+      savePlanCallbackCleanup?.();
+    }
 
     // Prompt resolved — go idle (no auto-advance for non-executing tasks)
     session.status = 'idle';
@@ -1459,30 +1552,13 @@ export async function startChat(
   });
 
   try {
-    const authStorage = new AuthStorage();
-    const modelRegistry = new ModelRegistry(authStorage);
-    const loader = new DefaultResourceLoader({
-      cwd: workspacePath,
-      additionalExtensionPaths: getRepoExtensionPaths(),
+    const { session: piSession } = await createTaskConversationSession({
+      task,
+      workspacePath,
+      forceNewSession: true,
+      purpose: 'execution',
     });
-    await loader.reload();
 
-    const sessionOpts: Parameters<typeof createAgentSession>[0] = {
-      cwd: workspacePath,
-      authStorage,
-      modelRegistry,
-      sessionManager: SessionManager.create(workspacePath),
-      resourceLoader: loader,
-    };
-
-    const mc = task.frontmatter.modelConfig;
-    if (mc) {
-      const resolved = modelRegistry.find(mc.provider, mc.modelId);
-      if (resolved) sessionOpts.model = resolved;
-      if (mc.thinkingLevel) sessionOpts.thinkingLevel = mc.thinkingLevel;
-    }
-
-    const { session: piSession } = await createAgentSession(sessionOpts);
     session.piSession = piSession;
 
     session.unsubscribe = piSession.subscribe((event: AgentSessionEvent) => {
@@ -1500,15 +1576,20 @@ export async function startChat(
       (task.frontmatter.plan ? `This task has a plan with goal: ${task.frontmatter.plan.goal}\n` : '') +
       `Current phase: ${task.frontmatter.phase}\n\n` +
       `User message: ${content}`;
+    const taskContextWithState = `${buildStateContractReferenceSection()}\n\n${prependCurrentStateToTurn(
+      taskContext,
+      buildTaskStateSnapshot(task.frontmatter),
+    )}`;
 
-    await piSession.prompt(taskContext, images && images.length > 0 ? { images } : undefined);
+    const savePlanCallbackCleanup =
+      buildTaskStateSnapshot(task.frontmatter).mode === 'task_planning'
+        ? registerSavePlanCallbackForChatTurn(task, workspaceId, broadcastToWorkspace)
+        : undefined;
 
-    // Save session file so future messages can resume
-    const sessionFilePath = piSession.sessionFile;
-    if (sessionFilePath) {
-      task.frontmatter.sessionFile = sessionFilePath;
-      task.frontmatter.updated = new Date().toISOString();
-      saveTaskFile(task);
+    try {
+      await piSession.prompt(taskContextWithState, images && images.length > 0 ? { images } : undefined);
+    } finally {
+      savePlanCallbackCleanup?.();
     }
 
     // Chat resolved — go idle (no auto-advance for non-executing tasks)
@@ -1587,19 +1668,65 @@ export async function stopTaskExecution(taskId: string): Promise<boolean> {
 // Plans are auto-generated at task creation time using planTask() below.
 // This agent is kept for manual/on-demand planning scenarios.
 
-const PLANNING_TIMEOUT_MS = 5 * 60 * 1000;
 const PLANNING_DEFAULT_THINKING_LEVEL = 'low' as const;
+const PLANNING_COMPACTION_TIMEOUT_MS = 90 * 1000;
+const PLANNING_COMPACTION_INSTRUCTIONS = [
+  'Planning is complete for this task.',
+  'Summarize the planning conversation for future implementation work.',
+  'Preserve: user intent, key constraints, architectural decisions, discovered risks, accepted trade-offs, acceptance criteria, and the saved plan goal/steps/validation/cleanup.',
+  'Drop repetitive exploration logs and duplicate command output.',
+].join(' ');
+
+function coercePlanningGuardrailNumber(value: unknown, fallback: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return fallback;
+  }
+
+  const rounded = Math.floor(value);
+  if (rounded <= 0) {
+    return fallback;
+  }
+
+  return rounded;
+}
+
+export function resolvePlanningGuardrails(raw: unknown): PlanningGuardrails {
+  if (!raw || typeof raw !== 'object') {
+    return { ...DEFAULT_PLANNING_GUARDRAILS };
+  }
+
+  const candidate = raw as Partial<PlanningGuardrails>;
+
+  return {
+    timeoutMs: coercePlanningGuardrailNumber(candidate.timeoutMs, DEFAULT_PLANNING_GUARDRAILS.timeoutMs),
+    maxToolCalls: coercePlanningGuardrailNumber(candidate.maxToolCalls, DEFAULT_PLANNING_GUARDRAILS.maxToolCalls),
+    maxReadBytes: coercePlanningGuardrailNumber(candidate.maxReadBytes, DEFAULT_PLANNING_GUARDRAILS.maxReadBytes),
+  };
+}
+
+export function loadPlanningGuardrails(): PlanningGuardrails {
+  const settings = loadPiFactorySettings();
+  return resolvePlanningGuardrails(settings?.planningGuardrails);
+}
 
 export function buildPlanningPrompt(
   task: Task,
   attachmentSection: string,
   workspaceSharedContext: string | null,
+  guardrails: PlanningGuardrails = DEFAULT_PLANNING_GUARDRAILS,
 ): string {
   const { frontmatter, content } = task;
 
   let prompt = `# Planning Task: ${frontmatter.title}\n\n`;
   prompt += `You are a planning agent. Your job is to research the codebase, generate strong acceptance criteria, and then produce a structured plan that is easy for humans to scan quickly.\n\n`;
   prompt += `**Task ID:** ${task.id}\n\n`;
+  const currentState = {
+    ...buildTaskStateSnapshot(frontmatter),
+    mode: 'task_planning' as const,
+  };
+  prompt += buildStateContractReferenceSection() + '\n';
+  prompt += `## Current State\n`;
+  prompt += `${buildCurrentStateContractBlock(currentState)}\n\n`;
 
   if (frontmatter.acceptanceCriteria.length > 0) {
     prompt += `## Acceptance Criteria\n`;
@@ -1625,15 +1752,101 @@ export function buildPlanningPrompt(
 
   prompt += `## Instructions\n\n`;
   prompt += `1. Research the codebase to understand the current state. Read relevant files, understand architecture, and trace call sites.\n`;
-  prompt += `2. From your investigation, produce 3-7 specific, testable acceptance criteria for this task.\n`;
-  prompt += `3. Then produce a plan that directly satisfies those acceptance criteria.\n`;
-  prompt += `4. The plan is a high-level task summary for humans. Keep it concise and easy to parse.\n`;
-  prompt += `5. Steps should be short outcome-focused summaries (usually 3-6 steps). Avoid line-level implementation details, exact file paths, and low-level function-by-function instructions.\n`;
-  prompt += `6. Validation items must verify the acceptance criteria and overall outcome without turning into a detailed test script.\n`;
-  prompt += `7. Call the \`save_plan\` tool **exactly once** with taskId "${task.id}", acceptanceCriteria, goal, steps, validation, and cleanup.\n`;
-  prompt += `8. Cleanup items are post-completion tasks (pass an empty array if none needed).\n`;
+  prompt += `2. You are in planning-only mode. Do not edit files, do not run write/edit tools, and do not implement code changes.\n`;
+  prompt += `3. From your investigation, produce 3-7 specific, testable acceptance criteria for this task.\n`;
+  prompt += `4. Then produce a plan that directly satisfies those acceptance criteria.\n`;
+  prompt += `5. The plan is a high-level task summary for humans. Keep it concise and easy to parse.\n`;
+  prompt += `6. Steps should be short outcome-focused summaries (usually 3-6 steps). Avoid line-level implementation details, exact file paths, and low-level function-by-function instructions.\n`;
+  prompt += `7. Validation items must verify the acceptance criteria and overall outcome without turning into a detailed test script.\n`;
+  prompt += `8. Call the \`save_plan\` tool **exactly once** with taskId "${task.id}", acceptanceCriteria, goal, steps, validation, and cleanup.\n`;
+  prompt += `9. Cleanup items are post-completion tasks (pass an empty array if none needed).\n`;
+  prompt += `10. After calling \`save_plan\`, stop immediately. Do not run any further tools or actions.\n`;
+  prompt += `11. Stay within planning guardrails: at most ${guardrails.maxToolCalls} tool calls and about ${Math.round(guardrails.maxReadBytes / 1024)}KB of total read output. Prefer targeted reads over broad scans.\n`;
 
   return prompt;
+}
+
+export function buildPlanningResumePrompt(
+  task: Task,
+  attachmentSection: string,
+  workspaceSharedContext: string | null,
+  guardrails: PlanningGuardrails = DEFAULT_PLANNING_GUARDRAILS,
+): string {
+  const { frontmatter, content } = task;
+
+  let prompt = `# Resume Planning Task: ${frontmatter.title}\n\n`;
+  prompt += 'Continue the existing planning conversation for this task. Reuse prior investigation and avoid repeating the same broad repo scans unless needed for new evidence.\n\n';
+  prompt += `**Task ID:** ${task.id}\n\n`;
+  const currentState = {
+    ...buildTaskStateSnapshot(frontmatter),
+    mode: 'task_planning' as const,
+  };
+  prompt += buildStateContractReferenceSection() + '\n';
+  prompt += `## Current State\n`;
+  prompt += `${buildCurrentStateContractBlock(currentState)}\n\n`;
+
+  if (frontmatter.acceptanceCriteria.length > 0) {
+    prompt += `## Existing Acceptance Criteria\n`;
+    frontmatter.acceptanceCriteria.forEach((criteria, i) => {
+      prompt += `${i + 1}. ${criteria}\n`;
+    });
+    prompt += '\n';
+  }
+
+  if (content) {
+    prompt += `## Task Description\n${content}\n\n`;
+  }
+
+  const sharedContextSection = buildWorkspaceSharedContextSection(workspaceSharedContext);
+  if (sharedContextSection) {
+    prompt += sharedContextSection;
+  }
+
+  if (attachmentSection) {
+    prompt += attachmentSection;
+  }
+
+  prompt += `## Instructions\n\n`;
+  prompt += `1. Continue from prior context and investigation.\n`;
+  prompt += `2. Fill only remaining gaps needed to produce a strong plan package.\n`;
+  prompt += `3. Produce 3-7 specific, testable acceptance criteria.\n`;
+  prompt += `4. Produce a concise high-level plan aligned to those criteria.\n`;
+  prompt += `5. Call the \`save_plan\` tool exactly once with taskId "${task.id}", acceptanceCriteria, goal, steps, validation, and cleanup.\n`;
+  prompt += `6. After calling \`save_plan\`, stop immediately.\n`;
+  prompt += `7. Stay within planning guardrails: at most ${guardrails.maxToolCalls} tool calls and about ${Math.round(guardrails.maxReadBytes / 1024)}KB of total read output.\n`;
+
+  return prompt;
+}
+
+async function compactTaskSessionAfterPlanning(
+  session: TaskSession,
+  taskId: string,
+): Promise<void> {
+  const piSession = session.piSession;
+  if (!piSession) return;
+
+  const compact = (piSession as any).compact;
+  if (typeof compact !== 'function') return;
+
+  try {
+    await withTimeout(
+      async () => {
+        await compact.call(piSession, PLANNING_COMPACTION_INSTRUCTIONS);
+      },
+      PLANNING_COMPACTION_TIMEOUT_MS,
+      `Planning compaction timed out after ${Math.round(PLANNING_COMPACTION_TIMEOUT_MS / 1000)} seconds`,
+    );
+  } catch (err) {
+    try {
+      const abortCompaction = (piSession as any).abortCompaction;
+      if (typeof abortCompaction === 'function') {
+        abortCompaction.call(piSession);
+      }
+    } catch {
+      // Ignore abort-compaction errors.
+    }
+    console.error(`[planTask] Failed to compact task conversation for ${taskId}:`, err);
+  }
 }
 
 // =============================================================================
@@ -1648,7 +1861,7 @@ interface SavedPlanningData {
   plan: TaskPlan;
 }
 
-function ensurePlanCallbackRegistry(): Map<string, (data: SavedPlanningData) => void> {
+function ensurePlanCallbackRegistry(): Map<string, (data: SavedPlanningData) => void | Promise<void>> {
   if (!globalThis.__piFactoryPlanCallbacks) {
     globalThis.__piFactoryPlanCallbacks = new Map();
   }
@@ -1666,7 +1879,7 @@ interface AttachTaskFileToolResult {
 }
 
 declare global {
-  var __piFactoryPlanCallbacks: Map<string, (data: SavedPlanningData) => void> | undefined;
+  var __piFactoryPlanCallbacks: Map<string, (data: SavedPlanningData) => void | Promise<void>> | undefined;
   var __piFactoryCompleteCallbacks: Map<string, (summary: string) => void> | undefined;
   var __piFactoryAttachFileCallbacks: Map<string, (data: AttachTaskFileRequest) => Promise<AttachTaskFileToolResult>> | undefined;
 }
@@ -1690,6 +1903,55 @@ function ensureAttachFileCallbackRegistry(): Map<string, (data: AttachTaskFileRe
     globalThis.__piFactoryAttachFileCallbacks = new Map();
   }
   return globalThis.__piFactoryAttachFileCallbacks;
+}
+
+function cleanupPlanCallback(taskId: string): void {
+  globalThis.__piFactoryPlanCallbacks?.delete(taskId);
+}
+
+function savePlanForTask(
+  task: Task,
+  acceptanceCriteria: string[],
+  plan: TaskPlan,
+  workspaceId: string,
+  broadcastToWorkspace?: (event: any) => void,
+): void {
+  const latestTask = existsSync(task.filePath) ? parseTaskFile(task.filePath) : task;
+  const currentState = buildTaskStateSnapshot(latestTask.frontmatter);
+
+  if (currentState.mode !== 'task_planning') {
+    throw new Error(
+      `save_plan is only available in task_planning mode. Current mode is ${currentState.mode}.`,
+    );
+  }
+
+  finalizePlan(task, acceptanceCriteria, plan, workspaceId, broadcastToWorkspace);
+}
+
+function registerSavePlanCallbackForChatTurn(
+  task: Task,
+  workspaceId: string,
+  broadcastToWorkspace?: (event: any) => void,
+): () => void {
+  const registry = ensurePlanCallbackRegistry();
+  const callback = ({ acceptanceCriteria, plan }: SavedPlanningData) => {
+    savePlanForTask(task, acceptanceCriteria, plan, workspaceId, broadcastToWorkspace);
+  };
+
+  const previous = registry.get(task.id);
+  registry.set(task.id, callback);
+
+  return () => {
+    const active = registry.get(task.id);
+    if (active !== callback) return;
+
+    if (previous) {
+      registry.set(task.id, previous);
+      return;
+    }
+
+    registry.delete(task.id);
+  };
 }
 
 export interface PlanTaskOptions {
@@ -1718,6 +1980,8 @@ function persistPlanningMutation(task: Task, mutate: (latestTask: Task) => void)
 export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | null> {
   const { task, workspaceId, workspacePath, broadcastToWorkspace } = options;
 
+  const stateBeforePlanning = buildTaskStateSnapshot(task.frontmatter);
+
   // Mark planning as running so interrupted work can be recovered on restart.
   const runningTask = persistPlanningMutation(task, (latestTask) => {
     latestTask.frontmatter.planningStatus = 'running';
@@ -1728,6 +1992,23 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
     type: 'task:updated',
     task: runningTask,
     changes: {},
+  });
+
+  const runningState = {
+    ...buildTaskStateSnapshot(runningTask.frontmatter),
+    mode: 'task_planning' as const,
+  };
+
+  void logTaskStateTransition({
+    workspaceId,
+    taskId: runningTask.id,
+    from: stateBeforePlanning,
+    to: runningState,
+    source: 'planning:start',
+    reason: 'Planning session started',
+    broadcastToWorkspace,
+  }).catch((err) => {
+    console.error(`[planTask] Failed to log planning start state for ${runningTask.id}:`, err);
   });
 
   // Create task separator in activity log
@@ -1778,29 +2059,27 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
   });
 
   const registry = ensurePlanCallbackRegistry();
+  const planningGuardrails = loadPlanningGuardrails();
   let savedPlan: TaskPlan | null = null;
+  let hasPersistedPlan = false;
+  let planningToolCallCount = 0;
+  let planningReadBytes = 0;
+  let planningGuardrailAbortMessage: string | null = null;
 
   try {
-    // Register callback so the save_plan extension tool can persist criteria + plan
+    // Register callback so the save_plan extension tool can persist criteria + plan.
+    // As soon as a plan is persisted, abort the planning turn so the model
+    // cannot continue into implementation work while the task is still backlog/planning.
     registry.set(task.id, ({ acceptanceCriteria, plan }: SavedPlanningData) => {
+      if (hasPersistedPlan) return;
+      hasPersistedPlan = true;
       savedPlan = plan;
       finalizePlan(task, acceptanceCriteria, plan, workspaceId, broadcastToWorkspace);
-    });
 
-    // Initialize Pi SDK
-    const authStorage = new AuthStorage();
-    const modelRegistry = new ModelRegistry(authStorage);
-    const loader = new DefaultResourceLoader({
-      cwd: workspacePath,
-      additionalExtensionPaths: getRepoExtensionPaths(),
+      void session.piSession?.abort().catch((abortErr) => {
+        console.error(`[planTask] Failed to abort planning session after save_plan for ${task.id}:`, abortErr);
+      });
     });
-    await loader.reload();
-
-    const safePath = `--${workspacePath.replace(/^[/\\]/, '').replace(/[/\\:]/g, '-')}--`;
-    const sessionDir = join(homedir(), '.pi', 'agent', 'sessions', safePath);
-    if (!existsSync(sessionDir)) {
-      mkdirSync(sessionDir, { recursive: true });
-    }
 
     const planningSettings = SettingsManager.create(workspacePath);
     planningSettings.applyOverrides({
@@ -1808,34 +2087,70 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
       compaction: { enabled: false },
     });
 
-    // Resolve per-task model config if set
-    const planSessionOpts: Parameters<typeof createAgentSession>[0] = {
-      cwd: workspacePath,
-      authStorage,
-      modelRegistry,
-      sessionManager: SessionManager.create(workspacePath),
-      resourceLoader: loader,
+    const { session: piSession, resumed: isResumingPlanningSession } = await createTaskConversationSession({
+      task,
+      workspacePath,
       settingsManager: planningSettings,
-      thinkingLevel: PLANNING_DEFAULT_THINKING_LEVEL,
-    };
-
-    const mc = task.frontmatter.modelConfig;
-    if (mc) {
-      const resolved = modelRegistry.find(mc.provider, mc.modelId);
-      if (resolved) {
-        planSessionOpts.model = resolved;
-      }
-      if (mc.thinkingLevel) {
-        planSessionOpts.thinkingLevel = mc.thinkingLevel;
-      }
-    }
-
-    const { session: piSession } = await createAgentSession(planSessionOpts);
+      purpose: 'planning',
+      defaultThinkingLevel: PLANNING_DEFAULT_THINKING_LEVEL,
+    });
 
     session.piSession = piSession;
 
+    const abortForPlanningGuardrail = (message: string): void => {
+      if (hasPersistedPlan || planningGuardrailAbortMessage) {
+        return;
+      }
+
+      planningGuardrailAbortMessage = message;
+
+      broadcastActivityEntry(
+        broadcastToWorkspace,
+        createSystemEvent(
+          workspaceId,
+          task.id,
+          'phase-change',
+          `Planning stopped early: ${message}`,
+        ),
+        'planning guardrail event',
+      );
+
+      void session.piSession?.abort().catch((abortErr) => {
+        console.error(`[planTask] Failed to abort planning session after guardrail hit for ${task.id}:`, abortErr);
+      });
+    };
+
     session.unsubscribe = piSession.subscribe((event: AgentSessionEvent) => {
       handlePiEvent(event, session, workspaceId, task.id);
+
+      if (hasPersistedPlan || planningGuardrailAbortMessage) {
+        return;
+      }
+
+      if (event.type !== 'tool_execution_end') {
+        return;
+      }
+
+      planningToolCallCount += 1;
+      if (planningToolCallCount > planningGuardrails.maxToolCalls) {
+        abortForPlanningGuardrail(
+          `tool-call budget exceeded (${planningToolCallCount}/${planningGuardrails.maxToolCalls}). Narrow scope or raise planning guardrails in Settings.`,
+        );
+        return;
+      }
+
+      if (event.toolName !== 'read') {
+        return;
+      }
+
+      const resultText = extractToolResultText((event as any).result) || '';
+      planningReadBytes += Buffer.byteLength(resultText, 'utf8');
+
+      if (planningReadBytes > planningGuardrails.maxReadBytes) {
+        abortForPlanningGuardrail(
+          `read-output budget exceeded (${planningReadBytes}/${planningGuardrails.maxReadBytes} bytes). Narrow scope or raise planning guardrails in Settings.`,
+        );
+      }
     });
 
     // Load task attachments for the planning prompt
@@ -1847,9 +2162,11 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
 
     // Send the planning prompt
     const workspaceSharedContext = loadWorkspaceSharedContext(workspacePath);
-    const prompt = buildPlanningPrompt(task, planAttachmentSection, workspaceSharedContext);
+    const prompt = isResumingPlanningSession
+      ? buildPlanningResumePrompt(task, planAttachmentSection, workspaceSharedContext, planningGuardrails)
+      : buildPlanningPrompt(task, planAttachmentSection, workspaceSharedContext, planningGuardrails);
     const planPromptOpts = planImages.length > 0 ? { images: planImages } : undefined;
-    const planningTimeoutMessage = `Planning timed out after ${Math.round(PLANNING_TIMEOUT_MS / 1000)} seconds`;
+    const planningTimeoutMessage = `Planning timed out after ${Math.round(planningGuardrails.timeoutMs / 1000)} seconds`;
     await withTimeout(
       async (signal) => {
         signal.addEventListener('abort', () => {
@@ -1857,9 +2174,17 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
         }, { once: true });
         await piSession.prompt(prompt, planPromptOpts);
       },
-      PLANNING_TIMEOUT_MS,
+      planningGuardrails.timeoutMs,
       planningTimeoutMessage,
     );
+
+    if (!savedPlan && planningGuardrailAbortMessage) {
+      throw new Error(planningGuardrailAbortMessage);
+    }
+
+    if (savedPlan) {
+      await compactTaskSessionAfterPlanning(session, task.id);
+    }
 
     // Clean up
     session.unsubscribe?.();
@@ -1869,6 +2194,7 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
     registry.delete(task.id);
 
     if (!savedPlan) {
+      const beforeErrorState = buildTaskStateSnapshot(task.frontmatter);
       const erroredTask = persistPlanningMutation(task, (latestTask) => {
         latestTask.frontmatter.planningStatus = 'error';
         latestTask.frontmatter.updated = new Date().toISOString();
@@ -1878,6 +2204,21 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
         type: 'task:updated',
         task: erroredTask,
         changes: {},
+      });
+
+      void logTaskStateTransition({
+        workspaceId,
+        taskId: erroredTask.id,
+        from: {
+          ...beforeErrorState,
+          mode: 'task_planning',
+        },
+        to: buildTaskStateSnapshot(erroredTask.frontmatter),
+        source: 'planning:missing-save-plan',
+        reason: 'Planning ended without save_plan',
+        broadcastToWorkspace,
+      }).catch((stateErr) => {
+        console.error(`[planTask] Failed to log missing-save-plan state for ${erroredTask.id}:`, stateErr);
       });
 
       broadcastActivityEntry(
@@ -1900,17 +2241,20 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
 
     return savedPlan;
   } catch (err) {
-    const errMessage = err instanceof Error ? err.message : String(err);
+    const errMessage = planningGuardrailAbortMessage ?? (err instanceof Error ? err.message : String(err));
 
     // If a plan was already persisted via save_plan, treat this as a successful
     // completion (the failure happened after the important state was saved).
     if (savedPlan) {
-      session.unsubscribe?.();
       try {
         await session.piSession?.abort();
       } catch {
         // Ignore — session may already be ended.
       }
+
+      await compactTaskSessionAfterPlanning(session, task.id);
+
+      session.unsubscribe?.();
       session.status = 'completed';
       session.endTime = new Date().toISOString();
       activeSessions.delete(task.id);
@@ -1940,6 +2284,7 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
     activeSessions.delete(task.id);
     registry.delete(task.id);
 
+    const beforeErrorState = buildTaskStateSnapshot(task.frontmatter);
     const erroredTask = persistPlanningMutation(task, (latestTask) => {
       latestTask.frontmatter.planningStatus = 'error';
       latestTask.frontmatter.updated = new Date().toISOString();
@@ -1949,6 +2294,21 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
       type: 'task:updated',
       task: erroredTask,
       changes: {},
+    });
+
+    void logTaskStateTransition({
+      workspaceId,
+      taskId: erroredTask.id,
+      from: {
+        ...beforeErrorState,
+        mode: 'task_planning',
+      },
+      to: buildTaskStateSnapshot(erroredTask.frontmatter),
+      source: 'planning:error',
+      reason: errMessage,
+      broadcastToWorkspace,
+    }).catch((stateErr) => {
+      console.error(`[planTask] Failed to log planning error state for ${erroredTask.id}:`, stateErr);
     });
 
     broadcastActivityEntry(
@@ -1986,11 +2346,28 @@ function finalizePlan(
     .map((criterion) => criterion.trim())
     .filter(Boolean);
 
+  const beforeCompletionState = buildTaskStateSnapshot(task.frontmatter);
+
   const updatedTask = persistPlanningMutation(task, (latestTask) => {
     latestTask.frontmatter.acceptanceCriteria = normalizedCriteria;
     latestTask.frontmatter.plan = plan;
     latestTask.frontmatter.planningStatus = 'completed';
     latestTask.frontmatter.updated = new Date().toISOString();
+  });
+
+  void logTaskStateTransition({
+    workspaceId,
+    taskId: updatedTask.id,
+    from: {
+      ...beforeCompletionState,
+      mode: 'task_planning',
+    },
+    to: buildTaskStateSnapshot(updatedTask.frontmatter),
+    source: 'planning:completed',
+    reason: 'Plan and acceptance criteria saved',
+    broadcastToWorkspace,
+  }).catch((stateErr) => {
+    console.error(`[finalizePlan] Failed to log planning completion state for ${updatedTask.id}:`, stateErr);
   });
 
   broadcastActivityEntry(
@@ -2017,6 +2394,111 @@ function finalizePlan(
   });
 }
 
+function buildAcceptanceCriteriaRegenerationPrompt(task: Task): string {
+  const plan = task.frontmatter.plan;
+
+  let prompt = `Regenerate acceptance criteria for task ${task.id}: "${task.frontmatter.title}".\n`;
+  prompt += 'Use the existing conversation context as the primary source of truth.\n';
+  prompt += 'Do not run tools unless absolutely necessary.\n';
+  prompt += 'Output ONLY a numbered list (1. 2. 3. ...) with 3-7 criteria.\n';
+  prompt += 'No introduction, no explanation, no markdown headers.\n\n';
+
+  if (task.content) {
+    prompt += `Task Description:\n${task.content}\n\n`;
+  }
+
+  if (plan) {
+    prompt += `Plan:\n`;
+    prompt += `- Goal: ${plan.goal}\n`;
+    if (plan.steps.length > 0) {
+      prompt += `- Steps:\n${plan.steps.map((step, i) => `  ${i + 1}. ${step}`).join('\n')}\n`;
+    }
+    if (plan.validation.length > 0) {
+      prompt += `- Validation:\n${plan.validation.map((item) => `  - ${item}`).join('\n')}\n`;
+    }
+    prompt += '\n';
+  }
+
+  return `${buildStateContractReferenceSection()}\n\n${prependCurrentStateToTurn(
+    prompt,
+    buildTaskStateSnapshot(task.frontmatter),
+  )}`;
+}
+
+function parseAcceptanceCriteriaFromConversation(response: string): string[] {
+  if (!response.trim()) return [];
+
+  const extracted = response
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const numbered = line.match(/^\d+[\.)]\s+(.+)$/);
+      if (numbered) return numbered[1].trim();
+
+      const bullet = line.match(/^[-*]\s+(.+)$/);
+      if (bullet) return bullet[1].trim();
+
+      return null;
+    })
+    .filter((line): line is string => !!line)
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+
+  const deduped: string[] = [];
+  const seen = new Set<string>();
+  for (const criterion of extracted) {
+    const key = criterion.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(criterion);
+  }
+
+  return deduped.slice(0, 7);
+}
+
+async function regenerateAcceptanceCriteriaViaTaskConversation(task: Task): Promise<string[]> {
+  const workspacePath = task.frontmatter.workspace?.trim();
+  if (!workspacePath) {
+    return [];
+  }
+
+  const { session: piSession } = await createTaskConversationSession({
+    task,
+    workspacePath,
+    purpose: 'planning',
+  });
+
+  let response = '';
+  const unsubscribe = piSession.subscribe((event: AgentSessionEvent) => {
+    if (
+      event.type === 'message_update'
+      && event.assistantMessageEvent.type === 'text_delta'
+    ) {
+      response += event.assistantMessageEvent.delta;
+    }
+  });
+
+  try {
+    const prompt = buildAcceptanceCriteriaRegenerationPrompt(task);
+    await withTimeout(
+      async (signal) => {
+        signal.addEventListener('abort', () => {
+          void piSession.abort().catch(() => undefined);
+        }, { once: true });
+        await piSession.prompt(prompt);
+      },
+      90_000,
+      'Acceptance criteria regeneration timed out after 90 seconds',
+    );
+  } finally {
+    unsubscribe();
+    piSession.dispose();
+  }
+
+  return parseAcceptanceCriteriaFromConversation(response);
+}
+
 /**
  * Regenerate acceptance criteria for a task using its description and plan.
  * Called manually via the API.
@@ -2029,41 +2511,51 @@ export async function regenerateAcceptanceCriteriaForTask(
   const description = task.content || task.frontmatter.title;
   const plan = task.frontmatter.plan;
 
+  let criteria: string[] = [];
+
   try {
-    const { generateAcceptanceCriteria } = await import('./acceptance-criteria-service.js');
-    const criteria = await generateAcceptanceCriteria(
-      description,
-      plan ? { goal: plan.goal, steps: plan.steps, validation: plan.validation, cleanup: plan.cleanup } : undefined,
+    criteria = await regenerateAcceptanceCriteriaViaTaskConversation(task);
+  } catch (err) {
+    console.error('[AcceptanceCriteria] Failed to regenerate via task conversation:', err);
+  }
+
+  if (criteria.length === 0) {
+    try {
+      const { generateAcceptanceCriteria } = await import('./acceptance-criteria-service.js');
+      criteria = await generateAcceptanceCriteria(
+        description,
+        plan ? { goal: plan.goal, steps: plan.steps, validation: plan.validation, cleanup: plan.cleanup } : undefined,
+      );
+    } catch (err) {
+      console.error('Failed to regenerate acceptance criteria:', err);
+      return task.frontmatter.acceptanceCriteria;
+    }
+  }
+
+  if (criteria.length > 0) {
+    task.frontmatter.acceptanceCriteria = criteria;
+    task.frontmatter.updated = new Date().toISOString();
+    saveTaskFile(task);
+
+    broadcastActivityEntry(
+      broadcastToWorkspace,
+      createSystemEvent(
+        workspaceId,
+        task.id,
+        'phase-change',
+        `Acceptance criteria regenerated (${criteria.length} criteria)`,
+      ),
+      'acceptance criteria regeneration event',
     );
 
-    if (criteria.length > 0) {
-      task.frontmatter.acceptanceCriteria = criteria;
-      task.frontmatter.updated = new Date().toISOString();
-      saveTaskFile(task);
-
-      broadcastActivityEntry(
-        broadcastToWorkspace,
-        createSystemEvent(
-          workspaceId,
-          task.id,
-          'phase-change',
-          `Acceptance criteria regenerated (${criteria.length} criteria)`,
-        ),
-        'acceptance criteria regeneration event',
-      );
-
-      broadcastToWorkspace?.({
-        type: 'task:updated',
-        task,
-        changes: { acceptanceCriteria: criteria },
-      });
-    }
-
-    return criteria;
-  } catch (err) {
-    console.error('Failed to regenerate acceptance criteria:', err);
-    return task.frontmatter.acceptanceCriteria;
+    broadcastToWorkspace?.({
+      type: 'task:updated',
+      task,
+      changes: { acceptanceCriteria: criteria },
+    });
   }
+
+  return criteria;
 }
 
 // =============================================================================

@@ -3,21 +3,28 @@ import { DEFAULT_PRE_EXECUTION_SKILLS, DEFAULT_POST_EXECUTION_SKILLS } from '@pi
 
 const STORAGE_KEY = 'pi-factory:create-task-draft'
 
+interface DraftModelConfig {
+  provider: string
+  modelId: string
+  thinkingLevel?: string
+}
+
 export interface TaskDraft {
   content: string
   selectedSkillIds: string[]
   selectedPreSkillIds: string[]
-  modelConfig?: {
-    provider: string
-    modelId: string
-    thinkingLevel?: string
-  }
+  planningModelConfig?: DraftModelConfig
+  executionModelConfig?: DraftModelConfig
+  /** Legacy single-model field (treated as execution model). */
+  modelConfig?: DraftModelConfig
 }
 
 const EMPTY_DRAFT: TaskDraft = {
   content: '',
   selectedSkillIds: [...DEFAULT_POST_EXECUTION_SKILLS],
   selectedPreSkillIds: [...DEFAULT_PRE_EXECUTION_SKILLS],
+  planningModelConfig: undefined,
+  executionModelConfig: undefined,
   modelConfig: undefined,
 }
 
@@ -30,11 +37,16 @@ function loadDraft(): TaskDraft | null {
     if (typeof parsed.content !== 'string') {
       return null
     }
+    const legacyModelConfig = parsed.modelConfig || undefined
+    const executionModelConfig = parsed.executionModelConfig || legacyModelConfig
+
     return {
       content: parsed.content || '',
       selectedSkillIds: Array.isArray(parsed.selectedSkillIds) ? parsed.selectedSkillIds : [],
       selectedPreSkillIds: Array.isArray(parsed.selectedPreSkillIds) ? parsed.selectedPreSkillIds : [],
-      modelConfig: parsed.modelConfig || undefined,
+      planningModelConfig: parsed.planningModelConfig || undefined,
+      executionModelConfig,
+      modelConfig: executionModelConfig,
     }
   } catch {
     return null

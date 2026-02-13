@@ -3,6 +3,7 @@ import { DEFAULT_POST_EXECUTION_SKILLS, DEFAULT_PRE_EXECUTION_SKILLS, type TaskD
 import {
   applyTaskDefaultsToRequest,
   getBuiltInTaskDefaults,
+  parseTaskDefaultsPayload,
   resolveTaskDefaults,
   validateTaskDefaults,
 } from '../src/task-defaults-service.js';
@@ -15,12 +16,20 @@ const AVAILABLE_MODELS = [
 const AVAILABLE_SKILLS = ['checkpoint', 'code-review', 'security-review'];
 
 describe('validateTaskDefaults', () => {
-  it('accepts valid provider/model pairs', () => {
+  it('accepts valid planning and execution model configs', () => {
     const defaults: TaskDefaults = {
-      modelConfig: {
+      planningModelConfig: {
         provider: 'anthropic',
         modelId: 'claude-sonnet-4',
         thinkingLevel: 'minimal',
+      },
+      executionModelConfig: {
+        provider: 'openai',
+        modelId: 'gpt-4o',
+      },
+      modelConfig: {
+        provider: 'openai',
+        modelId: 'gpt-4o',
       },
       preExecutionSkills: [],
       postExecutionSkills: ['checkpoint', 'code-review'],
@@ -29,12 +38,14 @@ describe('validateTaskDefaults', () => {
     expect(validateTaskDefaults(defaults, AVAILABLE_MODELS, AVAILABLE_SKILLS)).toEqual({ ok: true });
   });
 
-  it('rejects provider/model mismatches', () => {
+  it('rejects invalid planning model provider/model pair', () => {
     const defaults: TaskDefaults = {
-      modelConfig: {
+      planningModelConfig: {
         provider: 'anthropic',
         modelId: 'gpt-4o',
       },
+      executionModelConfig: undefined,
+      modelConfig: undefined,
       preExecutionSkills: [],
       postExecutionSkills: ['checkpoint'],
     };
@@ -43,12 +54,19 @@ describe('validateTaskDefaults', () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
+      expect(result.error).toContain('Planning model');
       expect(result.error).toContain('not available');
     }
   });
 
-  it('rejects thinking levels for non-reasoning models', () => {
+  it('rejects thinking levels for non-reasoning execution models', () => {
     const defaults: TaskDefaults = {
+      planningModelConfig: undefined,
+      executionModelConfig: {
+        provider: 'openai',
+        modelId: 'gpt-4o',
+        thinkingLevel: 'high',
+      },
       modelConfig: {
         provider: 'openai',
         modelId: 'gpt-4o',
@@ -62,17 +80,20 @@ describe('validateTaskDefaults', () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
+      expect(result.error).toContain('Execution thinking level');
       expect(result.error).toContain('reasoning models');
     }
   });
 
-  it('accepts xhigh thinking level for reasoning models', () => {
+  it('accepts xhigh thinking level for reasoning planning models', () => {
     const defaults: TaskDefaults = {
-      modelConfig: {
+      planningModelConfig: {
         provider: 'anthropic',
         modelId: 'claude-sonnet-4',
         thinkingLevel: 'xhigh',
       },
+      executionModelConfig: undefined,
+      modelConfig: undefined,
       preExecutionSkills: [],
       postExecutionSkills: ['checkpoint'],
     };
@@ -82,10 +103,9 @@ describe('validateTaskDefaults', () => {
 
   it('rejects unknown post-execution skill IDs', () => {
     const defaults: TaskDefaults = {
-      modelConfig: {
-        provider: 'anthropic',
-        modelId: 'claude-sonnet-4',
-      },
+      planningModelConfig: undefined,
+      executionModelConfig: undefined,
+      modelConfig: undefined,
       preExecutionSkills: [],
       postExecutionSkills: ['checkpoint', 'not-a-real-skill'],
     };
@@ -100,6 +120,8 @@ describe('validateTaskDefaults', () => {
 
   it('rejects unknown pre-execution skill IDs', () => {
     const defaults: TaskDefaults = {
+      planningModelConfig: undefined,
+      executionModelConfig: undefined,
       modelConfig: undefined,
       preExecutionSkills: ['not-a-real-skill'],
       postExecutionSkills: ['checkpoint'],
@@ -119,7 +141,7 @@ describe('resolveTaskDefaults', () => {
     expect(resolveTaskDefaults(null)).toEqual(getBuiltInTaskDefaults());
   });
 
-  it('falls back to built-in skills when settings are malformed', () => {
+  it('falls back to built-in skills when settings are malformed and maps legacy modelConfig to executionModelConfig', () => {
     const resolved = resolveTaskDefaults({
       taskDefaults: {
         modelConfig: {
@@ -133,21 +155,61 @@ describe('resolveTaskDefaults', () => {
 
     expect(resolved.postExecutionSkills).toEqual(DEFAULT_POST_EXECUTION_SKILLS);
     expect(resolved.preExecutionSkills).toEqual(DEFAULT_PRE_EXECUTION_SKILLS);
-    expect(resolved.modelConfig).toEqual({
+    expect(resolved.executionModelConfig).toEqual({
       provider: 'anthropic',
       modelId: 'claude-sonnet-4',
       thinkingLevel: 'medium',
     });
+    expect(resolved.modelConfig).toEqual(resolved.executionModelConfig);
+  });
+});
+
+describe('parseTaskDefaultsPayload', () => {
+  it('parses planning and execution model configs', () => {
+    const parsed = parseTaskDefaultsPayload({
+      planningModelConfig: { provider: 'anthropic', modelId: 'claude-sonnet-4', thinkingLevel: 'low' },
+      executionModelConfig: { provider: 'openai', modelId: 'gpt-4o' },
+      preExecutionSkills: ['checkpoint'],
+      postExecutionSkills: ['checkpoint', 'code-review'],
+    });
+
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.value.planningModelConfig).toEqual({ provider: 'anthropic', modelId: 'claude-sonnet-4', thinkingLevel: 'low' });
+      expect(parsed.value.executionModelConfig).toEqual({ provider: 'openai', modelId: 'gpt-4o' });
+      expect(parsed.value.modelConfig).toEqual({ provider: 'openai', modelId: 'gpt-4o' });
+    }
+  });
+
+  it('uses legacy modelConfig as execution model when executionModelConfig is missing', () => {
+    const parsed = parseTaskDefaultsPayload({
+      modelConfig: { provider: 'openai', modelId: 'gpt-4o' },
+      postExecutionSkills: ['checkpoint'],
+    });
+
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.value.executionModelConfig).toEqual({ provider: 'openai', modelId: 'gpt-4o' });
+      expect(parsed.value.modelConfig).toEqual({ provider: 'openai', modelId: 'gpt-4o' });
+    }
   });
 });
 
 describe('applyTaskDefaultsToRequest', () => {
-  it('applies saved defaults when request omits modelConfig and skills', () => {
+  it('applies saved defaults when request omits models and skills', () => {
     const defaults: TaskDefaults = {
-      modelConfig: {
+      planningModelConfig: {
         provider: 'anthropic',
         modelId: 'claude-sonnet-4',
         thinkingLevel: 'low',
+      },
+      executionModelConfig: {
+        provider: 'openai',
+        modelId: 'gpt-4o',
+      },
+      modelConfig: {
+        provider: 'openai',
+        modelId: 'gpt-4o',
       },
       preExecutionSkills: ['checkpoint'],
       postExecutionSkills: ['checkpoint', 'code-review'],
@@ -155,17 +217,26 @@ describe('applyTaskDefaultsToRequest', () => {
 
     const applied = applyTaskDefaultsToRequest({ content: 'Implement feature' }, defaults);
 
-    expect(applied.modelConfig).toEqual(defaults.modelConfig);
+    expect(applied.planningModelConfig).toEqual(defaults.planningModelConfig);
+    expect(applied.executionModelConfig).toEqual(defaults.executionModelConfig);
+    expect(applied.modelConfig).toEqual(defaults.executionModelConfig);
     expect(applied.preExecutionSkills).toEqual(defaults.preExecutionSkills);
     expect(applied.postExecutionSkills).toEqual(defaults.postExecutionSkills);
   });
 
-  it('preserves explicit request values over defaults', () => {
+  it('preserves explicit request planning/execution models over defaults', () => {
     const defaults: TaskDefaults = {
-      modelConfig: {
+      planningModelConfig: {
         provider: 'anthropic',
         modelId: 'claude-sonnet-4',
-        thinkingLevel: 'low',
+      },
+      executionModelConfig: {
+        provider: 'openai',
+        modelId: 'gpt-4o',
+      },
+      modelConfig: {
+        provider: 'openai',
+        modelId: 'gpt-4o',
       },
       preExecutionSkills: ['checkpoint'],
       postExecutionSkills: ['checkpoint', 'code-review'],
@@ -173,16 +244,54 @@ describe('applyTaskDefaultsToRequest', () => {
 
     const applied = applyTaskDefaultsToRequest({
       content: 'Implement feature',
-      modelConfig: {
-        provider: 'openai',
-        modelId: 'gpt-4o',
+      planningModelConfig: {
+        provider: 'anthropic',
+        modelId: 'claude-sonnet-4',
+        thinkingLevel: 'minimal',
+      },
+      executionModelConfig: {
+        provider: 'anthropic',
+        modelId: 'claude-sonnet-4',
       },
       preExecutionSkills: [],
       postExecutionSkills: ['security-review'],
     }, defaults);
 
-    expect(applied.modelConfig).toEqual({ provider: 'openai', modelId: 'gpt-4o' });
+    expect(applied.planningModelConfig).toEqual({
+      provider: 'anthropic',
+      modelId: 'claude-sonnet-4',
+      thinkingLevel: 'minimal',
+    });
+    expect(applied.executionModelConfig).toEqual({ provider: 'anthropic', modelId: 'claude-sonnet-4' });
+    expect(applied.modelConfig).toEqual({ provider: 'anthropic', modelId: 'claude-sonnet-4' });
     expect(applied.preExecutionSkills).toEqual([]);
     expect(applied.postExecutionSkills).toEqual(['security-review']);
+  });
+
+  it('treats legacy request.modelConfig as execution model override', () => {
+    const defaults: TaskDefaults = {
+      planningModelConfig: undefined,
+      executionModelConfig: {
+        provider: 'openai',
+        modelId: 'gpt-4o',
+      },
+      modelConfig: {
+        provider: 'openai',
+        modelId: 'gpt-4o',
+      },
+      preExecutionSkills: [],
+      postExecutionSkills: ['checkpoint'],
+    };
+
+    const applied = applyTaskDefaultsToRequest({
+      content: 'Implement feature',
+      modelConfig: {
+        provider: 'anthropic',
+        modelId: 'claude-sonnet-4',
+      },
+    }, defaults);
+
+    expect(applied.executionModelConfig).toEqual({ provider: 'anthropic', modelId: 'claude-sonnet-4' });
+    expect(applied.modelConfig).toEqual({ provider: 'anthropic', modelId: 'claude-sonnet-4' });
   });
 });

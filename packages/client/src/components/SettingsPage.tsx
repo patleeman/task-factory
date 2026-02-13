@@ -1,28 +1,48 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import type { ModelConfig, TaskDefaults } from '@pi-factory/shared'
+import {
+  DEFAULT_PLANNING_GUARDRAILS,
+  type ModelConfig,
+  type TaskDefaults,
+  type ExecutionWrapper,
+  type PlanningGuardrails,
+} from '@pi-factory/shared'
 import {
   api,
   type AvailableModel,
   type PiAuthOverview,
   type PiOAuthLoginSession,
   type PiProviderAuthState,
+  type PiFactorySettings,
 } from '../api'
-import { SkillSelector } from './SkillSelector'
+import { ExecutionPipelineEditor } from './ExecutionPipelineEditor'
+import { ModelSelector } from './ModelSelector'
+import { SkillManagementPanel } from './SkillManagementPanel'
+import { ThemeToggle } from './ThemeToggle'
+import { useTheme, type ThemePreference } from '../hooks/useTheme'
 import type { PostExecutionSkill } from '../types/pi'
-
-const THINKING_LEVELS: Array<{ value: NonNullable<ModelConfig['thinkingLevel']>; label: string }> = [
-  { value: 'off', label: 'Off' },
-  { value: 'minimal', label: 'Minimal' },
-  { value: 'low', label: 'Low' },
-  { value: 'medium', label: 'Medium' },
-  { value: 'high', label: 'High' },
-  { value: 'xhigh', label: 'XHigh' },
-]
 
 function findModel(models: AvailableModel[], modelConfig?: ModelConfig): AvailableModel | undefined {
   if (!modelConfig) return undefined
   return models.find((model) => model.provider === modelConfig.provider && model.id === modelConfig.modelId)
+}
+
+function normalizeModelConfigForUi(
+  models: AvailableModel[],
+  modelConfig?: ModelConfig,
+): ModelConfig | undefined {
+  const selectedModel = findModel(models, modelConfig)
+  if (!selectedModel) {
+    return undefined
+  }
+
+  return {
+    provider: selectedModel.provider,
+    modelId: selectedModel.id,
+    thinkingLevel: selectedModel.reasoning
+      ? modelConfig?.thinkingLevel || 'medium'
+      : undefined,
+  }
 }
 
 function normalizeTaskDefaultsForUi(
@@ -30,24 +50,38 @@ function normalizeTaskDefaultsForUi(
   models: AvailableModel[],
   skills: PostExecutionSkill[],
 ): TaskDefaults {
-  const selectedModel = findModel(models, defaults.modelConfig)
-
-  const modelConfig: ModelConfig | undefined = selectedModel
-    ? {
-      provider: selectedModel.provider,
-      modelId: selectedModel.id,
-      thinkingLevel: selectedModel.reasoning
-        ? defaults.modelConfig?.thinkingLevel || 'medium'
-        : undefined,
-    }
-    : undefined
-
   const availableSkillIds = new Set(skills.map((skill) => skill.id))
+  const executionModelConfig = normalizeModelConfigForUi(
+    models,
+    defaults.executionModelConfig ?? defaults.modelConfig,
+  )
 
   return {
-    modelConfig,
+    planningModelConfig: normalizeModelConfigForUi(models, defaults.planningModelConfig),
+    executionModelConfig,
+    // Keep legacy alias aligned for backward compatibility.
+    modelConfig: executionModelConfig,
     preExecutionSkills: defaults.preExecutionSkills.filter((skillId) => availableSkillIds.has(skillId)),
     postExecutionSkills: defaults.postExecutionSkills.filter((skillId) => availableSkillIds.has(skillId)),
+  }
+}
+
+function normalizePlanningGuardrailsForUi(settings: PiFactorySettings | null | undefined): PlanningGuardrails {
+  const candidate = settings?.planningGuardrails
+
+  const coerce = (value: unknown, fallback: number): number => {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      return fallback
+    }
+
+    const rounded = Math.floor(value)
+    return rounded > 0 ? rounded : fallback
+  }
+
+  return {
+    timeoutMs: coerce(candidate?.timeoutMs, DEFAULT_PLANNING_GUARDRAILS.timeoutMs),
+    maxToolCalls: coerce(candidate?.maxToolCalls, DEFAULT_PLANNING_GUARDRAILS.maxToolCalls),
+    maxReadBytes: coerce(candidate?.maxReadBytes, DEFAULT_PLANNING_GUARDRAILS.maxReadBytes),
   }
 }
 
@@ -83,12 +117,18 @@ function isTerminalLoginStatus(status: PiOAuthLoginSession['status']): boolean {
 
 export function SettingsPage() {
   const navigate = useNavigate()
+  const { preference, setPreference } = useTheme()
 
-  const [activeTab, setActiveTab] = useState<'auth' | 'task-defaults'>('auth')
+  const [activeTab, setActiveTab] = useState<'auth' | 'task-defaults' | 'skills'>('auth')
 
   const [models, setModels] = useState<AvailableModel[]>([])
   const [skills, setSkills] = useState<PostExecutionSkill[]>([])
+  const [wrappers, setWrappers] = useState<ExecutionWrapper[]>([])
   const [form, setForm] = useState<TaskDefaults | null>(null)
+  const [planningGuardrailsForm, setPlanningGuardrailsForm] = useState<PlanningGuardrails>({
+    ...DEFAULT_PLANNING_GUARDRAILS,
+  })
+  const [selectedWrapperId, setSelectedWrapperId] = useState('')
 
   const [authOverview, setAuthOverview] = useState<PiAuthOverview | null>(null)
   const [selectedAuthProviderId, setSelectedAuthProviderId] = useState('')
@@ -122,13 +162,18 @@ export function SettingsPage() {
       api.getTaskDefaults(),
       api.getAvailableModels(),
       fetch('/api/factory/skills').then(r => r.json() as Promise<PostExecutionSkill[]>),
+      fetch('/api/wrappers').then(r => r.json() as Promise<ExecutionWrapper[]>),
       api.getPiAuthOverview(),
+      api.getPiFactorySettings(),
     ])
-      .then(([defaults, availableModels, availableSkills, auth]) => {
+      .then(([defaults, availableModels, availableSkills, availableWrappers, auth, settings]) => {
         if (isCancelled) return
         setModels(availableModels)
         setSkills(availableSkills)
+        setWrappers(availableWrappers)
         setForm(normalizeTaskDefaultsForUi(defaults, availableModels, availableSkills))
+        setPlanningGuardrailsForm(normalizePlanningGuardrailsForUi(settings))
+        setSelectedWrapperId('')
         setAuthOverview(auth)
       })
       .catch((err) => {
@@ -159,87 +204,25 @@ export function SettingsPage() {
     }
   }, [authOverview, selectedAuthProviderId])
 
-  const providers = useMemo(
-    () => Array.from(new Set(models.map((model) => model.provider))).filter(Boolean).sort((a, b) => a.localeCompare(b)),
-    [models],
-  )
-
-  const selectedProvider = form?.modelConfig?.provider || ''
-  const providerModels = useMemo(
-    () => models.filter((model) => model.provider === selectedProvider),
-    [models, selectedProvider],
-  )
-  const selectedModel = form ? findModel(models, form.modelConfig) : undefined
-
   const selectedAuthProvider = useMemo(
     () => authOverview?.providers.find((provider) => provider.id === selectedAuthProviderId) || null,
     [authOverview, selectedAuthProviderId],
   )
 
-  const handleProviderChange = (provider: string) => {
-    if (!form) return
+  const handleSkillsChange = useCallback((nextSkills: PostExecutionSkill[]) => {
+    setSkills(nextSkills)
+    setSelectedWrapperId('')
+    setForm((current) => {
+      if (!current) return current
 
-    if (!provider) {
-      setForm({
-        ...form,
-        modelConfig: undefined,
-      })
-      return
-    }
-
-    const modelsForProvider = models.filter((model) => model.provider === provider)
-    if (modelsForProvider.length === 0) {
-      setForm({
-        ...form,
-        modelConfig: undefined,
-      })
-      return
-    }
-
-    const currentModel = modelsForProvider.find((model) => model.id === form.modelConfig?.modelId)
-    const nextModel = currentModel || modelsForProvider[0]
-
-    setForm({
-      ...form,
-      modelConfig: {
-        provider,
-        modelId: nextModel.id,
-        thinkingLevel: nextModel.reasoning
-          ? form.modelConfig?.thinkingLevel || 'medium'
-          : undefined,
-      },
+      const validSkillIds = new Set(nextSkills.map((skill) => skill.id))
+      return {
+        ...current,
+        preExecutionSkills: current.preExecutionSkills.filter((skillId) => validSkillIds.has(skillId)),
+        postExecutionSkills: current.postExecutionSkills.filter((skillId) => validSkillIds.has(skillId)),
+      }
     })
-  }
-
-  const handleModelChange = (modelId: string) => {
-    if (!form || !selectedProvider || !modelId) return
-
-    const model = models.find((candidate) => candidate.provider === selectedProvider && candidate.id === modelId)
-    if (!model) return
-
-    setForm({
-      ...form,
-      modelConfig: {
-        provider: model.provider,
-        modelId: model.id,
-        thinkingLevel: model.reasoning
-          ? form.modelConfig?.thinkingLevel || 'medium'
-          : undefined,
-      },
-    })
-  }
-
-  const handleThinkingLevelChange = (thinkingLevel: ModelConfig['thinkingLevel']) => {
-    if (!form?.modelConfig) return
-
-    setForm({
-      ...form,
-      modelConfig: {
-        ...form.modelConfig,
-        thinkingLevel,
-      },
-    })
-  }
+  }, [])
 
   const handleSaveDefaults = async () => {
     if (!form) return
@@ -249,25 +232,41 @@ export function SettingsPage() {
     setDefaultsSaveMessage(null)
 
     try {
+      const executionModelConfig = form.executionModelConfig ?? form.modelConfig
       const payload: TaskDefaults = {
-        modelConfig: form.modelConfig
-          ? {
-            ...form.modelConfig,
-            thinkingLevel: selectedModel?.reasoning
-              ? form.modelConfig.thinkingLevel || 'medium'
-              : undefined,
-          }
+        planningModelConfig: form.planningModelConfig
+          ? { ...form.planningModelConfig }
+          : undefined,
+        executionModelConfig: executionModelConfig
+          ? { ...executionModelConfig }
+          : undefined,
+        // Keep legacy alias aligned for backward compatibility.
+        modelConfig: executionModelConfig
+          ? { ...executionModelConfig }
           : undefined,
         preExecutionSkills: [...form.preExecutionSkills],
         postExecutionSkills: [...form.postExecutionSkills],
       }
 
-      const saved = await api.saveTaskDefaults(payload)
-      setForm(normalizeTaskDefaultsForUi(saved, models, skills))
-      setDefaultsSaveMessage('Task defaults saved')
+      const savedDefaults = await api.saveTaskDefaults(payload)
+
+      const currentSettings = await api.getPiFactorySettings()
+      const nextSettings: PiFactorySettings = {
+        ...currentSettings,
+        planningGuardrails: {
+          timeoutMs: planningGuardrailsForm.timeoutMs,
+          maxToolCalls: planningGuardrailsForm.maxToolCalls,
+          maxReadBytes: planningGuardrailsForm.maxReadBytes,
+        },
+      }
+
+      await api.savePiFactorySettings(nextSettings)
+      setPlanningGuardrailsForm(normalizePlanningGuardrailsForUi(nextSettings))
+      setForm(normalizeTaskDefaultsForUi(savedDefaults, models, skills))
+      setDefaultsSaveMessage('Task defaults and planning guardrails saved')
     } catch (err) {
-      console.error('Failed to save task defaults:', err)
-      setDefaultsError(err instanceof Error ? err.message : 'Failed to save task defaults')
+      console.error('Failed to save settings:', err)
+      setDefaultsError(err instanceof Error ? err.message : 'Failed to save settings')
     } finally {
       setIsSavingDefaults(false)
     }
@@ -425,20 +424,42 @@ export function SettingsPage() {
           <div className="h-6 w-px bg-slate-700" />
           <span className="text-sm font-medium text-slate-300">Settings</span>
         </div>
-        <button
-          onClick={() => navigate(-1)}
-          className="text-sm text-slate-400 hover:text-white transition-colors"
-        >
-          ← Back
-        </button>
+        <div className="flex items-center gap-3">
+          <ThemeToggle />
+          <button
+            onClick={() => navigate(-1)}
+            className="text-sm text-slate-400 hover:text-white transition-colors"
+          >
+            ← Back
+          </button>
+        </div>
       </header>
 
       <div className="flex-1 overflow-y-auto">
-        <div className="max-w-3xl mx-auto px-6 py-8 space-y-5">
+        <div className="max-w-6xl mx-auto px-6 py-8 space-y-5">
           <div>
             <h2 className="text-xl font-semibold text-slate-800">Pi Settings</h2>
-            <p className="text-sm text-slate-500">Configure API keys, OAuth login, and task defaults in one place.</p>
+            <p className="text-sm text-slate-500">Configure API keys, OAuth login, task defaults, and custom skills in one place.</p>
           </div>
+
+          <section className="rounded-xl border border-slate-200 bg-white p-4 space-y-2">
+            <h3 className="text-sm font-semibold text-slate-800">Appearance</h3>
+            <p className="text-xs text-slate-500">
+              Choose how Pi-Factory should render. Preference is saved in Pi-Factory settings and restored on reload.
+            </p>
+            <div className="max-w-xs">
+              <label className="block text-sm font-medium text-slate-700 mb-1">Theme</label>
+              <select
+                value={preference}
+                onChange={(event) => setPreference(event.target.value as ThemePreference)}
+                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent"
+              >
+                <option value="light">Light</option>
+                <option value="dark">Dark</option>
+                <option value="system">System</option>
+              </select>
+            </div>
+          </section>
 
           {loadError && (
             <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -466,6 +487,16 @@ export function SettingsPage() {
               }`}
             >
               Task Defaults
+            </button>
+            <button
+              onClick={() => setActiveTab('skills')}
+              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === 'skills'
+                  ? 'border-safety-orange text-safety-orange'
+                  : 'border-transparent text-slate-600 hover:text-slate-800'
+              }`}
+            >
+              Skills
             </button>
           </div>
 
@@ -612,80 +643,128 @@ export function SettingsPage() {
                 </div>
               )}
 
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Provider
-                </label>
-                <select
-                  value={selectedProvider}
-                  onChange={(e) => handleProviderChange(e.target.value)}
-                  className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent"
-                >
-                  <option value="">Default (from Pi settings)</option>
-                  {providers.map((provider) => (
-                    <option key={provider} value={provider}>{provider}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Model
-                </label>
-                <select
-                  value={form.modelConfig?.modelId || ''}
-                  onChange={(e) => handleModelChange(e.target.value)}
-                  disabled={!selectedProvider}
-                  className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent disabled:bg-slate-100 disabled:text-slate-400"
-                >
-                  <option value="">{selectedProvider ? 'Select model' : 'Select provider first'}</option>
-                  {providerModels.map((model) => (
-                    <option key={model.id} value={model.id}>
-                      {model.name || model.id}
-                      {model.reasoning ? ' (reasoning)' : ''}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {selectedModel?.reasoning && form.modelConfig && (
+              <div className="grid gap-4 md:grid-cols-2">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">
-                    Thinking Level
+                    Default Planning Model
                   </label>
-                  <select
-                    value={form.modelConfig.thinkingLevel || 'medium'}
-                    onChange={(e) => handleThinkingLevelChange(e.target.value as ModelConfig['thinkingLevel'])}
-                    className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent"
-                  >
-                    {THINKING_LEVELS.map((level) => (
-                      <option key={level.value} value={level.value}>{level.label}</option>
-                    ))}
-                  </select>
+                  <ModelSelector
+                    value={form.planningModelConfig}
+                    onChange={(config) => {
+                      setForm({
+                        ...form,
+                        planningModelConfig: config,
+                      })
+                    }}
+                  />
                 </div>
-              )}
 
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Pre-Execution Skills
-                </label>
-                <p className="text-xs text-slate-500 mb-2">Run before the agent starts. Failure blocks execution.</p>
-                <SkillSelector
-                  availableSkills={skills}
-                  selectedSkillIds={form.preExecutionSkills}
-                  onChange={(skillIds) => setForm({ ...form, preExecutionSkills: skillIds })}
-                />
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Default Execution Model
+                  </label>
+                  <ModelSelector
+                    value={form.executionModelConfig ?? form.modelConfig}
+                    onChange={(config) => {
+                      setForm({
+                        ...form,
+                        executionModelConfig: config,
+                        // Keep legacy alias aligned for backward compatibility.
+                        modelConfig: config,
+                      })
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-3">
+                <div>
+                  <h4 className="text-sm font-semibold text-slate-800">Planning Guardrails</h4>
+                  <p className="text-xs text-slate-500 mt-0.5">Limit planning runs to avoid long repository scans and timeout loops.</p>
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-3">
+                  <label className="block text-xs font-medium text-slate-600">
+                    Timeout (seconds)
+                    <input
+                      type="number"
+                      min={10}
+                      step={5}
+                      value={Math.round(planningGuardrailsForm.timeoutMs / 1000)}
+                      onChange={(event) => {
+                        const seconds = Number.parseInt(event.target.value, 10)
+                        setPlanningGuardrailsForm((current) => ({
+                          ...current,
+                          timeoutMs: Number.isFinite(seconds) && seconds > 0
+                            ? seconds * 1000
+                            : DEFAULT_PLANNING_GUARDRAILS.timeoutMs,
+                        }))
+                      }}
+                      className="mt-1 w-full text-sm border border-slate-200 rounded-lg px-2.5 py-2 bg-white"
+                    />
+                  </label>
+
+                  <label className="block text-xs font-medium text-slate-600">
+                    Max tool calls
+                    <input
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={planningGuardrailsForm.maxToolCalls}
+                      onChange={(event) => {
+                        const value = Number.parseInt(event.target.value, 10)
+                        setPlanningGuardrailsForm((current) => ({
+                          ...current,
+                          maxToolCalls: Number.isFinite(value) && value > 0
+                            ? value
+                            : DEFAULT_PLANNING_GUARDRAILS.maxToolCalls,
+                        }))
+                      }}
+                      className="mt-1 w-full text-sm border border-slate-200 rounded-lg px-2.5 py-2 bg-white"
+                    />
+                  </label>
+
+                  <label className="block text-xs font-medium text-slate-600">
+                    Max read output (KB)
+                    <input
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={Math.round(planningGuardrailsForm.maxReadBytes / 1024)}
+                      onChange={(event) => {
+                        const kb = Number.parseInt(event.target.value, 10)
+                        setPlanningGuardrailsForm((current) => ({
+                          ...current,
+                          maxReadBytes: Number.isFinite(kb) && kb > 0
+                            ? kb * 1024
+                            : DEFAULT_PLANNING_GUARDRAILS.maxReadBytes,
+                        }))
+                      }}
+                      className="mt-1 w-full text-sm border border-slate-200 rounded-lg px-2.5 py-2 bg-white"
+                    />
+                  </label>
+                </div>
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Post-Execution Skills
+                  Execution Pipeline
                 </label>
-                <p className="text-xs text-slate-500 mb-2">Drag selected skills to set execution order.</p>
-                <SkillSelector
+                <p className="text-xs text-slate-500 mb-2">Set default pre/post execution order with one visual pipeline.</p>
+                <ExecutionPipelineEditor
                   availableSkills={skills}
+                  availableWrappers={wrappers}
+                  selectedPreSkillIds={form.preExecutionSkills}
                   selectedSkillIds={form.postExecutionSkills}
-                  onChange={(skillIds) => setForm({ ...form, postExecutionSkills: skillIds })}
+                  selectedWrapperId={selectedWrapperId}
+                  onPreSkillsChange={(skillIds) => {
+                    setForm({ ...form, preExecutionSkills: skillIds })
+                  }}
+                  onPostSkillsChange={(skillIds) => {
+                    setForm({ ...form, postExecutionSkills: skillIds })
+                  }}
+                  onWrapperChange={setSelectedWrapperId}
+                  showSkillConfigControls={false}
                 />
               </div>
 
@@ -699,6 +778,10 @@ export function SettingsPage() {
                 </button>
               </div>
             </div>
+          )}
+
+          {activeTab === 'skills' && (
+            <SkillManagementPanel skills={skills} onSkillsChange={handleSkillsChange} />
           )}
         </div>
       </div>
