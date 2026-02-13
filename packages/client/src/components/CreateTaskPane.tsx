@@ -30,7 +30,11 @@ interface CreateTaskPaneProps {
   agentFormUpdates?: Partial<NewTaskFormState> | null
 }
 
-const CREATE_TASK_WHITEBOARD_STORAGE_KEY = 'pi-factory:create-task-whiteboard'
+const CREATE_TASK_WHITEBOARD_STORAGE_KEY_PREFIX = 'pi-factory:create-task-whiteboard'
+
+function getCreateTaskWhiteboardStorageKey(workspaceId: string): string {
+  return `${CREATE_TASK_WHITEBOARD_STORAGE_KEY_PREFIX}:${workspaceId}`
+}
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -39,7 +43,8 @@ function formatFileSize(bytes: number): string {
 }
 
 export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdates }: CreateTaskPaneProps) {
-  const { initialDraft, restoredFromDraft, updateDraft, clearDraft, dismissRestoredBanner } = useLocalStorageDraft()
+  const { initialDraft, restoredFromDraft, updateDraft, clearDraft, dismissRestoredBanner } = useLocalStorageDraft(workspaceId)
+  const whiteboardStorageKey = getCreateTaskWhiteboardStorageKey(workspaceId)
   const hasRestoredDraftContent = initialDraft.content.trim().length > 0
 
   const [content, setContent] = useState(initialDraft.content)
@@ -67,7 +72,7 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
   const [isWhiteboardModalOpen, setIsWhiteboardModalOpen] = useState(false)
   const [isAttachingWhiteboard, setIsAttachingWhiteboard] = useState(false)
   const [initialWhiteboardScene, setInitialWhiteboardScene] = useState<WhiteboardSceneSnapshot | null>(() => {
-    const loaded = loadStoredWhiteboardScene(CREATE_TASK_WHITEBOARD_STORAGE_KEY)
+    const loaded = loadStoredWhiteboardScene(whiteboardStorageKey)
     return hasWhiteboardContent(loaded) ? loaded : null
   })
   const [isDragOver, setIsDragOver] = useState(false)
@@ -234,9 +239,9 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
     setIsWhiteboardModalOpen(false)
     whiteboardSceneRef.current = null
     setInitialWhiteboardScene(null)
-    clearStoredWhiteboardScene(CREATE_TASK_WHITEBOARD_STORAGE_KEY)
+    clearStoredWhiteboardScene(whiteboardStorageKey)
     clearDraft()
-  }, [clearDraft, taskDefaults])
+  }, [clearDraft, taskDefaults, whiteboardStorageKey])
 
   const addFiles = useCallback((files: FileList | File[]) => {
     const newFiles = Array.from(files)
@@ -271,8 +276,8 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
 
   const handleWhiteboardSceneChange = useCallback((scene: WhiteboardSceneSnapshot) => {
     whiteboardSceneRef.current = scene
-    persistWhiteboardScene(CREATE_TASK_WHITEBOARD_STORAGE_KEY, scene)
-  }, [])
+    persistWhiteboardScene(whiteboardStorageKey, scene)
+  }, [whiteboardStorageKey])
 
   const openWhiteboardModal = useCallback(() => {
     setInitialWhiteboardScene(whiteboardSceneRef.current)
@@ -292,14 +297,14 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
       setPendingFiles(prev => [...prev, file])
       whiteboardSceneRef.current = null
       setInitialWhiteboardScene(null)
-      clearStoredWhiteboardScene(CREATE_TASK_WHITEBOARD_STORAGE_KEY)
+      clearStoredWhiteboardScene(whiteboardStorageKey)
       setIsWhiteboardModalOpen(false)
     } catch (err) {
       console.error('Failed to export whiteboard image:', err)
     } finally {
       setIsAttachingWhiteboard(false)
     }
-  }, [])
+  }, [whiteboardStorageKey])
 
   const handleSubmit = async () => {
     if (!content.trim()) return
@@ -321,7 +326,7 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
 
       whiteboardSceneRef.current = null
       setInitialWhiteboardScene(null)
-      clearStoredWhiteboardScene(CREATE_TASK_WHITEBOARD_STORAGE_KEY)
+      clearStoredWhiteboardScene(whiteboardStorageKey)
       clearDraft()
     } finally {
       setIsSubmitting(false)

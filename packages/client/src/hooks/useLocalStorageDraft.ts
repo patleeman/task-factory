@@ -1,7 +1,7 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useMemo, useEffect } from 'react'
 import { DEFAULT_PRE_EXECUTION_SKILLS, DEFAULT_POST_EXECUTION_SKILLS } from '@pi-factory/shared'
 
-const STORAGE_KEY = 'pi-factory:create-task-draft'
+const STORAGE_KEY_PREFIX = 'pi-factory:create-task-draft'
 
 interface DraftModelConfig {
   provider: string
@@ -28,15 +28,21 @@ const EMPTY_DRAFT: TaskDraft = {
   modelConfig: undefined,
 }
 
-function loadDraft(): TaskDraft | null {
+function getStorageKey(workspaceId: string): string {
+  return `${STORAGE_KEY_PREFIX}:${workspaceId}`
+}
+
+function loadDraft(storageKey: string): TaskDraft | null {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const raw = localStorage.getItem(storageKey)
     if (!raw) return null
+
     const parsed = JSON.parse(raw)
     // Basic validation: must have at least some content
     if (typeof parsed.content !== 'string') {
       return null
     }
+
     const legacyModelConfig = parsed.modelConfig || undefined
     const executionModelConfig = parsed.executionModelConfig || legacyModelConfig
 
@@ -53,39 +59,58 @@ function loadDraft(): TaskDraft | null {
   }
 }
 
-function saveDraft(draft: TaskDraft): void {
+function saveDraft(storageKey: string, draft: TaskDraft): void {
   try {
     // Only save if there's meaningful content
     const hasContent = draft.content.trim()
     if (!hasContent) {
-      localStorage.removeItem(STORAGE_KEY)
+      localStorage.removeItem(storageKey)
       return
     }
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(draft))
+
+    localStorage.setItem(storageKey, JSON.stringify(draft))
   } catch {
     // localStorage might be full or unavailable — ignore
   }
 }
 
-export function useLocalStorageDraft() {
-  const savedDraft = loadDraft()
-  const [restoredFromDraft, setRestoredFromDraft] = useState(
-    () => savedDraft !== null && savedDraft.content.trim() !== ''
-  )
+function removeDraft(storageKey: string): void {
+  try {
+    localStorage.removeItem(storageKey)
+  } catch {
+    // localStorage might be unavailable — ignore
+  }
+}
 
+function hasRestorableContent(draft: TaskDraft | null): boolean {
+  return draft !== null && draft.content.trim() !== ''
+}
+
+export function useLocalStorageDraft(workspaceId: string) {
+  const storageKey = getStorageKey(workspaceId)
+  const savedDraft = useMemo(() => loadDraft(storageKey), [storageKey])
   const initialDraft = savedDraft || EMPTY_DRAFT
+  const hasSavedDraftContent = hasRestorableContent(savedDraft)
+
   const draftRef = useRef<TaskDraft>(initialDraft)
+  const [restoredFromDraft, setRestoredFromDraft] = useState(hasSavedDraftContent)
+
+  // Keep local refs/banner state aligned if workspace changes while mounted.
+  useEffect(() => {
+    draftRef.current = initialDraft
+    setRestoredFromDraft(hasSavedDraftContent)
+  }, [initialDraft, hasSavedDraftContent])
 
   const updateDraft = useCallback((partial: Partial<TaskDraft>) => {
     draftRef.current = { ...draftRef.current, ...partial }
-    saveDraft(draftRef.current)
-  }, [])
+    saveDraft(storageKey, draftRef.current)
+  }, [storageKey])
 
   const clearDraft = useCallback(() => {
     draftRef.current = EMPTY_DRAFT
-    localStorage.removeItem(STORAGE_KEY)
+    removeDraft(storageKey)
     setRestoredFromDraft(false)
-  }, [])
+  }, [storageKey])
 
   const dismissRestoredBanner = useCallback(() => {
     setRestoredFromDraft(false)

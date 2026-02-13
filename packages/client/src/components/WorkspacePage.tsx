@@ -746,6 +746,7 @@ export function WorkspacePage() {
             {mode === 'foreman' ? (
               isCreateRoute ? (
                 <CreateTaskPane
+                  key={`create-task-${workspaceId || ''}`}
                   workspaceId={workspaceId || ''}
                   onCancel={() => navigate(workspaceRootPath)}
                   onSubmit={handleCreateTask}
