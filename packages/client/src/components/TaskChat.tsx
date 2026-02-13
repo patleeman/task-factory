@@ -396,6 +396,7 @@ export function TaskChat({
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
   const [isUploading, setIsUploading] = useState(false)
   const [isDragOver, setIsDragOver] = useState(false)
+  const [attachmentPreview, setAttachmentPreview] = useState<{ url: string; filename: string } | null>(null)
   const [isWhiteboardModalOpen, setIsWhiteboardModalOpen] = useState(false)
   const [initialWhiteboardScene, setInitialWhiteboardScene] = useState<WhiteboardSceneSnapshot | null>(null)
   const [whiteboardError, setWhiteboardError] = useState<string | null>(null)
@@ -439,19 +440,19 @@ export function TaskChat({
   }, [sendMode, hasFollowUpHandler, showSteerControls])
 
   useEffect(() => {
-    if (!isWhiteboardModalOpen) return
+    if (!isWhiteboardModalOpen && !attachmentPreview) return
 
     const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setIsWhiteboardModalOpen(false)
-      }
+      if (event.key !== 'Escape') return
+      if (isWhiteboardModalOpen) setIsWhiteboardModalOpen(false)
+      if (attachmentPreview) setAttachmentPreview(null)
     }
 
     window.addEventListener('keydown', handleEscape)
     return () => {
       window.removeEventListener('keydown', handleEscape)
     }
-  }, [isWhiteboardModalOpen])
+  }, [isWhiteboardModalOpen, attachmentPreview])
 
   const addFiles = useCallback((files: FileList | File[]) => {
     const newFiles = Array.from(files)
@@ -719,14 +720,21 @@ export function TaskChat({
                             : workspaceId && taskId ? api.getAttachmentUrl(workspaceId, taskId, att.storedName) : ''
                           const isImage = att.mimeType.startsWith('image/')
                           return isImage ? (
-                            <a key={att.id} href={url} target="_blank" rel="noopener noreferrer" className="block">
+                            <button
+                              key={att.id}
+                              type="button"
+                              onClick={() => setAttachmentPreview({ url, filename: att.filename })}
+                              className="block cursor-zoom-in"
+                              title={`Preview ${att.filename}`}
+                              aria-label={`Preview ${att.filename}`}
+                            >
                               <img
                                 src={url}
                                 alt={att.filename}
                                 className="max-h-32 rounded border border-blue-200 object-cover"
                                 loading="lazy"
                               />
-                            </a>
+                            </button>
                           ) : (
                             <a
                               key={att.id}
@@ -973,6 +981,32 @@ export function TaskChat({
           </button>
         </div>
       </div>
+
+      {attachmentPreview && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6"
+          onClick={() => setAttachmentPreview(null)}
+        >
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation()
+              setAttachmentPreview(null)
+            }}
+            className="absolute top-4 right-4 h-8 w-8 rounded-full bg-white/20 text-white hover:bg-white/30 flex items-center justify-center"
+            title="Close attachment preview"
+            aria-label="Close attachment preview"
+          >
+            <AppIcon icon={X} size="md" />
+          </button>
+          <img
+            src={attachmentPreview.url}
+            alt={attachmentPreview.filename}
+            className="max-h-full max-w-full rounded-lg object-contain shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          />
+        </div>
+      )}
 
       {isWhiteboardModalOpen && (
         <div
