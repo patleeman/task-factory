@@ -1,5 +1,5 @@
 import { useRef, useEffect } from 'react'
-import { EditorView, keymap, placeholder as cmPlaceholder, lineNumbers, highlightActiveLine, highlightActiveLineGutter } from '@codemirror/view'
+import { EditorView, keymap, placeholder as cmPlaceholder, highlightActiveLine } from '@codemirror/view'
 import { EditorState } from '@codemirror/state'
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { languages } from '@codemirror/language-data'
@@ -38,17 +38,6 @@ const editorTheme = EditorView.theme({
   },
   '.cm-line': {
     padding: '0',
-  },
-  '.cm-gutters': {
-    background: '#f8fafc',
-    borderRight: '1px solid #e2e8f0',
-    color: '#94a3b8',
-    fontSize: '12px',
-    minWidth: '40px',
-  },
-  '.cm-activeLineGutter': {
-    background: '#f1f5f9',
-    color: '#475569',
   },
   '.cm-activeLine': {
     background: '#f8fafc',
@@ -101,9 +90,7 @@ export function MarkdownEditor({
 
     const extensions: import('@codemirror/state').Extension[] = [
       editorTheme,
-      lineNumbers(),
       highlightActiveLine(),
-      highlightActiveLineGutter(),
       bracketMatching(),
       history(),
       markdown({ base: markdownLanguage, codeLanguages: languages }),
