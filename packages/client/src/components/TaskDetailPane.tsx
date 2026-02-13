@@ -3,7 +3,7 @@ import type { Task, Phase, ModelConfig, ExecutionWrapper, PostExecutionSummary a
 import { PHASES, PHASE_DISPLAY_NAMES, getPromotePhase, getDemotePhase } from '@pi-factory/shared'
 import { MarkdownEditor } from './MarkdownEditor'
 import { InlineWhiteboardPanel } from './InlineWhiteboardPanel'
-import { buildWhiteboardSceneSignature, createWhiteboardAttachmentFilename, exportWhiteboardPngFile, hasWhiteboardContent, isWhiteboardAttachmentFilename, loadStoredWhiteboardScene, loadWhiteboardSceneFromBlob, persistWhiteboardScene, type WhiteboardSceneSnapshot } from './whiteboard'
+import { createWhiteboardAttachmentFilename, exportWhiteboardPngFile, hasWhiteboardContent, type WhiteboardSceneSnapshot } from './whiteboard'
 import type { PostExecutionSkill } from '../types/pi'
 import { ModelSelector } from './ModelSelector'
 import { ExecutionPipelineEditor } from './ExecutionPipelineEditor'
@@ -662,84 +662,12 @@ function AttachmentsSection({ task, workspaceId }: { task: Task; workspaceId: st
   const [isUploading, setIsUploading] = useState(false)
   const [isDragOver, setIsDragOver] = useState(false)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
-  const [isWhiteboardExpanded, setIsWhiteboardExpanded] = useState(false)
-  const [isSavingWhiteboard, setIsSavingWhiteboard] = useState(false)
-  const [whiteboardSaveError, setWhiteboardSaveError] = useState<string | null>(null)
-  const [whiteboardSceneVersion, setWhiteboardSceneVersion] = useState(0)
+  const [isWhiteboardModalOpen, setIsWhiteboardModalOpen] = useState(false)
+  const [isAttachingWhiteboard, setIsAttachingWhiteboard] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const whiteboardSaveTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
-  const saveQueueRef = useRef<Promise<void>>(Promise.resolve())
   const whiteboardSceneRef = useRef<WhiteboardSceneSnapshot | null>(null)
-  const pendingWhiteboardSignatureRef = useRef('')
-  const lastSavedWhiteboardSignatureRef = useRef('')
   const [initialWhiteboardScene, setInitialWhiteboardScene] = useState<WhiteboardSceneSnapshot | null>(null)
   const attachments = task.frontmatter.attachments || []
-  const whiteboardStorageKey = `pi-factory:task-whiteboard:${workspaceId}:${task.id}`
-
-  useEffect(() => {
-    let cancelled = false
-
-    setIsWhiteboardExpanded(false)
-    setIsSavingWhiteboard(false)
-    setWhiteboardSaveError(null)
-    setWhiteboardSceneVersion(0)
-    saveQueueRef.current = Promise.resolve()
-    pendingWhiteboardSignatureRef.current = ''
-    lastSavedWhiteboardSignatureRef.current = ''
-
-    const storedScene = loadStoredWhiteboardScene(whiteboardStorageKey)
-    const restoredScene = hasWhiteboardContent(storedScene) ? storedScene : null
-
-    if (restoredScene) {
-      whiteboardSceneRef.current = restoredScene
-      setInitialWhiteboardScene(restoredScene)
-    } else {
-      whiteboardSceneRef.current = null
-      setInitialWhiteboardScene(null)
-
-      const latestAttachment = [...attachments]
-        .filter((attachment) => isWhiteboardAttachmentFilename(attachment.filename))
-        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
-
-      if (latestAttachment) {
-        const url = api.getAttachmentUrl(workspaceId, task.id, latestAttachment.storedName)
-
-        void (async () => {
-          try {
-            const response = await fetch(url)
-            if (!response.ok) return
-
-            const blob = await response.blob()
-            const recoveredScene = await loadWhiteboardSceneFromBlob(blob)
-            if (cancelled || !hasWhiteboardContent(recoveredScene)) return
-
-            whiteboardSceneRef.current = recoveredScene
-            setInitialWhiteboardScene(recoveredScene)
-            persistWhiteboardScene(whiteboardStorageKey, recoveredScene)
-          } catch {
-            // Ignore recovery failures (e.g., older PNGs without embedded scene data).
-          }
-        })()
-      }
-    }
-
-    if (whiteboardSaveTimerRef.current) {
-      clearTimeout(whiteboardSaveTimerRef.current)
-      whiteboardSaveTimerRef.current = undefined
-    }
-
-    return () => {
-      cancelled = true
-    }
-  }, [whiteboardStorageKey])
-
-  useEffect(() => {
-    return () => {
-      if (whiteboardSaveTimerRef.current) {
-        clearTimeout(whiteboardSaveTimerRef.current)
-      }
-    }
-  }, [])
 
   const handleUpload = useCallback(async (files: FileList | File[]) => {
     const fileArray = Array.from(files)
@@ -757,91 +685,24 @@ function AttachmentsSection({ task, workspaceId }: { task: Task; workspaceId: st
 
   const handleWhiteboardSceneChange = useCallback((scene: WhiteboardSceneSnapshot) => {
     whiteboardSceneRef.current = scene
-    persistWhiteboardScene(whiteboardStorageKey, scene)
+  }, [])
 
-    if (!hasWhiteboardContent(scene)) {
-      pendingWhiteboardSignatureRef.current = ''
-      return
-    }
-
-    const signature = buildWhiteboardSceneSignature(scene)
-    if (!signature) {
-      pendingWhiteboardSignatureRef.current = ''
-      return
-    }
-
-    if (signature === pendingWhiteboardSignatureRef.current) return
-    if (signature === lastSavedWhiteboardSignatureRef.current) return
-
-    pendingWhiteboardSignatureRef.current = signature
-    setWhiteboardSceneVersion((prev) => prev + 1)
-  }, [whiteboardStorageKey])
-
-  const saveWhiteboardAttachment = useCallback(async (
-    scene: WhiteboardSceneSnapshot,
-    signature: string,
-  ) => {
-    setIsSavingWhiteboard(true)
-    setWhiteboardSaveError(null)
-
+  const attachWhiteboard = useCallback(async () => {
+    const scene = whiteboardSceneRef.current
+    if (!scene || !hasWhiteboardContent(scene)) return
+    setIsAttachingWhiteboard(true)
     try {
-      const sketchFile = await exportWhiteboardPngFile(
-        scene,
-        createWhiteboardAttachmentFilename(),
-      )
-
-      const currentAttachments = await api.listAttachments(workspaceId, task.id)
-      const existingSketches = currentAttachments.filter((attachment) =>
-        isWhiteboardAttachmentFilename(attachment.filename)
-      )
-
-      for (const attachment of existingSketches) {
-        try {
-          await api.deleteAttachment(workspaceId, task.id, attachment.id)
-        } catch (err) {
-          console.error('Failed to remove previous whiteboard attachment:', err)
-        }
-      }
-
-      await api.uploadAttachments(workspaceId, task.id, [sketchFile])
-      pendingWhiteboardSignatureRef.current = ''
-      lastSavedWhiteboardSignatureRef.current = signature
+      const file = await exportWhiteboardPngFile(scene, createWhiteboardAttachmentFilename())
+      await api.uploadAttachments(workspaceId, task.id, [file])
+      whiteboardSceneRef.current = null
+      setInitialWhiteboardScene(null)
+      setIsWhiteboardModalOpen(false)
     } catch (err) {
-      console.error('Failed to auto-save whiteboard attachment:', err)
-      setWhiteboardSaveError('Auto-save failed. Keep drawing to retry.')
+      console.error('Failed to attach whiteboard sketch:', err)
     } finally {
-      setIsSavingWhiteboard(false)
+      setIsAttachingWhiteboard(false)
     }
   }, [workspaceId, task.id])
-
-  const queueWhiteboardSave = useCallback((scene: WhiteboardSceneSnapshot, signature: string) => {
-    saveQueueRef.current = saveQueueRef.current
-      .catch(() => {})
-      .then(() => saveWhiteboardAttachment(scene, signature))
-  }, [saveWhiteboardAttachment])
-
-  useEffect(() => {
-    if (!isWhiteboardExpanded) return
-
-    const sceneToSave = whiteboardSceneRef.current
-    const signature = pendingWhiteboardSignatureRef.current
-    if (!sceneToSave || !signature) return
-
-    if (whiteboardSaveTimerRef.current) {
-      clearTimeout(whiteboardSaveTimerRef.current)
-    }
-
-    whiteboardSaveTimerRef.current = setTimeout(() => {
-      queueWhiteboardSave(sceneToSave, signature)
-    }, 1200)
-
-    return () => {
-      if (whiteboardSaveTimerRef.current) {
-        clearTimeout(whiteboardSaveTimerRef.current)
-        whiteboardSaveTimerRef.current = undefined
-      }
-    }
-  }, [isWhiteboardExpanded, whiteboardSceneVersion, queueWhiteboardSave])
 
   const handleDelete = async (attachmentId: string) => {
     if (!confirm('Delete this attachment?')) return
@@ -883,15 +744,13 @@ function AttachmentsSection({ task, workspaceId }: { task: Task; workspaceId: st
           )}
         </h3>
         <div className="flex items-center gap-2">
-          {!isWhiteboardExpanded && (
-            <button
-              type="button"
-              onClick={() => setIsWhiteboardExpanded(true)}
-              className="text-xs text-violet-600 hover:text-violet-800 font-medium"
-            >
-              + Add Excalidraw
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => { setInitialWhiteboardScene(whiteboardSceneRef.current); setIsWhiteboardModalOpen(true) }}
+            className="text-xs text-violet-600 hover:text-violet-800 font-medium"
+          >
+            + Add Excalidraw
+          </button>
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
@@ -915,22 +774,6 @@ function AttachmentsSection({ task, workspaceId }: { task: Task; workspaceId: st
           />
         </div>
       </div>
-
-      {isWhiteboardExpanded && (
-        <div className="mb-3">
-          <InlineWhiteboardPanel
-            isActive
-            onSceneChange={handleWhiteboardSceneChange}
-            initialScene={initialWhiteboardScene}
-          />
-          <div className="mt-1.5 text-xs text-slate-400">
-            {isSavingWhiteboard ? 'Saving Excalidraw sketch…' : 'Excalidraw sketch auto-saves as an attachment.'}
-          </div>
-          {whiteboardSaveError && (
-            <div className="mt-1 text-xs text-red-600">{whiteboardSaveError}</div>
-          )}
-        </div>
-      )}
 
       {/* Drop zone (shown when no attachments or dragging) */}
       {(attachments.length === 0 || isDragOver) && (
@@ -1036,6 +879,56 @@ function AttachmentsSection({ task, workspaceId }: { task: Task; workspaceId: st
             className="max-w-full max-h-full object-contain rounded-lg shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           />
+        </div>
+      )}
+
+      {/* Excalidraw modal */}
+      {isWhiteboardModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onClick={() => setIsWhiteboardModalOpen(false)}
+        >
+          <div
+            className="w-full max-w-6xl max-h-[92vh] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+              <h3 className="text-sm font-semibold text-slate-700">Draw a sketch</h3>
+              <button
+                type="button"
+                onClick={() => setIsWhiteboardModalOpen(false)}
+                className="h-7 w-7 rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-600 flex items-center justify-center"
+                title="Close"
+              >
+                ×
+              </button>
+            </div>
+            <div className="p-4">
+              <InlineWhiteboardPanel
+                isActive
+                onSceneChange={handleWhiteboardSceneChange}
+                initialScene={initialWhiteboardScene}
+                heightClassName="h-[70vh]"
+              />
+            </div>
+            <div className="flex items-center justify-end gap-2 border-t border-slate-200 px-4 py-3">
+              <button
+                type="button"
+                onClick={() => setIsWhiteboardModalOpen(false)}
+                className="rounded-md border border-slate-200 px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void attachWhiteboard()}
+                disabled={isAttachingWhiteboard}
+                className="rounded-md bg-slate-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-600 disabled:opacity-60"
+              >
+                {isAttachingWhiteboard ? 'Attaching…' : 'Attach sketch'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

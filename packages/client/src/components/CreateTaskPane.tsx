@@ -4,8 +4,8 @@ import { DEFAULT_PRE_EXECUTION_SKILLS, DEFAULT_POST_EXECUTION_SKILLS } from '@pi
 import { MarkdownEditor } from './MarkdownEditor'
 import { ModelSelector } from './ModelSelector'
 import { ExecutionPipelineEditor } from './ExecutionPipelineEditor'
-import { InlineWhiteboardPanel } from './InlineWhiteboardPanel'
 import { clearStoredWhiteboardScene, createWhiteboardAttachmentFilename, exportWhiteboardPngFile, hasWhiteboardContent, loadStoredWhiteboardScene, persistWhiteboardScene, type WhiteboardSceneSnapshot } from './whiteboard'
+import { InlineWhiteboardPanel } from './InlineWhiteboardPanel'
 import { useLocalStorageDraft } from '../hooks/useLocalStorageDraft'
 import { api } from '../api'
 import type { PostExecutionSkill } from '../types/pi'
@@ -62,7 +62,8 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
     postExecutionSkills: [...DEFAULT_POST_EXECUTION_SKILLS],
   })
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
-  const [isWhiteboardActive, setIsWhiteboardActive] = useState(false)
+  const [isWhiteboardModalOpen, setIsWhiteboardModalOpen] = useState(false)
+  const [isAttachingWhiteboard, setIsAttachingWhiteboard] = useState(false)
   const [initialWhiteboardScene, setInitialWhiteboardScene] = useState<WhiteboardSceneSnapshot | null>(() => {
     const loaded = loadStoredWhiteboardScene(CREATE_TASK_WHITEBOARD_STORAGE_KEY)
     return hasWhiteboardContent(loaded) ? loaded : null
@@ -72,7 +73,6 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
   const containerRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const whiteboardSceneRef = useRef<WhiteboardSceneSnapshot | null>(initialWhiteboardScene)
-  const whiteboardPersistTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
 
   useEffect(() => {
     fetch('/api/factory/skills')
@@ -187,14 +187,6 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
     return () => observer.disconnect()
   }, [])
 
-  useEffect(() => {
-    return () => {
-      if (whiteboardPersistTimerRef.current) {
-        clearTimeout(whiteboardPersistTimerRef.current)
-      }
-    }
-  }, [])
-
   // Auto-save draft to localStorage when form fields change
   useEffect(() => {
     updateDraft({ content })
@@ -237,11 +229,7 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
     )
     setSelectedWrapperId('')
     setPendingFiles([])
-    setIsWhiteboardActive(false)
-    if (whiteboardPersistTimerRef.current) {
-      clearTimeout(whiteboardPersistTimerRef.current)
-      whiteboardPersistTimerRef.current = undefined
-    }
+    setIsWhiteboardModalOpen(false)
     whiteboardSceneRef.current = null
     setInitialWhiteboardScene(null)
     clearStoredWhiteboardScene(CREATE_TASK_WHITEBOARD_STORAGE_KEY)
@@ -281,14 +269,34 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
 
   const handleWhiteboardSceneChange = useCallback((scene: WhiteboardSceneSnapshot) => {
     whiteboardSceneRef.current = scene
+    persistWhiteboardScene(CREATE_TASK_WHITEBOARD_STORAGE_KEY, scene)
+  }, [])
 
-    if (whiteboardPersistTimerRef.current) {
-      clearTimeout(whiteboardPersistTimerRef.current)
+  const openWhiteboardModal = useCallback(() => {
+    setInitialWhiteboardScene(whiteboardSceneRef.current)
+    setIsWhiteboardModalOpen(true)
+  }, [])
+
+  const closeWhiteboardModal = useCallback(() => {
+    setIsWhiteboardModalOpen(false)
+  }, [])
+
+  const attachWhiteboardToPendingFiles = useCallback(async () => {
+    const scene = whiteboardSceneRef.current
+    if (!scene || !hasWhiteboardContent(scene)) return
+    setIsAttachingWhiteboard(true)
+    try {
+      const file = await exportWhiteboardPngFile(scene, createWhiteboardAttachmentFilename())
+      setPendingFiles(prev => [...prev, file])
+      whiteboardSceneRef.current = null
+      setInitialWhiteboardScene(null)
+      clearStoredWhiteboardScene(CREATE_TASK_WHITEBOARD_STORAGE_KEY)
+      setIsWhiteboardModalOpen(false)
+    } catch (err) {
+      console.error('Failed to export whiteboard image:', err)
+    } finally {
+      setIsAttachingWhiteboard(false)
     }
-
-    whiteboardPersistTimerRef.current = setTimeout(() => {
-      persistWhiteboardScene(CREATE_TASK_WHITEBOARD_STORAGE_KEY, scene)
-    }, 200)
   }, [])
 
   const handleSubmit = async () => {
@@ -298,20 +306,6 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
     try {
       // Only include skillConfigs if there are actual overrides
       const hasSkillConfigs = Object.keys(skillConfigs).length > 0
-      const filesToSubmit = [...pendingFiles]
-
-      const sceneToAttach = whiteboardSceneRef.current
-      if (sceneToAttach && hasWhiteboardContent(sceneToAttach)) {
-        try {
-          const whiteboardFile = await exportWhiteboardPngFile(
-            sceneToAttach,
-            createWhiteboardAttachmentFilename(),
-          )
-          filesToSubmit.push(whiteboardFile)
-        } catch (err) {
-          console.error('Failed to export whiteboard image:', err)
-        }
-      }
 
       await onSubmit({
         content,
@@ -320,13 +314,9 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
         skillConfigs: hasSkillConfigs ? skillConfigs : undefined,
         planningModelConfig,
         executionModelConfig,
-        pendingFiles: filesToSubmit.length > 0 ? filesToSubmit : undefined,
+        pendingFiles: pendingFiles.length > 0 ? pendingFiles : undefined,
       })
 
-      if (whiteboardPersistTimerRef.current) {
-        clearTimeout(whiteboardPersistTimerRef.current)
-        whiteboardPersistTimerRef.current = undefined
-      }
       whiteboardSceneRef.current = null
       setInitialWhiteboardScene(null)
       clearStoredWhiteboardScene(CREATE_TASK_WHITEBOARD_STORAGE_KEY)
@@ -352,23 +342,6 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
           fill
         />
       </div>
-
-      <div className="mt-3 shrink-0">
-        <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">
-          Whiteboard (Optional)
-        </label>
-        <p className="text-xs text-slate-400 mb-2">
-          Draw inline and we will auto-attach a PNG when you create the task.
-        </p>
-        <InlineWhiteboardPanel
-          isActive={isWhiteboardActive}
-          onActivate={() => setIsWhiteboardActive(true)}
-          onSceneChange={handleWhiteboardSceneChange}
-          initialScene={initialWhiteboardScene}
-          activateLabel="Open Excalidraw"
-          inactiveHint="No manual save needed — non-empty boards are exported automatically on submit."
-        />
-      </div>
     </div>
   )
 
@@ -381,13 +354,22 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
             <span className="ml-1.5 text-slate-400 font-normal">({pendingFiles.length})</span>
           )}
         </label>
-        <button
-          type="button"
-          onClick={() => fileInputRef.current?.click()}
-          className="text-xs text-blue-600 hover:text-blue-800 font-medium"
-        >
-          + Add Files
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={openWhiteboardModal}
+            className="text-xs text-violet-600 hover:text-violet-800 font-medium"
+          >
+            + Add Excalidraw
+          </button>
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+          >
+            + Add Files
+          </button>
+        </div>
         <input
           ref={fileInputRef}
           type="file"
@@ -573,6 +555,55 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
           {attachmentsSection}
           {modelSection}
           {executionPipelineSection}
+        </div>
+      )}
+
+      {isWhiteboardModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onClick={closeWhiteboardModal}
+        >
+          <div
+            className="w-full max-w-6xl max-h-[92vh] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+              <h3 className="text-sm font-semibold text-slate-700">Draw a sketch</h3>
+              <button
+                type="button"
+                onClick={closeWhiteboardModal}
+                className="h-7 w-7 rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-600 flex items-center justify-center"
+                title="Close"
+              >
+                ×
+              </button>
+            </div>
+            <div className="p-4">
+              <InlineWhiteboardPanel
+                isActive
+                onSceneChange={handleWhiteboardSceneChange}
+                initialScene={initialWhiteboardScene}
+                heightClassName="h-[70vh]"
+              />
+            </div>
+            <div className="flex items-center justify-end gap-2 border-t border-slate-200 px-4 py-3">
+              <button
+                type="button"
+                onClick={closeWhiteboardModal}
+                className="rounded-md border border-slate-200 px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void attachWhiteboardToPendingFiles()}
+                disabled={isAttachingWhiteboard}
+                className="rounded-md bg-slate-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-600 disabled:opacity-60"
+              >
+                {isAttachingWhiteboard ? 'Attaching…' : 'Attach sketch'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
