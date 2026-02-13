@@ -2104,11 +2104,17 @@ app.post('/api/workspaces/:workspaceId/planning/reset', async (req, res) => {
     res.status(404).json({ error: 'Workspace not found' });
     return;
   }
-  const newSessionId = await resetPlanningSession(
-    workspace.id,
-    (event) => broadcastToWorkspace(workspace.id, event),
-  );
-  res.json({ ok: true, sessionId: newSessionId });
+
+  try {
+    const newSessionId = await resetPlanningSession(
+      workspace.id,
+      (event) => broadcastToWorkspace(workspace.id, event),
+    );
+    res.json({ ok: true, sessionId: newSessionId });
+  } catch (err) {
+    logger.error('Error resetting planning session', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
 });
 
 // Poll for pending QA request (reliable fallback when WebSocket broadcasts don't arrive)

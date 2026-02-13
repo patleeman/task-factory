@@ -144,6 +144,13 @@ export async function removeArtifact(workspaceId: string, artifactId: string): P
 // Bulk operations
 // ─────────────────────────────────────────────────────────────────────────────
 
+export async function clearDraftTasks(workspaceId: string): Promise<Shelf> {
+  const shelf = await getShelf(workspaceId);
+  shelf.items = shelf.items.filter((si) => si.type !== 'draft-task');
+  await persistShelf(workspaceId, shelf);
+  return shelf;
+}
+
 export async function clearShelf(workspaceId: string): Promise<Shelf> {
   const shelf: Shelf = { items: [] };
   await persistShelf(workspaceId, shelf);

@@ -34,6 +34,7 @@ import type {
 } from '@pi-factory/shared';
 import {
   addDraftTask,
+  clearDraftTasks,
   getShelf,
   removeShelfItem,
   updateDraftTask as updateDraftTaskFn,
@@ -1057,9 +1058,13 @@ export async function resetPlanningSession(
   // Clear the active messages file
   persistMessagesSync(workspaceId, []);
 
-  // Broadcast the session reset event
+  // Clear production queue drafts (keep artifacts and other non-draft shelf items)
+  const shelf = await clearDraftTasks(workspaceId);
+
+  // Broadcast the session reset and updated shelf so clients clear chat + queue
   if (broadcast) {
     broadcast({ type: 'planning:session_reset', workspaceId, sessionId: newSessionId });
+    broadcast({ type: 'shelf:updated', workspaceId, shelf });
   }
 
   return newSessionId;
