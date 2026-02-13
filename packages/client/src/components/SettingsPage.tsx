@@ -160,7 +160,7 @@ export function SettingsPage() {
   }, [authOverview, selectedAuthProviderId])
 
   const providers = useMemo(
-    () => Array.from(new Set(models.map((model) => model.provider))).sort((a, b) => a.localeCompare(b)),
+    () => Array.from(new Set(models.map((model) => model.provider))).filter(Boolean).sort((a, b) => a.localeCompare(b)),
     [models],
   )
 

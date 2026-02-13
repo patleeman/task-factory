@@ -12,15 +12,10 @@ import {
   SessionManager,
   SettingsManager,
   DefaultResourceLoader,
+  type AgentSession,
 } from '@mariozechner/pi-coding-agent';
 import type { TaskPlan } from '@pi-factory/shared';
-
-function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms)),
-  ]);
-}
+import { withTimeout } from './with-timeout.js';
 
 export async function generatePlan(
   description: string,
@@ -42,6 +37,9 @@ Rules:
 Task Description:
 ${description}${criteriaText}`;
 
+  let session: AgentSession | null = null;
+  let result = '';
+
   try {
     const authStorage = new AuthStorage();
     const modelRegistry = new ModelRegistry(authStorage);
@@ -61,7 +59,7 @@ ${description}${criteriaText}`;
     });
     await loader.reload();
 
-    const { session } = await createAgentSession({
+    const created = await createAgentSession({
       model,
       thinkingLevel: 'off',
       tools: [],
@@ -75,8 +73,10 @@ ${description}${criteriaText}`;
       }),
     });
 
-    let result = '';
-    session.subscribe((event) => {
+    const activeSession = created.session;
+    session = activeSession;
+
+    activeSession.subscribe((event) => {
       if (
         event.type === 'message_update' &&
         event.assistantMessageEvent.type === 'text_delta'
@@ -85,14 +85,34 @@ ${description}${criteriaText}`;
       }
     });
 
-    await withTimeout(session.prompt(prompt), 15000, undefined);
-    session.dispose();
+    const timeoutMessage = 'Plan generation timed out';
 
-    const plan = parsePlanFromResponse(result, description, acceptanceCriteria);
-    return plan;
+    try {
+      await withTimeout(async (signal) => {
+        signal.addEventListener('abort', () => {
+          void activeSession.abort().catch(() => undefined);
+        }, { once: true });
+        await activeSession.prompt(prompt);
+      }, 300000, timeoutMessage);
+    } catch (err) {
+      // On timeout, abort the streaming request and continue with any partial output.
+      if (err instanceof Error && err.message === timeoutMessage) {
+        try {
+          await activeSession.abort();
+        } catch {
+          // Ignore abort errors — we'll still parse what we captured.
+        }
+      } else {
+        throw err;
+      }
+    }
+
+    return parsePlanFromResponse(result, description, acceptanceCriteria);
   } catch (err) {
     console.error('Plan generation failed, using fallback:', err);
     return fallbackPlan(description, acceptanceCriteria);
+  } finally {
+    session?.dispose();
   }
 }
 
@@ -137,24 +157,32 @@ function fallbackPlan(
   acceptanceCriteria: string[],
 ): TaskPlan {
   const firstLine = description.split('\n')[0].trim();
-  const goal = firstLine.length <= 200 ? firstLine : firstLine.slice(0, 197) + '...';
+  const goalBase = firstLine || 'Complete the requested task';
+  const goal = goalBase.length <= 200 ? goalBase : goalBase.slice(0, 197) + '...';
+
+  const normalizedCriteria = acceptanceCriteria
+    .map((criterion) => criterion.trim())
+    .filter(Boolean);
+
+  const criteriaForSteps = normalizedCriteria.slice(0, 6);
+  const criteriaForValidation = normalizedCriteria.slice(0, 5);
 
   return {
     goal,
-    steps: acceptanceCriteria.length > 0
-      ? acceptanceCriteria.map((c, i) => `Step ${i + 1}: Implement "${c}"`)
+    steps: criteriaForSteps.length > 0
+      ? criteriaForSteps.map((criterion) => `Deliver: ${criterion}`)
       : [
-          'Understand the current codebase structure',
+          'Understand the existing behavior and constraints',
           'Implement the required changes',
-          'Write tests for the new functionality',
-          'Verify all tests pass',
+          'Add or update tests',
+          'Verify the final behavior matches expectations',
         ],
-    validation: acceptanceCriteria.length > 0
-      ? acceptanceCriteria.map(c => `Verify: ${c}`)
+    validation: criteriaForValidation.length > 0
+      ? criteriaForValidation.map((criterion) => `Confirm: ${criterion}`)
       : [
-          'All new tests pass',
-          'No existing tests broken',
-          'Code lints cleanly',
+          'Relevant tests pass',
+          'Behavior matches the task description',
+          'No regressions are introduced',
         ],
     cleanup: [],
     generatedAt: new Date().toISOString(),

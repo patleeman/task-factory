@@ -493,6 +493,13 @@ export function canMoveToPhase(task: Task, targetPhase: Phase): {
   }
 
   // Phase-specific validation
+  if (targetPhase === 'executing' && task.frontmatter.planningStatus === 'running' && !task.frontmatter.plan) {
+    return {
+      allowed: false,
+      reason: 'Task planning is still running',
+    };
+  }
+
   if (targetPhase === 'ready') {
     if (normalizeAcceptanceCriteria(task.frontmatter.acceptanceCriteria).length === 0) {
       return {

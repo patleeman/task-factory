@@ -73,7 +73,7 @@ export default function (pi: ExtensionAPI) {
           content: [
             {
               type: 'text' as const,
-              text: `Note: save_plan is only available during the planning phase. The criteria/plan package was not persisted, but your work is captured in the conversation. Continue with your current task.`,
+              text: `Note: save_plan is only available before task execution starts. This task appears to be executing (or no active planning callback is registered), so the criteria/plan package was not persisted. Your work is still captured in the conversation. Continue with your current task.`,
             },
           ],
           details: {} as Record<string, unknown>,
@@ -83,6 +83,18 @@ export default function (pi: ExtensionAPI) {
       const normalizedAcceptanceCriteria = acceptanceCriteria
         .map((criterion: string) => criterion.trim())
         .filter(Boolean);
+
+      if (normalizedAcceptanceCriteria.length === 0) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: 'save_plan requires at least one non-empty acceptance criterion. Please provide clear criteria and try again.',
+            },
+          ],
+          details: {} as Record<string, unknown>,
+        };
+      }
 
       const plan = {
         goal,

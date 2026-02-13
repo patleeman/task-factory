@@ -57,10 +57,10 @@ import {
 // =============================================================================
 
 export interface ShelfCallbacks {
-  createDraftTask: (args: any) => void;
-  removeItem: (itemId: string) => string;
-  updateDraftTask: (draftId: string, updates: any) => string;
-  getShelf: () => any;
+  createDraftTask: (args: any) => Promise<void>;
+  removeItem: (itemId: string) => Promise<string>;
+  updateDraftTask: (draftId: string, updates: any) => Promise<string>;
+  getShelf: () => Promise<Shelf>;
 }
 
 declare global {
@@ -80,7 +80,7 @@ function registerShelfCallbacks(
 ): void {
   const registry = ensureShelfCallbackRegistry();
   registry.set(workspaceId, {
-    createDraftTask: (args: any) => {
+    createDraftTask: async (args: any) => {
       const draft: DraftTask = {
         id: `draft-${crypto.randomUUID().slice(0, 8)}`,
         title: String(args.title || 'Untitled Task'),
@@ -97,28 +97,28 @@ function registerShelfCallbacks(
         } : undefined,
         createdAt: new Date().toISOString(),
       };
-      const shelf = addDraftTask(workspaceId, draft);
+      const shelf = await addDraftTask(workspaceId, draft);
       broadcast({ type: 'shelf:updated', workspaceId, shelf });
     },
-    removeItem: (itemId: string) => {
+    removeItem: async (itemId: string) => {
       try {
-        const shelf = removeShelfItem(workspaceId, itemId);
+        const shelf = await removeShelfItem(workspaceId, itemId);
         broadcast({ type: 'shelf:updated', workspaceId, shelf });
         return `Removed item ${itemId}`;
       } catch (err: any) {
         return `Failed to remove: ${err.message}`;
       }
     },
-    updateDraftTask: (draftId: string, updates: any) => {
+    updateDraftTask: async (draftId: string, updates: any) => {
       try {
-        const shelf = updateDraftTaskFn(workspaceId, draftId, updates);
+        const shelf = await updateDraftTaskFn(workspaceId, draftId, updates);
         broadcast({ type: 'shelf:updated', workspaceId, shelf });
         return `Updated draft ${draftId}`;
       } catch (err: any) {
         return `Failed to update: ${err.message}`;
       }
     },
-    getShelf: () => {
+    getShelf: async () => {
       return getShelf(workspaceId);
     },
   });
@@ -303,18 +303,39 @@ export function resolveQARequest(
 // Planning session ID management
 // =============================================================================
 
+interface WorkspaceRegistryEntry {
+  id: string;
+  path: string;
+}
+
+function getWorkspacePath(workspaceId: string): string | null {
+  const activeSession = planningSessions.get(workspaceId);
+  if (activeSession?.workspacePath) {
+    return activeSession.workspacePath;
+  }
+
+  const registryPath = join(homedir(), '.pi', 'factory', 'workspaces.json');
+  try {
+    const entries = JSON.parse(readFileSync(registryPath, 'utf-8')) as WorkspaceRegistryEntry[];
+    const entry = entries.find((e) => e.id === workspaceId);
+    return entry?.path || null;
+  } catch {
+    return null;
+  }
+}
+
 function sessionIdPath(workspaceId: string): string | null {
-  const workspace = getWorkspaceById(workspaceId);
-  if (!workspace) return null;
-  const dir = join(workspace.path, '.pi');
+  const workspacePath = getWorkspacePath(workspaceId);
+  if (!workspacePath) return null;
+  const dir = join(workspacePath, '.pi');
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   return join(dir, 'planning-session-id.txt');
 }
 
 function sessionsDir(workspaceId: string): string | null {
-  const workspace = getWorkspaceById(workspaceId);
-  if (!workspace) return null;
-  const dir = join(workspace.path, '.pi', 'planning-sessions');
+  const workspacePath = getWorkspacePath(workspaceId);
+  if (!workspacePath) return null;
+  const dir = join(workspacePath, '.pi', 'planning-sessions');
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -351,9 +372,9 @@ function archiveSession(workspaceId: string, sessionId: string, messages: Planni
 // =============================================================================
 
 function messagesPath(workspaceId: string): string | null {
-  const workspace = getWorkspaceById(workspaceId);
-  if (!workspace) return null;
-  const dir = join(workspace.path, '.pi');
+  const workspacePath = getWorkspacePath(workspaceId);
+  if (!workspacePath) return null;
+  const dir = join(workspacePath, '.pi');
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   return join(dir, 'planning-messages.json');
 }
@@ -405,6 +426,7 @@ function persistMessagesSync(workspaceId: string, messages: PlanningMessage[]): 
 
 interface PlanningSession {
   workspaceId: string;
+  workspacePath: string;
   piSession: AgentSession | null;
   status: PlanningAgentStatus;
   messages: PlanningMessage[];
@@ -436,13 +458,14 @@ async function getOrCreateSession(
     return existing;
   }
 
-  const workspace = getWorkspaceById(workspaceId);
+  const workspace = await getWorkspaceById(workspaceId);
   if (!workspace) {
     throw new Error(`Workspace ${workspaceId} not found`);
   }
 
   const session: PlanningSession = {
     workspaceId,
+    workspacePath: workspace.path,
     piSession: null,
     status: 'idle',
     messages: existing?.messages || loadPersistedMessages(workspaceId),
@@ -511,9 +534,9 @@ async function getOrCreateSession(
 // System prompt for the planning agent
 // =============================================================================
 
-export function buildPlanningSystemPrompt(workspacePath: string, workspaceId: string): string {
+export async function buildPlanningSystemPrompt(workspacePath: string, workspaceId: string): Promise<string> {
   // Get current tasks for context
-  const workspace = getWorkspaceById(workspaceId);
+  const workspace = await getWorkspaceById(workspaceId);
   let taskSummary = '';
   if (workspace) {
     try {
@@ -562,9 +585,9 @@ export function buildPlanningSystemPrompt(workspacePath: string, workspaceId: st
   }
 
   // Get current production queue contents (draft tasks only)
-  const shelf = getShelf(workspaceId);
+  const shelf = await getShelf(workspaceId);
   let shelfSummary = '';
-  const drafts = shelf.items.filter(si => si.type === 'draft-task');
+  const drafts = shelf.items.filter((si) => si.type === 'draft-task');
   if (drafts.length > 0) {
     shelfSummary = '\n## Current Production Queue\n';
     for (const si of drafts) {
@@ -821,9 +844,8 @@ async function sendToAgent(
     try {
       if (!session.firstMessageSent) {
         // First message in this Pi session: include system prompt + conversation history
-        const workspace = getWorkspaceById(workspaceId);
-        const systemPrompt = buildPlanningSystemPrompt(
-          workspace?.path || '',
+        const systemPrompt = await buildPlanningSystemPrompt(
+          session.workspacePath,
           workspaceId,
         );
 
@@ -874,8 +896,10 @@ async function sendToAgent(
 
         // Recreate the Pi SDK session in-place
         try {
-          const workspace = getWorkspaceById(workspaceId);
+          const workspace = await getWorkspaceById(workspaceId);
           if (!workspace) throw new Error('Workspace not found');
+
+          session.workspacePath = workspace.path;
 
           const authStorage = new AuthStorage();
           const modelRegistry = new ModelRegistry(authStorage);

@@ -51,8 +51,8 @@ export function WorkspacePage() {
 
   const [shelf, setShelf] = useState<Shelf>({ items: [] })
   const [planningMessages, setPlanningMessages] = useState<PlanningMessage[]>([])
-  const [planGeneratingTaskIds, setPlanGeneratingTaskIds] = useState<Set<string>>(new Set())
   const [runningExecutionTaskIds, setRunningExecutionTaskIds] = useState<Set<string>>(new Set())
+  const tasksByIdRef = useRef<Map<string, Task>>(new Map())
 
   const selectedTask = taskId ? tasks.find((t) => t.id === taskId) || null : null
   const isTaskRoute = Boolean(taskId)
@@ -71,13 +71,45 @@ export function WorkspacePage() {
       new Date(b.frontmatter.updated).getTime() - new Date(a.frontmatter.updated).getTime()
     )
   const nonArchivedTasks = tasks.filter(t => t.frontmatter.phase !== 'archived')
-  const runningTaskIds = useMemo(() => {
-    const ids = new Set(runningExecutionTaskIds)
-    for (const taskId of planGeneratingTaskIds) {
-      ids.add(taskId)
-    }
-    return ids
-  }, [runningExecutionTaskIds, planGeneratingTaskIds])
+  const runningTaskIds = runningExecutionTaskIds
+  const planGeneratingTaskIds = useMemo(() => {
+    return new Set(
+      tasks
+        .filter((t) => t.frontmatter.phase === 'backlog')
+        .filter((t) => t.frontmatter.planningStatus === 'running' && !t.frontmatter.plan)
+        .map((t) => t.id),
+    )
+  }, [tasks])
+
+  useEffect(() => {
+    tasksByIdRef.current = new Map(tasks.map((task) => [task.id, task]))
+  }, [tasks])
+
+  useEffect(() => {
+    setRunningExecutionTaskIds((prev) => {
+      const executingTaskIds = new Set(
+        tasks
+          .filter((task) => task.frontmatter.phase === 'executing')
+          .map((task) => task.id),
+      )
+
+      let changed = false
+      const next = new Set<string>()
+      for (const taskId of prev) {
+        if (executingTaskIds.has(taskId)) {
+          next.add(taskId)
+        } else {
+          changed = true
+        }
+      }
+
+      if (!changed && next.size === prev.size) {
+        return prev
+      }
+
+      return next
+    })
+  }, [tasks])
 
   // Load workspace data
   useEffect(() => {
@@ -85,6 +117,7 @@ export function WorkspacePage() {
 
     setIsLoading(true)
     setError(null)
+    setActivity([])
     setRunningExecutionTaskIds(new Set())
 
     Promise.all([
@@ -102,19 +135,39 @@ export function WorkspacePage() {
       .then(([ws, tasksData, activityData, qStatus, shelfData, planningMsgs, activeExecutions]) => {
         setWorkspace(ws)
         setTasks(tasksData)
-        setActivity(activityData)
+        setActivity((prev) => {
+          const byId = new Map<string, ActivityEntry>()
+
+          for (const entry of activityData) {
+            if (entry?.id) byId.set(entry.id, entry)
+          }
+
+          // Keep any live websocket entries that arrived while the initial
+          // HTTP load was still in flight.
+          for (const entry of prev) {
+            if (entry?.id && !byId.has(entry.id)) {
+              byId.set(entry.id, entry)
+            }
+          }
+
+          const merged = Array.from(byId.values())
+          merged.sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''))
+          return merged
+        })
         setQueueStatus(qStatus)
         setShelf(shelfData)
         setPlanningMessages(planningMsgs)
-        setPlanGeneratingTaskIds(new Set(
+
+        const executingTaskIds = new Set(
           tasksData
-            .filter((t) => t.frontmatter.planningStatus === 'running' && !t.frontmatter.plan)
-            .map((t) => t.id)
-        ))
+            .filter((task) => task.frontmatter.phase === 'executing')
+            .map((task) => task.id),
+        )
+
         setRunningExecutionTaskIds(new Set(
           activeExecutions
-            .filter((session) => session.isRunning)
-            .map((session) => session.taskId)
+            .filter((session) => session.isRunning && executingTaskIds.has(session.taskId))
+            .map((session) => session.taskId),
         ))
         setIsLoading(false)
       })
@@ -136,7 +189,7 @@ export function WorkspacePage() {
           const newEntries = taskEntries.filter((e) => !existingIds.has(e.id))
           if (newEntries.length === 0) return prev
           const merged = [...newEntries, ...prev]
-          merged.sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+          merged.sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''))
           return merged
         })
       })
@@ -159,37 +212,34 @@ export function WorkspacePage() {
             if (prev.some((t) => t.id === msg.task.id)) return prev
             return [msg.task, ...prev]
           })
-          // Track plan generation for tasks without a plan
-          if (!msg.task.frontmatter.plan && msg.task.content) {
-            setPlanGeneratingTaskIds((prev) => new Set(prev).add(msg.task.id))
-          }
           break
         case 'task:updated':
           setTasks((prev) =>
             prev.map((t) => (t.id === msg.task.id ? msg.task : t))
           )
-          setPlanGeneratingTaskIds((prev) => {
-            const next = new Set(prev)
-            const isPlanning = msg.task.frontmatter.planningStatus === 'running' && !msg.task.frontmatter.plan
-            if (isPlanning) {
-              next.add(msg.task.id)
-            } else {
+          if (msg.task.frontmatter.phase !== 'executing') {
+            setRunningExecutionTaskIds((prev) => {
+              if (!prev.has(msg.task.id)) return prev
+              const next = new Set(prev)
               next.delete(msg.task.id)
-            }
-            return next
-          })
+              return next
+            })
+          }
           break
         case 'task:moved':
           setTasks((prev) =>
             prev.map((t) => (t.id === msg.task.id ? msg.task : t))
           )
+          if (msg.to !== 'executing') {
+            setRunningExecutionTaskIds((prev) => {
+              if (!prev.has(msg.task.id)) return prev
+              const next = new Set(prev)
+              next.delete(msg.task.id)
+              return next
+            })
+          }
           break
         case 'task:plan_generated': {
-          setPlanGeneratingTaskIds((prev) => {
-            const next = new Set(prev)
-            next.delete(msg.taskId)
-            return next
-          })
           setTasks((prev) =>
             prev.map((t) =>
               t.id === msg.taskId
@@ -217,15 +267,23 @@ export function WorkspacePage() {
           break
         }
         case 'activity:entry':
-          setActivity((prev) => [msg.entry, ...prev])
+          setActivity((prev) => {
+            const entry = msg.entry
+            if (!entry?.id) return prev
+            if (prev.some((e) => e.id === entry.id)) return prev
+            return [entry, ...prev]
+          })
           break
         case 'queue:status':
           setQueueStatus(msg.status)
           break
-        case 'agent:execution_status':
+        case 'agent:execution_status': {
+          const task = tasksByIdRef.current.get(msg.taskId)
+          const isExecutingTask = task?.frontmatter.phase === 'executing'
+
           setRunningExecutionTaskIds((prev) => {
             const next = new Set(prev)
-            if (isExecutionStatusRunning(msg.status)) {
+            if (isExecutionStatusRunning(msg.status) && isExecutingTask) {
               next.add(msg.taskId)
             } else {
               next.delete(msg.taskId)
@@ -233,6 +291,7 @@ export function WorkspacePage() {
             return next
           })
           break
+        }
         case 'shelf:updated':
           setShelf(msg.shelf)
           break
@@ -252,10 +311,6 @@ export function WorkspacePage() {
         } catch (uploadErr) {
           console.error('Failed to upload attachments:', uploadErr)
         }
-      }
-      // Track that plan is being generated for this task
-      if (!task.frontmatter.plan && task.content) {
-        setPlanGeneratingTaskIds((prev) => new Set(prev).add(task.id))
       }
       navigate(`${workspaceRootPath}/tasks/${task.id}`)
     } catch (err) {
@@ -289,6 +344,14 @@ export function WorkspacePage() {
       },
     }
     setTasks((prev) => prev.map((t) => (t.id === task.id ? updatedTask : t)))
+    if (toPhase !== 'executing') {
+      setRunningExecutionTaskIds((prev) => {
+        if (!prev.has(task.id)) return prev
+        const next = new Set(prev)
+        next.delete(task.id)
+        return next
+      })
+    }
 
     try {
       const result = await api.moveTask(workspaceId, task.id, toPhase)
@@ -568,7 +631,7 @@ export function WorkspacePage() {
                 <path d="M3 1.5v11l9-5.5z" />
               </svg>
             )}
-            {queueStatus?.enabled ? 'Running' : 'Paused'}
+            {queueStatus?.enabled ? 'Queue On' : 'Queue Off'}
             {queueStatus?.enabled && queueStatus.tasksInReady > 0 && (
               <span className="bg-green-500/30 text-green-300 text-xs px-1.5 py-0.5 rounded-full">
                 {queueStatus.tasksInReady} queued
@@ -636,6 +699,8 @@ export function WorkspacePage() {
                 attachments={[]}
                 agentStream={planningStream.agentStream}
                 onSendMessage={handlePlanningMessage}
+                onSteer={handlePlanningMessage}
+                onFollowUp={handlePlanningMessage}
                 onUploadFiles={handlePlanningUpload}
                 getAttachmentUrl={(storedName) => api.getPlanningAttachmentUrl(workspaceId!, storedName)}
                 onReset={handleResetPlanning}

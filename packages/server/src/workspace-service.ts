@@ -5,11 +5,13 @@
 // Workspaces are stored as .pi/factory.json files in the workspace directory.
 // A registry at ~/.pi/factory/workspaces.json tracks known workspace paths.
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'fs';
+import { mkdir, readFile, writeFile, rm, stat } from 'fs/promises';
 import { join, basename } from 'path';
 import { homedir } from 'os';
 import type { Workspace, WorkspaceConfig } from '@pi-factory/shared';
-import { discoverTasks } from './task-service.js';
+// discoverTasks is likely sync, but we are just importing it here.
+// If discoverTasks is used in the future it might need to be async too,
+// but for now we focus on workspace service functions.
 
 // =============================================================================
 // Constants
@@ -30,6 +32,19 @@ const DEFAULT_CONFIG: WorkspaceConfig = {
 };
 
 // =============================================================================
+// Helpers
+// =============================================================================
+
+async function exists(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// =============================================================================
 // Registry (lightweight index of known workspaces)
 // =============================================================================
 
@@ -39,64 +54,62 @@ interface WorkspaceEntry {
   name: string;
 }
 
-function loadRegistry(): WorkspaceEntry[] {
-  if (!existsSync(REGISTRY_PATH)) return [];
+async function loadRegistry(): Promise<WorkspaceEntry[]> {
   try {
-    return JSON.parse(readFileSync(REGISTRY_PATH, 'utf-8'));
+    const content = await readFile(REGISTRY_PATH, 'utf-8');
+    return JSON.parse(content);
   } catch {
     return [];
   }
 }
 
-function saveRegistry(entries: WorkspaceEntry[]): void {
-  if (!existsSync(REGISTRY_DIR)) {
-    mkdirSync(REGISTRY_DIR, { recursive: true });
-  }
-  writeFileSync(REGISTRY_PATH, JSON.stringify(entries, null, 2), 'utf-8');
+async function saveRegistry(entries: WorkspaceEntry[]): Promise<void> {
+  await mkdir(REGISTRY_DIR, { recursive: true });
+  await writeFile(REGISTRY_PATH, JSON.stringify(entries, null, 2), 'utf-8');
 }
 
-function addToRegistry(entry: WorkspaceEntry): void {
-  const entries = loadRegistry().filter((e) => e.path !== entry.path);
+async function addToRegistry(entry: WorkspaceEntry): Promise<void> {
+  const current = await loadRegistry();
+  const entries = current.filter((e) => e.path !== entry.path);
   entries.push(entry);
-  saveRegistry(entries);
+  await saveRegistry(entries);
 }
 
-function removeFromRegistry(id: string): void {
-  const entries = loadRegistry().filter((e) => e.id !== id);
-  saveRegistry(entries);
+async function removeFromRegistry(id: string): Promise<void> {
+  const current = await loadRegistry();
+  const entries = current.filter((e) => e.id !== id);
+  await saveRegistry(entries);
 }
 
 // =============================================================================
 // Read workspace config from disk
 // =============================================================================
 
-function readWorkspaceConfig(workspacePath: string): WorkspaceConfig | null {
+async function readWorkspaceConfig(workspacePath: string): Promise<WorkspaceConfig | null> {
   const configPath = join(workspacePath, '.pi', 'factory.json');
-  if (!existsSync(configPath)) return null;
   try {
-    return JSON.parse(readFileSync(configPath, 'utf-8'));
+    const content = await readFile(configPath, 'utf-8');
+    return JSON.parse(content);
   } catch {
     return null;
   }
 }
 
-function writeWorkspaceConfig(workspacePath: string, config: WorkspaceConfig): void {
+async function writeWorkspaceConfig(workspacePath: string, config: WorkspaceConfig): Promise<void> {
   const piDir = join(workspacePath, '.pi');
-  if (!existsSync(piDir)) {
-    mkdirSync(piDir, { recursive: true });
-  }
-  writeFileSync(join(piDir, 'factory.json'), JSON.stringify(config, null, 2), 'utf-8');
+  await mkdir(piDir, { recursive: true });
+  await writeFile(join(piDir, 'factory.json'), JSON.stringify(config, null, 2), 'utf-8');
 }
 
 // =============================================================================
 // Workspace CRUD
 // =============================================================================
 
-export function createWorkspace(
+export async function createWorkspace(
   path: string,
   name?: string,
   config?: Partial<WorkspaceConfig>
-): Workspace {
+): Promise<Workspace> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
@@ -115,26 +128,24 @@ export function createWorkspace(
   };
 
   // Write config to workspace directory
-  writeWorkspaceConfig(path, mergedConfig);
+  await writeWorkspaceConfig(path, mergedConfig);
 
   // Ensure tasks directory exists
   const tasksDir = getTasksDir(workspace);
-  if (!existsSync(tasksDir)) {
-    mkdirSync(tasksDir, { recursive: true });
-  }
+  await mkdir(tasksDir, { recursive: true });
 
   // Track in registry
-  addToRegistry({ id, path, name: workspace.name });
+  await addToRegistry({ id, path, name: workspace.name });
 
   return workspace;
 }
 
-export function loadWorkspace(path: string): Workspace | null {
+export async function loadWorkspace(path: string): Promise<Workspace | null> {
   // Check registry first
-  const entries = loadRegistry();
+  const entries = await loadRegistry();
   const entry = entries.find((e) => e.path === path);
 
-  const config = readWorkspaceConfig(path);
+  const config = await readWorkspaceConfig(path);
 
   if (entry && config) {
     return {
@@ -155,12 +166,12 @@ export function loadWorkspace(path: string): Workspace | null {
   return null;
 }
 
-export function getWorkspaceById(id: string): Workspace | null {
-  const entries = loadRegistry();
+export async function getWorkspaceById(id: string): Promise<Workspace | null> {
+  const entries = await loadRegistry();
   const entry = entries.find((e) => e.id === id);
   if (!entry) return null;
 
-  const config = readWorkspaceConfig(entry.path);
+  const config = await readWorkspaceConfig(entry.path);
   if (!config) return null;
 
   return {
@@ -173,12 +184,12 @@ export function getWorkspaceById(id: string): Workspace | null {
   };
 }
 
-export function listWorkspaces(): Workspace[] {
-  const entries = loadRegistry();
+export async function listWorkspaces(): Promise<Workspace[]> {
+  const entries = await loadRegistry();
   const workspaces: Workspace[] = [];
 
   for (const entry of entries) {
-    const config = readWorkspaceConfig(entry.path);
+    const config = await readWorkspaceConfig(entry.path);
     if (config) {
       workspaces.push({
         id: entry.id,
@@ -195,17 +206,17 @@ export function listWorkspaces(): Workspace[] {
   return workspaces;
 }
 
-export function updateWorkspaceConfig(
+export async function updateWorkspaceConfig(
   workspace: Workspace,
   config: Partial<WorkspaceConfig>
-): Workspace {
+): Promise<Workspace> {
   workspace.config = {
     ...workspace.config,
     ...config,
   };
   workspace.updatedAt = new Date().toISOString();
 
-  writeWorkspaceConfig(workspace.path, workspace.config);
+  await writeWorkspaceConfig(workspace.path, workspace.config);
 
   return workspace;
 }
@@ -218,63 +229,53 @@ export function updateWorkspaceConfig(
  * Delete a workspace: remove from registry and clean up .pi/factory data.
  * Does NOT delete the user's project files — only Pi-Factory metadata.
  */
-export function deleteWorkspace(id: string): boolean {
-  const entries = loadRegistry();
+export async function deleteWorkspace(id: string): Promise<boolean> {
+  const entries = await loadRegistry();
   const entry = entries.find((e) => e.id === id);
   if (!entry) return false;
 
   // Remove factory config file (.pi/factory.json)
   const configPath = join(entry.path, '.pi', 'factory.json');
-  if (existsSync(configPath)) {
-    try {
-      rmSync(configPath);
-    } catch {
-      // Best-effort cleanup
-    }
+  try {
+    await rm(configPath);
+  } catch {
+    // Best-effort cleanup
   }
 
   // Remove factory data directory (.pi/factory/) — activity logs, etc.
   const factoryDir = join(entry.path, '.pi', 'factory');
-  if (existsSync(factoryDir)) {
-    try {
-      rmSync(factoryDir, { recursive: true });
-    } catch {
-      // Best-effort cleanup
-    }
+  try {
+    await rm(factoryDir, { recursive: true });
+  } catch {
+    // Best-effort cleanup
   }
 
   // Remove task files (.pi/tasks/)
   const tasksDir = join(entry.path, '.pi', 'tasks');
-  if (existsSync(tasksDir)) {
-    try {
-      rmSync(tasksDir, { recursive: true });
-    } catch {
-      // Best-effort cleanup
-    }
+  try {
+    await rm(tasksDir, { recursive: true });
+  } catch {
+    // Best-effort cleanup
   }
 
   // Remove shelf data (.pi/shelf.json)
   const shelfPath = join(entry.path, '.pi', 'shelf.json');
-  if (existsSync(shelfPath)) {
-    try {
-      rmSync(shelfPath);
-    } catch {
-      // Best-effort cleanup
-    }
+  try {
+    await rm(shelfPath);
+  } catch {
+    // Best-effort cleanup
   }
 
   // Remove planning attachments (.pi/planning-attachments/)
   const planningAttDir = join(entry.path, '.pi', 'planning-attachments');
-  if (existsSync(planningAttDir)) {
-    try {
-      rmSync(planningAttDir, { recursive: true });
-    } catch {
-      // Best-effort cleanup
-    }
+  try {
+    await rm(planningAttDir, { recursive: true });
+  } catch {
+    // Best-effort cleanup
   }
 
   // Remove from registry
-  removeFromRegistry(id);
+  await removeFromRegistry(id);
 
   return true;
 }

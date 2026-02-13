@@ -211,6 +211,31 @@ Body`;
 
     expect(parsed.frontmatter.acceptanceCriteria).toEqual(['Keep this']);
   });
+
+  it('normalizes YAML object-style criteria into readable text', () => {
+    const now = new Date().toISOString();
+    const rawTask = `---
+id: TEST-OBJ
+phase: backlog
+created: ${now}
+updated: ${now}
+workspace: /tmp/workspace
+project: workspace
+acceptanceCriteria:
+  - Criterion with colon: still valid text
+testingInstructions: []
+commits: []
+attachments: []
+blocked:
+  isBlocked: false
+---
+
+Body`;
+
+    const parsed = parseTaskContent(rawTask, '/tmp/test-obj.md');
+
+    expect(parsed.frontmatter.acceptanceCriteria).toEqual(['Criterion with colon: still valid text']);
+  });
 });
 
 describe('canMoveToPhase', () => {
@@ -237,6 +262,20 @@ describe('canMoveToPhase', () => {
 
     expect(result.allowed).toBe(false);
     expect(result.reason).toBe('Cannot move from backlog to executing');
+  });
+
+  it('blocks move to executing when planning is still running', () => {
+    const task = createTask({
+      phase: 'ready',
+      acceptanceCriteria: ['all good'],
+      planningStatus: 'running',
+      plan: undefined,
+    });
+
+    const result = canMoveToPhase(task, 'executing');
+
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toBe('Task planning is still running');
   });
 
   it('only allows unarchive from archived to backlog', () => {

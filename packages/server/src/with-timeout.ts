@@ -1,26 +1,28 @@
 /**
- * Resolve/reject with the original promise result unless it exceeds timeoutMs.
- * In that case, reject with the provided timeout message.
+ * Runs an async operation with a timeout and cooperative cancellation.
+ *
+ * The operation receives an AbortSignal. On timeout, we abort that signal and
+ * reject with timeoutMessage (or a default message).
  */
 export async function withTimeout<T>(
-  promise: Promise<T>,
+  operation: (signal: AbortSignal) => Promise<T>,
   timeoutMs: number,
-  timeoutMessage: string,
+  timeoutMessage?: string,
 ): Promise<T> {
+  const controller = new AbortController();
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
   try {
     return await Promise.race([
-      promise,
+      operation(controller.signal),
       new Promise<T>((_, reject) => {
         timeoutId = setTimeout(() => {
-          reject(new Error(timeoutMessage));
+          controller.abort(new Error(timeoutMessage || `Operation timed out after ${timeoutMs}ms`));
+          reject(new Error(timeoutMessage || `Operation timed out after ${timeoutMs}ms`));
         }, timeoutMs);
       }),
     ]);
   } finally {
-    if (timeoutId) {
-      clearTimeout(timeoutId);
-    }
+    if (timeoutId) clearTimeout(timeoutId);
   }
 }

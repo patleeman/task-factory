@@ -10,8 +10,8 @@ import { Type } from '@sinclair/typebox';
 
 declare global {
   var __piFactoryShelfCallbacks: Map<string, {
-    createDraftTask: (args: any) => void;
-    createArtifact: (args: any) => void;
+    createDraftTask: (args: any) => Promise<void>;
+    createArtifact: (args: any) => Promise<void>;
   }> | undefined;
 }
 
@@ -37,7 +37,7 @@ export default function (pi: ExtensionAPI) {
 
       if (callbacks) {
         for (const [, cb] of callbacks) {
-          cb.createArtifact({ name, html });
+          await cb.createArtifact({ name, html });
           called = true;
           break;
         }

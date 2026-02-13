@@ -14,8 +14,8 @@ import { Type } from '@sinclair/typebox';
 
 declare global {
   var __piFactoryShelfCallbacks: Map<string, {
-    createDraftTask: (args: any) => void;
-    createArtifact: (args: any) => void;
+    createDraftTask: (args: any) => Promise<void>;
+    createArtifact: (args: any) => Promise<void>;
   }> | undefined;
 }
 
@@ -64,7 +64,7 @@ export default function (pi: ExtensionAPI) {
       if (callbacks) {
         // Try all registered callbacks — the planning agent service will handle routing
         for (const [, cb] of callbacks) {
-          cb.createDraftTask({
+          await cb.createDraftTask({
             title,
             content,
             acceptance_criteria,

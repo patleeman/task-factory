@@ -209,7 +209,7 @@ export async function runPreExecutionSkills(
     if (!skill) {
       const errMsg = `Pre-execution skill "${skillId}" not found`;
       console.warn(`[Skills] ${errMsg}`);
-      const notFoundEntry = createSystemEvent(
+      const notFoundEntry = await createSystemEvent(
         workspaceId,
         taskId,
         'phase-change',
@@ -224,7 +224,7 @@ export async function runPreExecutionSkills(
     skill = applySkillConfigOverrides(skill, skillConfigs?.[skillId]);
 
     // Broadcast that we're starting this skill
-    const startEntry = createSystemEvent(
+    const startEntry = await createSystemEvent(
       workspaceId,
       taskId,
       'phase-change',
@@ -241,7 +241,7 @@ export async function runPreExecutionSkills(
       }
     } catch (err) {
       console.error(`[Skills] Pre-execution skill "${skillId}" failed:`, err);
-      const errEntry = createSystemEvent(
+      const errEntry = await createSystemEvent(
         workspaceId,
         taskId,
         'phase-change',
@@ -253,7 +253,7 @@ export async function runPreExecutionSkills(
       throw new Error(`Pre-execution skill "${skill.name}" failed: ${err}`);
     }
 
-    const doneEntry = createSystemEvent(
+    const doneEntry = await createSystemEvent(
       workspaceId,
       taskId,
       'phase-change',
@@ -303,7 +303,7 @@ export async function runPostExecutionSkills(
     let skill = getPostExecutionSkill(skillId);
     if (!skill) {
       console.warn(`[Skills] Skill "${skillId}" not found, skipping`);
-      const notFoundEntry = createSystemEvent(
+      const notFoundEntry = await createSystemEvent(
         workspaceId,
         taskId,
         'phase-change',
@@ -318,7 +318,7 @@ export async function runPostExecutionSkills(
     skill = applySkillConfigOverrides(skill, skillConfigs?.[skillId]);
 
     // Broadcast that we're starting this skill
-    const startEntry = createSystemEvent(
+    const startEntry = await createSystemEvent(
       workspaceId,
       taskId,
       'phase-change',
@@ -337,7 +337,7 @@ export async function runPostExecutionSkills(
       }
 
       if (!producedOutput) {
-        const emptyEntry = createSystemEvent(
+        const emptyEntry = await createSystemEvent(
           workspaceId,
           taskId,
           'phase-change',
@@ -348,7 +348,7 @@ export async function runPostExecutionSkills(
       }
     } catch (err) {
       console.error(`[Skills] Error running skill "${skillId}":`, err);
-      const errEntry = createSystemEvent(
+      const errEntry = await createSystemEvent(
         workspaceId,
         taskId,
         'phase-change',
@@ -359,7 +359,7 @@ export async function runPostExecutionSkills(
       // Continue to next skill — don't fail the whole task
     }
 
-    const doneEntry = createSystemEvent(
+    const doneEntry = await createSystemEvent(
       workspaceId,
       taskId,
       'phase-change',
@@ -405,7 +405,7 @@ async function runLoopSkill(
   let producedOutput = false;
 
   for (let i = 0; i < skill.maxIterations; i++) {
-    const iterEntry = createSystemEvent(
+    const iterEntry = await createSystemEvent(
       workspaceId,
       taskId,
       'phase-change',
@@ -426,7 +426,7 @@ async function runLoopSkill(
     // Check if the agent signaled it's done.
     const responseText = getLastAssistantText(piSession);
     if (responseText.includes(skill.doneSignal)) {
-      const doneEntry = createSystemEvent(
+      const doneEntry = await createSystemEvent(
         workspaceId,
         taskId,
         'phase-change',
@@ -438,7 +438,7 @@ async function runLoopSkill(
     }
   }
 
-  const maxEntry = createSystemEvent(
+  const maxEntry = await createSystemEvent(
     workspaceId,
     taskId,
     'phase-change',

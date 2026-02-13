@@ -9,14 +9,14 @@ const css = readFileSync(cssPath, 'utf-8');
 
 describe('markdown list styles', () => {
   it('keeps ordered and unordered list markers for chat and task detail prose', () => {
-    expect(css).toMatch(/\.chat-prose ul, \.chat-prose ol,\s*\n\.prose ul, \.prose ol \{/m);
-    expect(css).toMatch(/\.chat-prose ul, \.prose ul \{\s*@apply list-disc;\s*\}/m);
-    expect(css).toMatch(/\.chat-prose ol, \.prose ol \{\s*@apply list-decimal;\s*\}/m);
+    expect(css).toMatch(/\.chat-prose ul,\s*\.chat-prose ol,\s*\.prose ul,\s*\.prose ol\s*\{/m);
+    expect(css).toMatch(/\.chat-prose ul,\s*\.prose ul\s*\{\s*@apply list-disc;\s*\}/m);
+    expect(css).toMatch(/\.chat-prose ol,\s*\.prose ol\s*\{\s*@apply list-decimal;\s*\}/m);
   });
 
   it('styles gfm task list checkboxes so checkbox states stay visible', () => {
-    expect(css).toMatch(/\.chat-prose \.contains-task-list,\s*\n\.prose \.contains-task-list \{/m);
-    expect(css).toMatch(/\.chat-prose \.task-list-item,\s*\n\.prose \.task-list-item \{/m);
-    expect(css).toMatch(/\.chat-prose \.task-list-item > input\[type='checkbox'\],\s*\n\.prose \.task-list-item > input\[type='checkbox'\] \{\s*@apply [^}]*opacity-100/m);
+    expect(css).toMatch(/\.chat-prose \.contains-task-list,\s*\.prose \.contains-task-list\s*\{/m);
+    expect(css).toMatch(/\.chat-prose \.task-list-item,\s*\.prose \.task-list-item\s*\{/m);
+    expect(css).toMatch(/\.chat-prose \.task-list-item > input\[type='checkbox'\],\s*\.prose \.task-list-item > input\[type='checkbox'\]\s*\{\s*@apply [^}]*opacity-100/m);
   });
 });

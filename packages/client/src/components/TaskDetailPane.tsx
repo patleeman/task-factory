@@ -561,6 +561,7 @@ function AttachmentsSection({ task, workspaceId }: { task: Task; workspaceId: st
   const [whiteboardSaveError, setWhiteboardSaveError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const whiteboardSaveTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const saveQueueRef = useRef<Promise<void>>(Promise.resolve())
   const lastSavedWhiteboardSignatureRef = useRef('')
   const attachments = task.frontmatter.attachments || []
 
@@ -569,6 +570,7 @@ function AttachmentsSection({ task, workspaceId }: { task: Task; workspaceId: st
     setWhiteboardScene(null)
     setIsSavingWhiteboard(false)
     setWhiteboardSaveError(null)
+    saveQueueRef.current = Promise.resolve()
     lastSavedWhiteboardSignatureRef.current = ''
     if (whiteboardSaveTimerRef.current) {
       clearTimeout(whiteboardSaveTimerRef.current)
@@ -601,7 +603,6 @@ function AttachmentsSection({ task, workspaceId }: { task: Task; workspaceId: st
   const saveWhiteboardAttachment = useCallback(async (
     scene: WhiteboardSceneSnapshot,
     signature: string,
-    existingAttachments: Task['frontmatter']['attachments'],
   ) => {
     setIsSavingWhiteboard(true)
     setWhiteboardSaveError(null)
@@ -612,7 +613,8 @@ function AttachmentsSection({ task, workspaceId }: { task: Task; workspaceId: st
         createWhiteboardAttachmentFilename(),
       )
 
-      const existingSketches = existingAttachments.filter((attachment) =>
+      const currentAttachments = await api.listAttachments(workspaceId, task.id)
+      const existingSketches = currentAttachments.filter((attachment) =>
         isWhiteboardAttachmentFilename(attachment.filename)
       )
 
@@ -634,6 +636,12 @@ function AttachmentsSection({ task, workspaceId }: { task: Task; workspaceId: st
     }
   }, [workspaceId, task.id])
 
+  const queueWhiteboardSave = useCallback((scene: WhiteboardSceneSnapshot, signature: string) => {
+    saveQueueRef.current = saveQueueRef.current
+      .catch(() => {})
+      .then(() => saveWhiteboardAttachment(scene, signature))
+  }, [saveWhiteboardAttachment])
+
   useEffect(() => {
     if (!isWhiteboardExpanded) return
 
@@ -648,7 +656,7 @@ function AttachmentsSection({ task, workspaceId }: { task: Task; workspaceId: st
     }
 
     whiteboardSaveTimerRef.current = setTimeout(() => {
-      void saveWhiteboardAttachment(sceneToSave, signature, attachments)
+      queueWhiteboardSave(sceneToSave, signature)
     }, 1200)
 
     return () => {
@@ -657,7 +665,7 @@ function AttachmentsSection({ task, workspaceId }: { task: Task; workspaceId: st
         whiteboardSaveTimerRef.current = undefined
       }
     }
-  }, [isWhiteboardExpanded, whiteboardScene, saveWhiteboardAttachment])
+  }, [isWhiteboardExpanded, whiteboardScene, queueWhiteboardSave])
 
   const handleDelete = async (attachmentId: string) => {
     if (!confirm('Delete this attachment?')) return

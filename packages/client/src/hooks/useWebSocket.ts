@@ -15,41 +15,78 @@ export function useWebSocket(workspaceId: string | null) {
   const ws = useRef<WebSocket | null>(null)
   const [isConnected, setIsConnected] = useState(false)
   const subscribersRef = useRef(new Set<MessageHandler>())
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const reconnectAttemptsRef = useRef(0)
+  const shouldReconnectRef = useRef(true)
 
   useEffect(() => {
     if (!workspaceId) return
 
+    shouldReconnectRef.current = true
+    reconnectAttemptsRef.current = 0
+
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const wsUrl = `${protocol}//${window.location.host}/ws`
 
-    ws.current = new WebSocket(wsUrl)
+    const connect = () => {
+      if (!shouldReconnectRef.current) return
 
-    ws.current.onopen = () => {
-      setIsConnected(true)
-      // Subscribe to workspace
-      if (ws.current?.readyState === WebSocket.OPEN) {
-        ws.current.send(JSON.stringify({ type: 'subscribe', workspaceId }))
-      }
-    }
+      const socket = new WebSocket(wsUrl)
+      ws.current = socket
 
-    ws.current.onclose = () => {
-      setIsConnected(false)
-    }
+      socket.onopen = () => {
+        setIsConnected(true)
+        reconnectAttemptsRef.current = 0
 
-    ws.current.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data) as ServerEvent
-        // Deliver to all subscribers synchronously — no batching, no lost messages
-        for (const handler of subscribersRef.current) {
-          handler(data)
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ type: 'subscribe', workspaceId }))
         }
-      } catch (err) {
-        console.error('Failed to parse WebSocket message:', err)
+      }
+
+      socket.onclose = () => {
+        setIsConnected(false)
+
+        if (!shouldReconnectRef.current) return
+
+        reconnectAttemptsRef.current += 1
+        const retryDelayMs = Math.min(5000, 500 * (2 ** Math.min(reconnectAttemptsRef.current, 4)))
+
+        reconnectTimerRef.current = setTimeout(() => {
+          connect()
+        }, retryDelayMs)
+      }
+
+      socket.onerror = () => {
+        // Let onclose handle reconnect scheduling.
+        socket.close()
+      }
+
+      socket.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data) as ServerEvent
+          // Deliver to all subscribers synchronously — no batching, no lost messages
+          for (const handler of subscribersRef.current) {
+            handler(data)
+          }
+        } catch (err) {
+          console.error('Failed to parse WebSocket message:', err)
+        }
       }
     }
+
+    connect()
 
     return () => {
+      shouldReconnectRef.current = false
+      setIsConnected(false)
+
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current)
+        reconnectTimerRef.current = null
+      }
+
       ws.current?.close()
+      ws.current = null
     }
   }, [workspaceId])
 

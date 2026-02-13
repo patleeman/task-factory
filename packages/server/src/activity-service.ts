@@ -5,8 +5,8 @@
 // Activity is stored as a JSONL file per workspace at .pi/factory/activity.jsonl.
 // At typical agent usage, this file stays small (thousands of lines max).
 
-import { existsSync, readFileSync, appendFileSync, mkdirSync } from 'fs';
-import { join } from 'path';
+import { mkdir, readFile, appendFile } from 'fs/promises';
+import { join, dirname } from 'path';
 import type {
   ActivityEntry,
   TaskSeparatorEntry,
@@ -20,54 +20,73 @@ import { getWorkspaceById } from './workspace-service.js';
 // File Operations
 // =============================================================================
 
-function activityFilePath(workspaceId: string): string {
-  const workspace = getWorkspaceById(workspaceId);
+async function activityFilePath(workspaceId: string): Promise<string> {
+  const workspace = await getWorkspaceById(workspaceId);
   if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`);
   return join(workspace.path, '.pi', 'factory', 'activity.jsonl');
 }
 
-function ensureActivityDir(filePath: string): void {
-  const dir = filePath.substring(0, filePath.lastIndexOf('/'));
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true });
-  }
+async function ensureActivityDir(filePath: string): Promise<void> {
+  const dir = dirname(filePath);
+  await mkdir(dir, { recursive: true });
 }
 
-function appendEntry(workspaceId: string, entry: ActivityEntry): void {
-  const filePath = activityFilePath(workspaceId);
-  ensureActivityDir(filePath);
-  appendFileSync(filePath, JSON.stringify(entry) + '\n', 'utf-8');
-}
+const appendQueueByWorkspace = new Map<string, Promise<void>>();
 
-function readAllEntries(workspaceId: string): ActivityEntry[] {
-  const filePath = activityFilePath(workspaceId);
-  if (!existsSync(filePath)) return [];
+async function appendEntry(workspaceId: string, entry: ActivityEntry): Promise<void> {
+  const previous = appendQueueByWorkspace.get(workspaceId) || Promise.resolve();
 
-  const lines = readFileSync(filePath, 'utf-8').trim().split('\n').filter(Boolean);
-  const entries: ActivityEntry[] = [];
+  const next = previous
+    .catch(() => undefined)
+    .then(async () => {
+      const filePath = await activityFilePath(workspaceId);
+      await ensureActivityDir(filePath);
+      await appendFile(filePath, JSON.stringify(entry) + '\n', 'utf-8');
+    });
 
-  for (const line of lines) {
-    try {
-      entries.push(JSON.parse(line));
-    } catch {
-      // Skip malformed lines
+  appendQueueByWorkspace.set(workspaceId, next);
+
+  try {
+    await next;
+  } finally {
+    if (appendQueueByWorkspace.get(workspaceId) === next) {
+      appendQueueByWorkspace.delete(workspaceId);
     }
   }
+}
 
-  return entries;
+async function readAllEntries(workspaceId: string): Promise<ActivityEntry[]> {
+  try {
+    const filePath = await activityFilePath(workspaceId);
+    const content = await readFile(filePath, 'utf-8');
+    const lines = content.trim().split('\n').filter(Boolean);
+    const entries: ActivityEntry[] = [];
+
+    for (const line of lines) {
+      try {
+        entries.push(JSON.parse(line));
+      } catch {
+        // Skip malformed lines
+      }
+    }
+
+    return entries;
+  } catch {
+    return [];
+  }
 }
 
 // =============================================================================
 // Entry Creation Helpers
 // =============================================================================
 
-export function createTaskSeparator(
+export async function createTaskSeparator(
   workspaceId: string,
   taskId: string,
   taskTitle: string,
   phase: Phase,
   agentId?: string
-): TaskSeparatorEntry {
+): Promise<TaskSeparatorEntry> {
   const entry: TaskSeparatorEntry = {
     type: 'task-separator',
     id: crypto.randomUUID(),
@@ -78,18 +97,18 @@ export function createTaskSeparator(
     agentId,
   };
 
-  appendEntry(workspaceId, entry);
+  await appendEntry(workspaceId, entry);
   return entry;
 }
 
-export function createChatMessage(
+export async function createChatMessage(
   workspaceId: string,
   taskId: string,
   role: 'user' | 'agent',
   content: string,
   agentId?: string,
   metadata?: Record<string, unknown>
-): ChatMessageEntry {
+): Promise<ChatMessageEntry> {
   const entry: ChatMessageEntry = {
     type: 'chat-message',
     id: crypto.randomUUID(),
@@ -101,17 +120,17 @@ export function createChatMessage(
     metadata,
   };
 
-  appendEntry(workspaceId, entry);
+  await appendEntry(workspaceId, entry);
   return entry;
 }
 
-export function createSystemEvent(
+export async function createSystemEvent(
   workspaceId: string,
   taskId: string,
   event: SystemEventEntry['event'],
   message: string,
   metadata?: Record<string, unknown>
-): SystemEventEntry {
+): Promise<SystemEventEntry> {
   const entry: SystemEventEntry = {
     type: 'system-event',
     id: crypto.randomUUID(),
@@ -122,7 +141,7 @@ export function createSystemEvent(
     metadata,
   };
 
-  appendEntry(workspaceId, entry);
+  await appendEntry(workspaceId, entry);
   return entry;
 }
 
@@ -130,21 +149,21 @@ export function createSystemEvent(
 // Activity Log Queries
 // =============================================================================
 
-export function getActivityTimeline(
+export async function getActivityTimeline(
   workspaceId: string,
   limit: number = 100
-): ActivityEntry[] {
-  const entries = readAllEntries(workspaceId);
+): Promise<ActivityEntry[]> {
+  const entries = await readAllEntries(workspaceId);
   // Return newest first, capped at limit
   return entries.reverse().slice(0, limit);
 }
 
-export function getActivityForTask(
+export async function getActivityForTask(
   workspaceId: string,
   taskId: string,
   limit: number = 50
-): ActivityEntry[] {
-  const entries = readAllEntries(workspaceId);
+): Promise<ActivityEntry[]> {
+  const entries = await readAllEntries(workspaceId);
   return entries
     .filter((e) => e.taskId === taskId)
     .reverse()
@@ -161,12 +180,12 @@ export interface ActivityStream {
   oldestTimestamp?: string;
 }
 
-export function getActivityStream(
+export async function getActivityStream(
   workspaceId: string,
   cursor?: string,
   limit: number = 50
-): ActivityStream {
-  const all = readAllEntries(workspaceId).reverse(); // newest first
+): Promise<ActivityStream> {
+  const all = (await readAllEntries(workspaceId)).reverse(); // newest first
 
   let filtered = all;
   if (cursor) {

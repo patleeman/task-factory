@@ -25,7 +25,7 @@ import {
   WORKSPACE_SHARED_CONTEXT_REL_PATH,
   type PiSkill,
 } from './pi-integration.js';
-import { moveTaskToPhase, updateTask, saveTaskFile } from './task-service.js';
+import { moveTaskToPhase, updateTask, saveTaskFile, parseTaskFile } from './task-service.js';
 import { runPreExecutionSkills, runPostExecutionSkills } from './post-execution-skills.js';
 import { withTimeout } from './with-timeout.js';
 import { generateAndPersistSummary } from './summary-service.js';
@@ -266,6 +266,22 @@ export function getAllActiveSessions(): TaskSession[] {
   return Array.from(activeSessions.values());
 }
 
+function broadcastActivityEntry(
+  broadcastToWorkspace: ((event: any) => void) | undefined,
+  entryPromise: Promise<any>,
+  context: string,
+): void {
+  if (!broadcastToWorkspace) return;
+
+  void entryPromise
+    .then((entry) => {
+      broadcastToWorkspace({ type: 'activity:entry', entry });
+    })
+    .catch((err) => {
+      console.error(`[AgentExecution] Failed to create activity entry (${context}):`, err);
+    });
+}
+
 // =============================================================================
 // Build Agent Prompt
 // =============================================================================
@@ -444,25 +460,31 @@ export async function executeTask(options: ExecuteTaskOptions): Promise<TaskSess
   activeSessions.set(task.id, session);
 
   // Create task separator in activity log
-  const sepEntry = createTaskSeparator(
-    workspaceId,
-    task.id,
-    task.frontmatter.title,
-    'executing'
+  broadcastActivityEntry(
+    broadcastToWorkspace,
+    createTaskSeparator(
+      workspaceId,
+      task.id,
+      task.frontmatter.title,
+      'executing',
+    ),
+    'task separator',
   );
-  broadcastToWorkspace?.({ type: 'activity:entry', entry: sepEntry });
 
   const isRework = task.frontmatter.sessionFile && existsSync(task.frontmatter.sessionFile);
-  const startEntry = createSystemEvent(
-    workspaceId,
-    task.id,
-    'phase-change',
-    isRework
-      ? `Agent resuming execution (continuing previous conversation)`
-      : `Agent started executing task`,
-    { sessionId: session.id }
+  broadcastActivityEntry(
+    broadcastToWorkspace,
+    createSystemEvent(
+      workspaceId,
+      task.id,
+      'phase-change',
+      isRework
+        ? `Agent resuming execution (continuing previous conversation)`
+        : `Agent started executing task`,
+      { sessionId: session.id },
+    ),
+    'execution start event',
   );
-  broadcastToWorkspace?.({ type: 'activity:entry', entry: startEntry });
 
   try {
     // Initialize Pi SDK components
@@ -615,14 +637,17 @@ async function runAgentExecution(
         status: 'pre-hooks',
       });
 
-      const preStartEntry = createSystemEvent(
-        workspaceId,
-        task.id,
-        'phase-change',
-        `Running ${preSkillIds.length} pre-execution skill(s): ${preSkillIds.join(', ')}`,
-        { skillIds: preSkillIds }
+      broadcastActivityEntry(
+        session.broadcastToWorkspace,
+        createSystemEvent(
+          workspaceId,
+          task.id,
+          'phase-change',
+          `Running ${preSkillIds.length} pre-execution skill(s): ${preSkillIds.join(', ')}`,
+          { skillIds: preSkillIds },
+        ),
+        'pre-execution start event',
       );
-      session.broadcastToWorkspace?.({ type: 'activity:entry', entry: preStartEntry });
 
       try {
         await runPreExecutionSkills(session.piSession, preSkillIds, {
@@ -633,14 +658,17 @@ async function runAgentExecution(
         });
       } catch (preErr) {
         console.error('Pre-execution skills failed:', preErr);
-        const preErrEntry = createSystemEvent(
-          workspaceId,
-          task.id,
-          'phase-change',
-          `Pre-execution skills failed — skipping main execution and post-execution: ${preErr}`,
-          { error: String(preErr) }
+        broadcastActivityEntry(
+          session.broadcastToWorkspace,
+          createSystemEvent(
+            workspaceId,
+            task.id,
+            'phase-change',
+            `Pre-execution skills failed — skipping main execution and post-execution: ${preErr}`,
+            { error: String(preErr) },
+          ),
+          'pre-execution error event',
         );
-        session.broadcastToWorkspace?.({ type: 'activity:entry', entry: preErrEntry });
 
         // Pre-execution failure: skip main execution and post-execution
         handleAgentError(session, workspaceId, task, preErr);
@@ -707,14 +735,17 @@ async function handleAgentTurnEnd(
       status: 'post-hooks',
     });
 
-    const postStartEntry = createSystemEvent(
-      workspaceId,
-      task.id,
-      'phase-change',
-      `Running ${postSkillIds.length} post-execution skill(s): ${postSkillIds.join(', ')}`,
-      { skillIds: postSkillIds }
+    broadcastActivityEntry(
+      session.broadcastToWorkspace,
+      createSystemEvent(
+        workspaceId,
+        task.id,
+        'phase-change',
+        `Running ${postSkillIds.length} post-execution skill(s): ${postSkillIds.join(', ')}`,
+        { skillIds: postSkillIds },
+      ),
+      'post-execution start event',
     );
-    session.broadcastToWorkspace?.({ type: 'activity:entry', entry: postStartEntry });
 
     try {
       await runPostExecutionSkills(session.piSession, postSkillIds, {
@@ -725,14 +756,17 @@ async function handleAgentTurnEnd(
       });
     } catch (hookErr) {
       console.error('Post-execution skills error:', hookErr);
-      const hookErrEntry = createSystemEvent(
-        workspaceId,
-        task.id,
-        'phase-change',
-        `Post-execution skills error: ${hookErr}`,
-        { error: String(hookErr) }
+      broadcastActivityEntry(
+        session.broadcastToWorkspace,
+        createSystemEvent(
+          workspaceId,
+          task.id,
+          'phase-change',
+          `Post-execution skills error: ${hookErr}`,
+          { error: String(hookErr) },
+        ),
+        'post-execution error event',
       );
-      session.broadcastToWorkspace?.({ type: 'activity:entry', entry: hookErrEntry });
     }
   }
 
@@ -745,25 +779,31 @@ async function handleAgentTurnEnd(
       status: 'post-hooks',
     });
 
-    const summaryStartEntry = createSystemEvent(
-      workspaceId,
-      task.id,
-      'phase-change',
-      'Generating post-execution summary…',
+    broadcastActivityEntry(
+      session.broadcastToWorkspace,
+      createSystemEvent(
+        workspaceId,
+        task.id,
+        'phase-change',
+        'Generating post-execution summary…',
+      ),
+      'post-summary start event',
     );
-    session.broadcastToWorkspace?.({ type: 'activity:entry', entry: summaryStartEntry });
 
     const postSummary = await generateAndPersistSummary(task, session.piSession, summary);
 
     const passCount = postSummary.criteriaValidation.filter(c => c.status === 'pass').length;
     const totalCount = postSummary.criteriaValidation.length;
-    const summaryEntry = createSystemEvent(
-      workspaceId,
-      task.id,
-      'phase-change',
-      `Post-execution summary generated (${postSummary.fileDiffs.length} files changed, ${passCount}/${totalCount} criteria passing)`,
+    broadcastActivityEntry(
+      session.broadcastToWorkspace,
+      createSystemEvent(
+        workspaceId,
+        task.id,
+        'phase-change',
+        `Post-execution summary generated (${postSummary.fileDiffs.length} files changed, ${passCount}/${totalCount} criteria passing)`,
+      ),
+      'post-summary completion event',
     );
-    session.broadcastToWorkspace?.({ type: 'activity:entry', entry: summaryEntry });
   } catch (summaryErr) {
     console.error('Failed to generate post-execution summary:', summaryErr);
   }
@@ -774,14 +814,17 @@ async function handleAgentTurnEnd(
 
   session.endTime = new Date().toISOString();
 
-  const completionEntry = createSystemEvent(
-    workspaceId,
-    task.id,
-    'phase-change',
-    `Agent execution completed${summary ? ': ' + summary : ''}`,
-    { sessionId: session.id }
+  broadcastActivityEntry(
+    session.broadcastToWorkspace,
+    createSystemEvent(
+      workspaceId,
+      task.id,
+      'phase-change',
+      `Agent execution completed${summary ? ': ' + summary : ''}`,
+      { sessionId: session.id },
+    ),
+    'execution completion event',
   );
-  session.broadcastToWorkspace?.({ type: 'activity:entry', entry: completionEntry });
 
   session.broadcastToWorkspace?.({
     type: 'agent:execution_status',
@@ -813,14 +856,17 @@ function handleAgentError(
   session.status = 'error';
   session.endTime = new Date().toISOString();
 
-  const errorEntry = createSystemEvent(
-    workspaceId,
-    task.id,
-    'phase-change',
-    `Agent execution error: ${err}`,
-    { sessionId: session.id }
+  broadcastActivityEntry(
+    session.broadcastToWorkspace,
+    createSystemEvent(
+      workspaceId,
+      task.id,
+      'phase-change',
+      `Agent execution error: ${err}`,
+      { sessionId: session.id },
+    ),
+    'execution error event',
   );
-  session.broadcastToWorkspace?.({ type: 'activity:entry', entry: errorEntry });
 
   session.broadcastToWorkspace?.({
     type: 'agent:execution_status',
@@ -965,8 +1011,11 @@ function handlePiEvent(
       }
 
       if (content && !shouldSkipToolEchoMessage(session, content)) {
-        const entry = createChatMessage(workspaceId, taskId, 'agent', content);
-        broadcast?.({ type: 'activity:entry', entry });
+        broadcastActivityEntry(
+          broadcast,
+          createChatMessage(workspaceId, taskId, 'agent', content),
+          'assistant message',
+        );
       }
 
       broadcast?.({
@@ -1041,17 +1090,16 @@ function handlePiEvent(
       const finalResultText = extractToolResultText((event as any).result) || streamedText;
 
       // Store as structured activity entry with tool metadata
-      const toolEntry = createChatMessage(workspaceId, taskId, 'agent', finalResultText, undefined, {
-        toolName: event.toolName,
-        toolCallId: event.toolCallId,
-        args: toolInfo?.args || {},
-        isError: event.isError,
-      });
-
-      broadcast?.({
-        type: 'activity:entry',
-        entry: toolEntry,
-      });
+      broadcastActivityEntry(
+        broadcast,
+        createChatMessage(workspaceId, taskId, 'agent', finalResultText, undefined, {
+          toolName: event.toolName,
+          toolCallId: event.toolCallId,
+          args: toolInfo?.args || {},
+          isError: event.isError,
+        }),
+        'tool result message',
+      );
 
       broadcast?.({
         type: 'agent:tool_end',
@@ -1455,7 +1503,7 @@ export async function stopTaskExecution(taskId: string): Promise<boolean> {
 // Plans are auto-generated at task creation time using planTask() below.
 // This agent is kept for manual/on-demand planning scenarios.
 
-const PLANNING_TIMEOUT_MS = 3 * 60 * 1000;
+const PLANNING_TIMEOUT_MS = 5 * 60 * 1000;
 const PLANNING_DEFAULT_THINKING_LEVEL = 'low' as const;
 
 export function buildPlanningPrompt(
@@ -1549,17 +1597,34 @@ export interface PlanTaskOptions {
   broadcastToWorkspace?: (event: any) => void;
 }
 
+function syncTaskReference(target: Task, source: Task): void {
+  target.id = source.id;
+  target.frontmatter = source.frontmatter;
+  target.content = source.content;
+  target.history = source.history;
+  target.filePath = source.filePath;
+}
+
+function persistPlanningMutation(task: Task, mutate: (latestTask: Task) => void): Task {
+  const latestTask = existsSync(task.filePath) ? parseTaskFile(task.filePath) : task;
+  mutate(latestTask);
+  saveTaskFile(latestTask);
+  syncTaskReference(task, latestTask);
+  return latestTask;
+}
+
 export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | null> {
   const { task, workspaceId, workspacePath, broadcastToWorkspace } = options;
 
   // Mark planning as running so interrupted work can be recovered on restart.
-  task.frontmatter.planningStatus = 'running';
-  task.frontmatter.updated = new Date().toISOString();
-  saveTaskFile(task);
+  const runningTask = persistPlanningMutation(task, (latestTask) => {
+    latestTask.frontmatter.planningStatus = 'running';
+    latestTask.frontmatter.updated = new Date().toISOString();
+  });
 
   broadcastToWorkspace?.({
     type: 'task:updated',
-    task,
+    task: runningTask,
     changes: {},
   });
 
@@ -1571,13 +1636,16 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
     task.frontmatter.phase,
   );
 
-  const sysEntry = createSystemEvent(
-    workspaceId,
-    task.id,
-    'phase-change',
-    'Planning agent started — researching codebase and generating plan'
+  broadcastActivityEntry(
+    broadcastToWorkspace,
+    createSystemEvent(
+      workspaceId,
+      task.id,
+      'phase-change',
+      'Planning agent started — researching codebase and generating plan',
+    ),
+    'planning start event',
   );
-  broadcastToWorkspace?.({ type: 'activity:entry', entry: sysEntry });
 
   // Create a session to track the planning agent
   const session: TaskSession = {
@@ -1679,10 +1747,16 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
     const workspaceSharedContext = loadWorkspaceSharedContext(workspacePath);
     const prompt = buildPlanningPrompt(task, planAttachmentSection, workspaceSharedContext);
     const planPromptOpts = planImages.length > 0 ? { images: planImages } : undefined;
+    const planningTimeoutMessage = `Planning timed out after ${Math.round(PLANNING_TIMEOUT_MS / 1000)} seconds`;
     await withTimeout(
-      piSession.prompt(prompt, planPromptOpts),
+      async (signal) => {
+        signal.addEventListener('abort', () => {
+          void piSession.abort().catch(() => undefined);
+        }, { once: true });
+        await piSession.prompt(prompt, planPromptOpts);
+      },
       PLANNING_TIMEOUT_MS,
-      `Planning timed out after ${Math.round(PLANNING_TIMEOUT_MS / 1000)} seconds`,
+      planningTimeoutMessage,
     );
 
     // Clean up
@@ -1693,23 +1767,27 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
     registry.delete(task.id);
 
     if (!savedPlan) {
-      task.frontmatter.planningStatus = 'error';
-      task.frontmatter.updated = new Date().toISOString();
-      saveTaskFile(task);
+      const erroredTask = persistPlanningMutation(task, (latestTask) => {
+        latestTask.frontmatter.planningStatus = 'error';
+        latestTask.frontmatter.updated = new Date().toISOString();
+      });
 
       broadcastToWorkspace?.({
         type: 'task:updated',
-        task,
+        task: erroredTask,
         changes: {},
       });
 
-      const entry = createSystemEvent(
-        workspaceId,
-        task.id,
-        'phase-change',
-        'Planning agent completed but did not call save_plan — no plan was saved'
+      broadcastActivityEntry(
+        broadcastToWorkspace,
+        createSystemEvent(
+          workspaceId,
+          task.id,
+          'phase-change',
+          'Planning agent completed but did not call save_plan — no plan was saved',
+        ),
+        'planning missing save_plan event',
       );
-      broadcastToWorkspace?.({ type: 'activity:entry', entry });
     }
 
     broadcastToWorkspace?.({
@@ -1760,23 +1838,27 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
     activeSessions.delete(task.id);
     registry.delete(task.id);
 
-    task.frontmatter.planningStatus = 'error';
-    task.frontmatter.updated = new Date().toISOString();
-    saveTaskFile(task);
+    const erroredTask = persistPlanningMutation(task, (latestTask) => {
+      latestTask.frontmatter.planningStatus = 'error';
+      latestTask.frontmatter.updated = new Date().toISOString();
+    });
 
     broadcastToWorkspace?.({
       type: 'task:updated',
-      task,
+      task: erroredTask,
       changes: {},
     });
 
-    const entry = createSystemEvent(
-      workspaceId,
-      task.id,
-      'phase-change',
-      `Planning agent failed (${errMessage}). No plan was saved.`
+    broadcastActivityEntry(
+      broadcastToWorkspace,
+      createSystemEvent(
+        workspaceId,
+        task.id,
+        'phase-change',
+        `Planning agent failed (${errMessage}). No plan was saved.`,
+      ),
+      'planning failure event',
     );
-    broadcastToWorkspace?.({ type: 'activity:entry', entry });
 
     broadcastToWorkspace?.({
       type: 'agent:execution_status',
@@ -1802,29 +1884,33 @@ function finalizePlan(
     .map((criterion) => criterion.trim())
     .filter(Boolean);
 
-  task.frontmatter.acceptanceCriteria = normalizedCriteria;
-  task.frontmatter.plan = plan;
-  task.frontmatter.planningStatus = 'completed';
-  task.frontmatter.updated = new Date().toISOString();
-  saveTaskFile(task);
+  const updatedTask = persistPlanningMutation(task, (latestTask) => {
+    latestTask.frontmatter.acceptanceCriteria = normalizedCriteria;
+    latestTask.frontmatter.plan = plan;
+    latestTask.frontmatter.planningStatus = 'completed';
+    latestTask.frontmatter.updated = new Date().toISOString();
+  });
 
-  const entry = createSystemEvent(
-    workspaceId,
-    task.id,
-    'phase-change',
-    `Planning complete: ${normalizedCriteria.length} acceptance criteria and plan generated successfully`,
+  broadcastActivityEntry(
+    broadcastToWorkspace,
+    createSystemEvent(
+      workspaceId,
+      updatedTask.id,
+      'phase-change',
+      `Planning complete: ${normalizedCriteria.length} acceptance criteria and plan generated successfully`,
+    ),
+    'planning complete event',
   );
-  broadcastToWorkspace?.({ type: 'activity:entry', entry });
 
   broadcastToWorkspace?.({
     type: 'task:plan_generated',
-    taskId: task.id,
+    taskId: updatedTask.id,
     plan,
   });
 
   broadcastToWorkspace?.({
     type: 'task:updated',
-    task,
+    task: updatedTask,
     changes: { acceptanceCriteria: normalizedCriteria, plan },
   });
 }
@@ -1853,13 +1939,16 @@ export async function regenerateAcceptanceCriteriaForTask(
       task.frontmatter.updated = new Date().toISOString();
       saveTaskFile(task);
 
-      const sysEntry = createSystemEvent(
-        workspaceId,
-        task.id,
-        'phase-change',
-        `Acceptance criteria regenerated (${criteria.length} criteria)`,
+      broadcastActivityEntry(
+        broadcastToWorkspace,
+        createSystemEvent(
+          workspaceId,
+          task.id,
+          'phase-change',
+          `Acceptance criteria regenerated (${criteria.length} criteria)`,
+        ),
+        'acceptance criteria regeneration event',
       );
-      broadcastToWorkspace?.({ type: 'activity:entry', entry: sysEntry });
 
       broadcastToWorkspace?.({
         type: 'task:updated',
@@ -1909,14 +1998,17 @@ function simulateAgentExecution(
       session.status = 'completed';
       session.endTime = new Date().toISOString();
 
-      const entry = createSystemEvent(
-        workspaceId,
-        task.id,
-        'phase-change',
-        'Agent execution completed',
-        { simulated: true }
+      broadcastActivityEntry(
+        broadcast,
+        createSystemEvent(
+          workspaceId,
+          task.id,
+          'phase-change',
+          'Agent execution completed',
+          { simulated: true },
+        ),
+        'simulated execution completion event',
       );
-      broadcast?.({ type: 'activity:entry', entry });
 
       onComplete?.(true);
       return;
@@ -1926,8 +2018,11 @@ function simulateAgentExecution(
     session.output.push(output);
     onOutput?.(output);
 
-    const entry = createChatMessage(workspaceId, task.id, 'agent', output);
-    broadcast?.({ type: 'activity:entry', entry });
+    broadcastActivityEntry(
+      broadcast,
+      createChatMessage(workspaceId, task.id, 'agent', output),
+      'simulated chat message',
+    );
 
     stepIndex++;
   }, 2000);

@@ -9,11 +9,11 @@ import { Type } from '@sinclair/typebox';
 
 declare global {
   var __piFactoryShelfCallbacks: Map<string, {
-    createDraftTask: (args: any) => void;
-    createArtifact: (args: any) => void;
-    removeItem: (itemId: string) => string;
-    updateDraftTask: (draftId: string, updates: any) => string;
-    getShelf: () => any;
+    createDraftTask: (args: any) => Promise<void>;
+    createArtifact: (args: any) => Promise<void>;
+    removeItem: (itemId: string) => Promise<string>;
+    updateDraftTask: (draftId: string, updates: any) => Promise<string>;
+    getShelf: () => Promise<any>;
   }> | undefined;
 }
 
@@ -75,7 +75,7 @@ export default function (pi: ExtensionAPI) {
       const [, cb] = callbacks.entries().next().value!;
 
       if (action === 'list') {
-        const shelf = cb.getShelf();
+        const shelf = await cb.getShelf();
         if (!shelf.items || shelf.items.length === 0) {
           return {
             content: [{ type: 'text' as const, text: 'The shelf is empty.' }],
@@ -106,7 +106,7 @@ export default function (pi: ExtensionAPI) {
             details: {} as Record<string, unknown>,
           };
         }
-        const result = cb.removeItem(item_id);
+        const result = await cb.removeItem(item_id);
         return {
           content: [{ type: 'text' as const, text: result }],
           details: {} as Record<string, unknown>,
@@ -134,7 +134,7 @@ export default function (pi: ExtensionAPI) {
           delete serverUpdates.acceptance_criteria;
         }
 
-        const result = cb.updateDraftTask(item_id, serverUpdates);
+        const result = await cb.updateDraftTask(item_id, serverUpdates);
         return {
           content: [{ type: 'text' as const, text: result }],
           details: {} as Record<string, unknown>,

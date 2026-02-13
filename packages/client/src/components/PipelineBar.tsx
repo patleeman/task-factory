@@ -67,6 +67,7 @@ export function PipelineBar({
   // avoiding stale-closure issues when React hasn't committed the latest re-render.
   const dropTargetRef = useRef<DropTarget | null>(null)
   const archiveRef = useRef<HTMLDivElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [hasOverflow, setHasOverflow] = useState(false)
   const [canScrollLeft, setCanScrollLeft] = useState(false)
@@ -84,15 +85,21 @@ export function PipelineBar({
   }, [tasks])
 
   const updateScrollState = useCallback(() => {
-    const el = scrollRef.current
-    if (!el) return
+    const scrollEl = scrollRef.current
+    const containerEl = containerRef.current
+    if (!scrollEl || !containerEl) return
 
-    const maxScrollLeft = el.scrollWidth - el.clientWidth
-    const overflow = maxScrollLeft > 1
+    // Compute overflow using the full pipeline-bar width (without control buttons)
+    // so controls never keep themselves visible when content actually fits.
+    const contentWidth = scrollEl.scrollWidth
+    const fullViewportWidth = containerEl.clientWidth
+    const overflow = contentWidth - fullViewportWidth > 1
+
+    const maxScrollLeft = scrollEl.scrollWidth - scrollEl.clientWidth
 
     setHasOverflow(overflow)
-    setCanScrollLeft(overflow && el.scrollLeft > 1)
-    setCanScrollRight(overflow && el.scrollLeft < maxScrollLeft - 1)
+    setCanScrollLeft(overflow && scrollEl.scrollLeft > 1)
+    setCanScrollRight(overflow && scrollEl.scrollLeft < maxScrollLeft - 1)
   }, [])
 
   const scrollPipeline = useCallback((direction: 'left' | 'right') => {
@@ -251,7 +258,7 @@ export function PipelineBar({
   }, [findTask, onMoveTask])
 
   return (
-    <div className="flex items-stretch min-h-[148px] h-full">
+    <div ref={containerRef} className="flex items-stretch min-h-[148px] h-full">
       {hasOverflow && (
         <PipelineScrollControl
           direction="left"
@@ -482,6 +489,7 @@ function PipelineCard({
   const isExecuting = phase === 'executing'
   const isComplete = phase === 'complete'
   const isAgentRunning = isRunning
+  const isPlanning = phase === 'backlog' && task.frontmatter.planningStatus === 'running' && !task.frontmatter.plan
   // Backlog tasks with a completed plan get a distinct color to signal "ready to promote"
   const hasPlan = phase === 'backlog' && !!task.frontmatter.plan && task.frontmatter.planningStatus !== 'running'
   const phaseBg = hasPlan ? 'bg-indigo-100' : (PHASE_BG[phase] || PHASE_BG.backlog)
@@ -512,7 +520,7 @@ function PipelineCard({
       }`}
     >
       <div className="min-w-0">
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 min-w-0">
           {isAgentRunning && (
             <span className="w-3.5 h-3.5 shrink-0 relative flex items-center justify-center">
               <span className="absolute inset-0 rounded-full animate-ping opacity-40 bg-orange-400" />
@@ -520,6 +528,12 @@ function PipelineCard({
             </span>
           )}
           <span className="text-xs font-mono text-slate-400 truncate">{task.id}</span>
+          {isPlanning && (
+            <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-sky-100 text-sky-700 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide shrink-0">
+              <span className="w-1.5 h-1.5 rounded-full bg-sky-500 animate-pulse" />
+              Planning
+            </span>
+          )}
         </div>
         <div className="text-sm font-medium text-slate-800 line-clamp-2 leading-snug mt-1">
           {task.frontmatter.title}

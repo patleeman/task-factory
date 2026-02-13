@@ -22,8 +22,8 @@ describe('planning prompt guidance', () => {
     expect(prompt).not.toContain('reference files/functions when possible');
   });
 
-  it('guides foreman-created draft task plans to stay concise and high-level', () => {
-    const prompt = buildPlanningSystemPrompt('/tmp/workspace', 'workspace-not-registered');
+  it('guides foreman-created draft task plans to stay concise and high-level', async () => {
+    const prompt = await buildPlanningSystemPrompt('/tmp/workspace', 'workspace-not-registered');
 
     expect(prompt).toContain('high-level summary plan');
     expect(prompt).toContain('Avoid line-level implementation details');

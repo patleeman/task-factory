@@ -173,6 +173,15 @@ export const api = {
     return res.json()
   },
 
+  async listAttachments(workspaceId: string, taskId: string): Promise<Attachment[]> {
+    const res = await fetch(`/api/workspaces/${workspaceId}/tasks/${taskId}/attachments`)
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Load failed' }))
+      throw new Error(err.error || `Load failed (${res.status})`)
+    }
+    return res.json()
+  },
+
   async deleteAttachment(workspaceId: string, taskId: string, attachmentId: string): Promise<void> {
     const res = await fetch(`/api/workspaces/${workspaceId}/tasks/${taskId}/attachments/${attachmentId}`, {
       method: 'DELETE',

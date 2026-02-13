@@ -4,7 +4,7 @@
 // Draft tasks and artifacts live on a shelf per workspace.
 // Persisted to JSON in the workspace's .pi directory.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { mkdir, readFile, writeFile } from 'fs/promises';
 import { join } from 'path';
 import type { DraftTask, Artifact, Shelf, ShelfItem } from '@pi-factory/shared';
 import { getWorkspaceById } from './workspace-service.js';
@@ -16,52 +16,47 @@ function getShelfPath(workspacePath: string): string {
   return join(workspacePath, '.pi', 'shelf.json');
 }
 
-function ensurePiDir(workspacePath: string): void {
+async function ensurePiDir(workspacePath: string): Promise<void> {
   const piDir = join(workspacePath, '.pi');
-  if (!existsSync(piDir)) {
-    mkdirSync(piDir, { recursive: true });
-  }
+  await mkdir(piDir, { recursive: true });
 }
 
-function loadShelfFromDisk(workspacePath: string): Shelf {
+async function loadShelfFromDisk(workspacePath: string): Promise<Shelf> {
   const path = getShelfPath(workspacePath);
-  if (!existsSync(path)) {
-    return { items: [] };
-  }
   try {
-    const raw = readFileSync(path, 'utf-8');
+    const raw = await readFile(path, 'utf-8');
     return JSON.parse(raw) as Shelf;
   } catch {
     return { items: [] };
   }
 }
 
-function saveShelfToDisk(workspacePath: string, shelf: Shelf): void {
-  ensurePiDir(workspacePath);
+async function saveShelfToDisk(workspacePath: string, shelf: Shelf): Promise<void> {
+  await ensurePiDir(workspacePath);
   const path = getShelfPath(workspacePath);
-  writeFileSync(path, JSON.stringify(shelf, null, 2), 'utf-8');
+  await writeFile(path, JSON.stringify(shelf, null, 2), 'utf-8');
 }
 
-export function getShelf(workspaceId: string): Shelf {
+export async function getShelf(workspaceId: string): Promise<Shelf> {
   if (shelfCache.has(workspaceId)) {
     return shelfCache.get(workspaceId)!;
   }
 
-  const workspace = getWorkspaceById(workspaceId);
+  const workspace = await getWorkspaceById(workspaceId);
   if (!workspace) {
     return { items: [] };
   }
 
-  const shelf = loadShelfFromDisk(workspace.path);
+  const shelf = await loadShelfFromDisk(workspace.path);
   shelfCache.set(workspaceId, shelf);
   return shelf;
 }
 
-function persistShelf(workspaceId: string, shelf: Shelf): void {
+async function persistShelf(workspaceId: string, shelf: Shelf): Promise<void> {
   shelfCache.set(workspaceId, shelf);
-  const workspace = getWorkspaceById(workspaceId);
+  const workspace = await getWorkspaceById(workspaceId);
   if (workspace) {
-    saveShelfToDisk(workspace.path, shelf);
+    await saveShelfToDisk(workspace.path, shelf);
   }
 }
 
@@ -69,15 +64,15 @@ function persistShelf(workspaceId: string, shelf: Shelf): void {
 // Draft Tasks
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function addDraftTask(workspaceId: string, draft: DraftTask): Shelf {
-  const shelf = getShelf(workspaceId);
+export async function addDraftTask(workspaceId: string, draft: DraftTask): Promise<Shelf> {
+  const shelf = await getShelf(workspaceId);
   shelf.items.push({ type: 'draft-task', item: draft });
-  persistShelf(workspaceId, shelf);
+  await persistShelf(workspaceId, shelf);
   return shelf;
 }
 
-export function updateDraftTask(workspaceId: string, draftId: string, updates: Partial<DraftTask>): Shelf {
-  const shelf = getShelf(workspaceId);
+export async function updateDraftTask(workspaceId: string, draftId: string, updates: Partial<DraftTask>): Promise<Shelf> {
+  const shelf = await getShelf(workspaceId);
   const idx = shelf.items.findIndex(
     (si) => si.type === 'draft-task' && si.item.id === draftId
   );
@@ -88,21 +83,21 @@ export function updateDraftTask(workspaceId: string, draftId: string, updates: P
     type: 'draft-task',
     item: { ...existing, ...updates },
   };
-  persistShelf(workspaceId, shelf);
+  await persistShelf(workspaceId, shelf);
   return shelf;
 }
 
-export function removeDraftTask(workspaceId: string, draftId: string): Shelf {
-  const shelf = getShelf(workspaceId);
+export async function removeDraftTask(workspaceId: string, draftId: string): Promise<Shelf> {
+  const shelf = await getShelf(workspaceId);
   shelf.items = shelf.items.filter(
     (si) => !(si.type === 'draft-task' && si.item.id === draftId)
   );
-  persistShelf(workspaceId, shelf);
+  await persistShelf(workspaceId, shelf);
   return shelf;
 }
 
-export function getDraftTask(workspaceId: string, draftId: string): DraftTask | null {
-  const shelf = getShelf(workspaceId);
+export async function getDraftTask(workspaceId: string, draftId: string): Promise<DraftTask | null> {
+  const shelf = await getShelf(workspaceId);
   const item = shelf.items.find(
     (si) => si.type === 'draft-task' && si.item.id === draftId
   );
@@ -113,15 +108,15 @@ export function getDraftTask(workspaceId: string, draftId: string): DraftTask | 
 // Artifacts
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function addArtifact(workspaceId: string, artifact: Artifact): Shelf {
-  const shelf = getShelf(workspaceId);
+export async function addArtifact(workspaceId: string, artifact: Artifact): Promise<Shelf> {
+  const shelf = await getShelf(workspaceId);
   shelf.items.push({ type: 'artifact', item: artifact });
-  persistShelf(workspaceId, shelf);
+  await persistShelf(workspaceId, shelf);
   return shelf;
 }
 
-export function updateArtifact(workspaceId: string, artifactId: string, updates: Partial<Artifact>): Shelf {
-  const shelf = getShelf(workspaceId);
+export async function updateArtifact(workspaceId: string, artifactId: string, updates: Partial<Artifact>): Promise<Shelf> {
+  const shelf = await getShelf(workspaceId);
   const idx = shelf.items.findIndex(
     (si) => si.type === 'artifact' && si.item.id === artifactId
   );
@@ -132,16 +127,16 @@ export function updateArtifact(workspaceId: string, artifactId: string, updates:
     type: 'artifact',
     item: { ...existing, ...updates },
   };
-  persistShelf(workspaceId, shelf);
+  await persistShelf(workspaceId, shelf);
   return shelf;
 }
 
-export function removeArtifact(workspaceId: string, artifactId: string): Shelf {
-  const shelf = getShelf(workspaceId);
+export async function removeArtifact(workspaceId: string, artifactId: string): Promise<Shelf> {
+  const shelf = await getShelf(workspaceId);
   shelf.items = shelf.items.filter(
     (si) => !(si.type === 'artifact' && si.item.id === artifactId)
   );
-  persistShelf(workspaceId, shelf);
+  await persistShelf(workspaceId, shelf);
   return shelf;
 }
 
@@ -149,15 +144,15 @@ export function removeArtifact(workspaceId: string, artifactId: string): Shelf {
 // Bulk operations
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function clearShelf(workspaceId: string): Shelf {
+export async function clearShelf(workspaceId: string): Promise<Shelf> {
   const shelf: Shelf = { items: [] };
-  persistShelf(workspaceId, shelf);
+  await persistShelf(workspaceId, shelf);
   return shelf;
 }
 
-export function removeShelfItem(workspaceId: string, itemId: string): Shelf {
-  const shelf = getShelf(workspaceId);
+export async function removeShelfItem(workspaceId: string, itemId: string): Promise<Shelf> {
+  const shelf = await getShelf(workspaceId);
   shelf.items = shelf.items.filter((si) => si.item.id !== itemId);
-  persistShelf(workspaceId, shelf);
+  await persistShelf(workspaceId, shelf);
   return shelf;
 }

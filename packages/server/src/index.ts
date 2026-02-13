@@ -264,7 +264,7 @@ app.post('/api/workspaces/:id/tasks', async (req, res) => {
     });
 
     // Add system event
-    createSystemEvent(workspace.id, task.id, 'task-created', `Task ${task.id} created`);
+    await createSystemEvent(workspace.id, task.id, 'task-created', `Task ${task.id} created`);
 
     res.json(task);
 
@@ -457,7 +457,7 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/move', async (req, res) => 
   if (fromPhase === 'executing' && toPhase !== 'executing') {
     await stopTaskExecution(task.id);
 
-    const pauseEntry = createSystemEvent(
+    const pauseEntry = await createSystemEvent(
       workspace.id,
       task.id,
       'phase-change',
@@ -471,7 +471,7 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/move', async (req, res) => 
     task = moveTaskToPhase(task, toPhase, 'user', reason, tasks);
 
     // Create system event
-    createSystemEvent(
+    await createSystemEvent(
       workspace.id,
       task.id,
       'phase-change',
@@ -487,7 +487,7 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/move', async (req, res) => 
     const isBackwardMove = toIndex < fromIndex;
 
     if (toPhase === 'executing' || isBackwardMove) {
-      createTaskSeparator(
+      await createTaskSeparator(
         workspace.id,
         task.id,
         task.frontmatter.title,
@@ -562,7 +562,7 @@ app.get('/api/workspaces/:id/activity', async (req, res) => {
   }
 
   const limit = req.query.limit ? parseInt(req.query.limit as string) : 100;
-  const entries = getActivityTimeline(workspace.id, limit);
+  const entries = await getActivityTimeline(workspace.id, limit);
 
   res.json(entries);
 });
@@ -577,7 +577,7 @@ app.get('/api/workspaces/:workspaceId/tasks/:taskId/activity', async (req, res) 
   }
 
   const limit = req.query.limit ? parseInt(req.query.limit as string) : 50;
-  const entries = getActivityForTask(workspace.id, req.params.taskId, limit);
+  const entries = await getActivityForTask(workspace.id, req.params.taskId, limit);
 
   res.json(entries);
 });
@@ -598,7 +598,7 @@ app.post('/api/workspaces/:workspaceId/activity', async (req, res) => {
     metadata?: Record<string, unknown>;
   };
 
-  const entry = createChatMessage(workspace.id, taskId, role, content, undefined, metadata);
+  const entry = await createChatMessage(workspace.id, taskId, role, content, undefined, metadata);
 
   broadcastToWorkspace(workspace.id, {
     type: 'activity:entry',
@@ -1257,6 +1257,14 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/execute', async (req, res) 
     return;
   }
   
+  const isPlanningRunning = task.frontmatter.planningStatus === 'running' && !task.frontmatter.plan;
+  if (isPlanningRunning) {
+    res.status(409).json({
+      error: 'Task planning is still running. Wait for planning to finish before executing this task.',
+    });
+    return;
+  }
+
   // Move task to executing phase and broadcast the change
   const fromPhase = task.frontmatter.phase;
   if (fromPhase !== 'executing') {
@@ -1322,9 +1330,9 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/steer', async (req, res) =>
   const workspace = await getWorkspaceById(req.params.workspaceId);
   if (workspace) {
     const metadata = attachmentIds && attachmentIds.length > 0 ? { attachmentIds } : undefined;
-    const entry = createChatMessage(workspace.id, req.params.taskId, 'user', content, undefined, metadata);
+    const entry = await createChatMessage(workspace.id, req.params.taskId, 'user', content, undefined, metadata);
     broadcastToWorkspace(workspace.id, { type: 'activity:entry', entry });
-    createSystemEvent(workspace.id, req.params.taskId, 'phase-change', 'User sent steering message');
+    await createSystemEvent(workspace.id, req.params.taskId, 'phase-change', 'User sent steering message');
   }
 
   // Load image attachments if referenced
@@ -1356,9 +1364,9 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/follow-up', async (req, res
   const workspace = await getWorkspaceById(req.params.workspaceId);
   if (workspace) {
     const metadata = attachmentIds && attachmentIds.length > 0 ? { attachmentIds } : undefined;
-    const entry = createChatMessage(workspace.id, req.params.taskId, 'user', content, undefined, metadata);
+    const entry = await createChatMessage(workspace.id, req.params.taskId, 'user', content, undefined, metadata);
     broadcastToWorkspace(workspace.id, { type: 'activity:entry', entry });
-    createSystemEvent(workspace.id, req.params.taskId, 'phase-change', 'User queued follow-up message');
+    await createSystemEvent(workspace.id, req.params.taskId, 'phase-change', 'User queued follow-up message');
   }
 
   // Load image attachments if referenced
@@ -1599,7 +1607,7 @@ app.post('/api/workspaces/:workspaceId/queue/start', async (req, res) => {
     (event) => broadcastToWorkspace(workspace.id, event),
   );
 
-  createSystemEvent(
+  await createSystemEvent(
     workspace.id,
     '',
     'phase-change',
@@ -1619,7 +1627,7 @@ app.post('/api/workspaces/:workspaceId/queue/stop', async (req, res) => {
 
   const status = await stopQueueProcessing(workspace.id);
 
-  createSystemEvent(
+  await createSystemEvent(
     workspace.id,
     '',
     'phase-change',
@@ -1952,8 +1960,8 @@ app.post('/api/workspaces/:workspaceId/planning/reset', async (req, res) => {
 });
 
 // Poll for pending QA request (reliable fallback when WebSocket broadcasts don't arrive)
-app.get('/api/workspaces/:workspaceId/qa/pending', (req, res) => {
-  const workspace = getWorkspaceById(req.params.workspaceId);
+app.get('/api/workspaces/:workspaceId/qa/pending', async (req, res) => {
+  const workspace = await getWorkspaceById(req.params.workspaceId);
   if (!workspace) {
     res.status(404).json({ error: 'Workspace not found' });
     return;
@@ -2098,7 +2106,7 @@ app.get('/api/workspaces/:workspaceId/shelf', async (req, res) => {
     res.status(404).json({ error: 'Workspace not found' });
     return;
   }
-  res.json(getShelf(workspace.id));
+  res.json(await getShelf(workspace.id));
 });
 
 // Update draft task on shelf
@@ -2110,7 +2118,7 @@ app.patch('/api/workspaces/:workspaceId/shelf/drafts/:draftId', async (req, res)
   }
 
   try {
-    const shelf = updateDraftTask(workspace.id, req.params.draftId, req.body);
+    const shelf = await updateDraftTask(workspace.id, req.params.draftId, req.body);
     broadcastToWorkspace(workspace.id, { type: 'shelf:updated', workspaceId: workspace.id, shelf });
     res.json(shelf);
   } catch (err) {
@@ -2127,7 +2135,7 @@ app.delete('/api/workspaces/:workspaceId/shelf/items/:itemId', async (req, res) 
     return;
   }
 
-  const shelf = removeShelfItem(workspace.id, req.params.itemId);
+  const shelf = await removeShelfItem(workspace.id, req.params.itemId);
   broadcastToWorkspace(workspace.id, { type: 'shelf:updated', workspaceId: workspace.id, shelf });
   res.json(shelf);
 });
@@ -2140,7 +2148,7 @@ app.delete('/api/workspaces/:workspaceId/shelf', async (req, res) => {
     return;
   }
 
-  const shelf = clearShelf(workspace.id);
+  const shelf = await clearShelf(workspace.id);
   broadcastToWorkspace(workspace.id, { type: 'shelf:updated', workspaceId: workspace.id, shelf });
   res.json(shelf);
 });
@@ -2154,7 +2162,7 @@ app.post('/api/workspaces/:workspaceId/shelf/drafts/:draftId/push', async (req, 
   }
 
   const { getDraftTask } = await import('./shelf-service.js');
-  const draft = getDraftTask(workspace.id, req.params.draftId);
+  const draft = await getDraftTask(workspace.id, req.params.draftId);
   if (!draft) {
     res.status(404).json({ error: 'Draft task not found' });
     return;
@@ -2180,13 +2188,13 @@ app.post('/api/workspaces/:workspaceId/shelf/drafts/:draftId/push', async (req, 
     }
 
     // Remove from shelf
-    const shelf = removeDraftTask(workspace.id, draft.id);
+    const shelf = await removeDraftTask(workspace.id, draft.id);
     broadcastToWorkspace(workspace.id, { type: 'shelf:updated', workspaceId: workspace.id, shelf });
 
     // Broadcast task created
     broadcastToWorkspace(workspace.id, { type: 'task:created', task });
 
-    createSystemEvent(workspace.id, task.id, 'task-created', `Task ${task.id} created from draft`);
+    await createSystemEvent(workspace.id, task.id, 'task-created', `Task ${task.id} created from draft`);
 
     res.json(task);
 
@@ -2215,7 +2223,7 @@ app.post('/api/workspaces/:workspaceId/shelf/push-all', async (req, res) => {
     return;
   }
 
-  const shelf = getShelf(workspace.id);
+  const shelf = await getShelf(workspace.id);
   const drafts = shelf.items
     .filter((si) => si.type === 'draft-task')
     .map((si) => si.item as import('@pi-factory/shared').DraftTask);
@@ -2246,7 +2254,7 @@ app.post('/api/workspaces/:workspaceId/shelf/push-all', async (req, res) => {
 
       createdTasks.push(task);
       broadcastToWorkspace(workspace.id, { type: 'task:created', task });
-      createSystemEvent(workspace.id, task.id, 'task-created', `Task ${task.id} created from draft`);
+      await createSystemEvent(workspace.id, task.id, 'task-created', `Task ${task.id} created from draft`);
 
       // Generate plan asynchronously using the planning agent (explores codebase)
       if (!task.frontmatter.plan && task.content) {
@@ -2266,9 +2274,9 @@ app.post('/api/workspaces/:workspaceId/shelf/push-all', async (req, res) => {
 
   // Remove all drafts from shelf (keep artifacts)
   for (const draft of drafts) {
-    removeDraftTask(workspace.id, draft.id);
+    await removeDraftTask(workspace.id, draft.id);
   }
-  const updatedShelf = getShelf(workspace.id);
+  const updatedShelf = await getShelf(workspace.id);
   broadcastToWorkspace(workspace.id, { type: 'shelf:updated', workspaceId: workspace.id, shelf: updatedShelf });
 
   res.json({ tasks: createdTasks, count: createdTasks.length });
@@ -2340,10 +2348,11 @@ function handleClientEvent(clientId: string, event: ClientEvent) {
       // Find workspace for this client
       for (const [workspaceId, clientIds] of workspaceSubscriptions) {
         if (clientIds.has(clientId)) {
-          const entry = createChatMessage(workspaceId, taskId, role, content);
-          broadcastToWorkspace(workspaceId, {
-            type: 'activity:entry',
-            entry,
+          createChatMessage(workspaceId, taskId, role, content).then((entry) => {
+            broadcastToWorkspace(workspaceId, {
+              type: 'activity:entry',
+              entry,
+            });
           });
           break;
         }
@@ -2392,7 +2401,7 @@ async function resumeInterruptedPlanningRuns(): Promise<void> {
     logger.info(`[Startup] Resuming ${interrupted.length} interrupted planning task(s) in ${workspace.name}`);
 
     for (const task of interrupted) {
-      const entry = createSystemEvent(
+      const entry = await createSystemEvent(
         workspace.id,
         task.id,
         'phase-change',

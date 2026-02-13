@@ -401,10 +401,10 @@ export function TaskChat({
   // still displays running status while the model responds.
   const isAgentActive = agentStream.isActive
 
-  // Steering controls are available in task chat whenever callbacks are provided.
-  // Foreman/planning chat does not provide these callbacks.
-  const canSteer = !!onSteer
-  const showSteerControls = isAgentActive && canSteer
+  // Steering controls are available whenever callbacks are provided.
+  const hasSteerHandler = !!onSteer
+  const hasFollowUpHandler = !!onFollowUp
+  const showSteerControls = isAgentActive && hasSteerHandler
 
   const isWaitingForInput = taskPhase
     ? !agentStream.isActive && taskPhase === 'executing' && agentStream.status === 'idle'
@@ -422,6 +422,12 @@ export function TaskChat({
   useEffect(() => {
     setSendMode(showSteerControls ? 'steer' : 'message')
   }, [showSteerControls])
+
+  useEffect(() => {
+    if (sendMode === 'followUp' && !hasFollowUpHandler) {
+      setSendMode(showSteerControls ? 'steer' : 'message')
+    }
+  }, [sendMode, hasFollowUpHandler, showSteerControls])
 
   const addFiles = useCallback((files: FileList | File[]) => {
     const newFiles = Array.from(files)
@@ -466,13 +472,15 @@ export function TaskChat({
       setIsUploading(false)
     }
 
+    const messageContent = trimmed || (attachmentIds ? '(attached files)' : '')
+
     if (activeSendMode === 'steer' && onSteer) {
-      if (trimmed) onSteer(trimmed, attachmentIds)
+      if (messageContent) onSteer(messageContent, attachmentIds)
     } else if (activeSendMode === 'followUp' && onFollowUp) {
-      if (trimmed) onFollowUp(trimmed, attachmentIds)
+      if (messageContent) onFollowUp(messageContent, attachmentIds)
     } else {
-      if (trimmed || attachmentIds) {
-        onSendMessage(trimmed || '(attached files)', attachmentIds)
+      if (messageContent) {
+        onSendMessage(messageContent, attachmentIds)
       }
     }
 
@@ -507,7 +515,7 @@ export function TaskChat({
     if (e.key === 'Enter' && !e.shiftKey && !e.altKey) {
       e.preventDefault()
       void handleSend()
-    } else if (e.key === 'Enter' && e.altKey && showSteerControls && onFollowUp) {
+    } else if (e.key === 'Enter' && e.altKey && showSteerControls && hasFollowUpHandler) {
       e.preventDefault()
       void handleSend('followUp')
     }
@@ -722,7 +730,7 @@ export function TaskChat({
             >
               ⚡ steer
             </button>
-            {onFollowUp && (
+            {hasFollowUpHandler && (
               <button
                 onClick={() => setSendMode('followUp')}
                 className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded transition-colors ${
