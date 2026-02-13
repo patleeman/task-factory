@@ -173,14 +173,14 @@ export function SkillSelector({
                       e.stopPropagation()
                       setConfigSkillId(skill.id)
                     }}
-                    className={`w-6 h-6 rounded-full flex items-center justify-center text-xs shrink-0 transition-colors ${
+                    className={`shrink-0 px-2 py-1 rounded-md text-[11px] font-medium transition-colors ${
                       hasCustomConfig(skill.id)
-                        ? 'text-blue-600 bg-blue-50 hover:bg-blue-100'
-                        : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'
+                        ? 'text-blue-700 bg-blue-100 hover:bg-blue-200 border border-blue-200'
+                        : 'text-slate-500 bg-slate-100 hover:bg-slate-200 border border-slate-200'
                     }`}
                     title={`Configure ${skill.name}`}
                   >
-                    ⚙
+                    {hasCustomConfig(skill.id) ? '⚙ Configured' : '⚙ Configure'}
                   </button>
                 )}
                 {/* Remove button */}
@@ -221,6 +221,9 @@ export function SkillSelector({
                 <div className="min-w-0">
                   <div className="text-sm font-medium text-slate-800 truncate">
                     {skill.name}
+                    {skill.configSchema && skill.configSchema.length > 0 && (
+                      <span className="ml-1.5 text-[10px] text-slate-400 font-normal">⚙ configurable</span>
+                    )}
                   </div>
                   <div className="text-xs text-slate-500 truncate">
                     {skill.description}
