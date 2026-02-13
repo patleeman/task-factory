@@ -36,7 +36,9 @@ export default function (pi: ExtensionAPI) {
       'Ask the user multiple-choice questions to clarify ambiguity before proceeding. ' +
       'Each question must include 2–6 concrete options. The tool blocks until the user ' +
       'responds and returns their selected answers. Use this whenever a task description ' +
-      'is vague or could be interpreted in multiple ways.',
+      'is vague or could be interpreted in multiple ways. ' +
+      'IMPORTANT: Call this tool directly — do NOT write the questions in your text response. ' +
+      'The tool renders an interactive UI for the user to click answers.',
     parameters: Type.Object({
       questions: Type.Array(
         Type.Object({

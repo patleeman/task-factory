@@ -600,6 +600,7 @@ You have access to the following special tools:
 ### ask_questions
 Ask the user multiple-choice questions to clarify ambiguity before proceeding.
 **Always call this tool FIRST** if the user's request is vague, under-specified, or could be interpreted in more than one way. Do not guess — ask.
+**Do NOT write the questions in your text response** — call the tool directly. The tool renders an interactive UI where the user clicks to answer. Writing questions as text duplicates them.
 Parameters:
 - questions (array): List of questions, each with:
   - id (string): Unique identifier (e.g. "q1", "q2")
