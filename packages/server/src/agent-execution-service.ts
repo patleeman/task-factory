@@ -1182,12 +1182,64 @@ function handlePiEvent(
 // Steer / Follow-up
 // =============================================================================
 
+function refreshSessionTaskSnapshot(session: TaskSession): Task | undefined {
+  if (!session.task?.filePath) {
+    return session.task;
+  }
+
+  if (!existsSync(session.task.filePath)) {
+    return session.task;
+  }
+
+  try {
+    const latestTask = parseTaskFile(session.task.filePath);
+    session.task = latestTask;
+    return latestTask;
+  } catch (err) {
+    console.warn(
+      `[AgentExecution] Failed to refresh task snapshot for ${session.taskId}; using in-memory snapshot:`,
+      err,
+    );
+    return session.task;
+  }
+}
+
+function resolveTaskTurnMode(task: Task): 'task_planning' | 'task_execution' | 'task_rework' | 'task_chat' {
+  const phase = task.frontmatter.phase;
+  const planningStatus = task.frontmatter.planningStatus;
+  const hasPlan = !!task.frontmatter.plan;
+
+  if (phase === 'backlog' && planningStatus === 'running' && !hasPlan) {
+    return 'task_planning';
+  }
+
+  if (phase === 'executing') {
+    return 'task_execution';
+  }
+
+  if (phase === 'complete') {
+    return 'task_rework';
+  }
+
+  return 'task_chat';
+}
+
+function prependTaskTurnState(task: Task, content: string): string {
+  const phase = task.frontmatter.phase;
+  const planningStatus = task.frontmatter.planningStatus ?? 'none';
+  const mode = resolveTaskTurnMode(task);
+
+  return `## Current Turn State\n<state_contract version="1">\n  <mode>${mode}</mode>\n  <phase>${phase}</phase>\n  <planning_status>${planningStatus}</planning_status>\n</state_contract>\n\nUse <state_contract> as the highest-priority behavior contract for this turn.\nDo not ask the user to send manual state updates; rely on this injected state.\n\n${content}`;
+}
+
 export async function steerTask(taskId: string, content: string, images?: ImageContent[]): Promise<boolean> {
   const session = activeSessions.get(taskId);
   if (!session?.piSession) return false;
 
   try {
-    await session.piSession.steer(content, images && images.length > 0 ? images : undefined);
+    const latestTask = refreshSessionTaskSnapshot(session);
+    const turnContent = latestTask ? prependTaskTurnState(latestTask, content) : content;
+    await session.piSession.steer(turnContent, images && images.length > 0 ? images : undefined);
     return true;
   } catch (err) {
     console.error('Failed to steer task:', err);
@@ -1201,11 +1253,13 @@ export async function followUpTask(taskId: string, content: string, images?: Ima
 
   try {
     const hasImages = !!(images && images.length > 0);
+    const latestTask = refreshSessionTaskSnapshot(session);
+    const turnContent = latestTask ? prependTaskTurnState(latestTask, content) : content;
 
     // If the agent is currently streaming, queue as follow-up and return.
     // Do NOT run handleAgentTurnEnd here — followUp() only queues the message.
     if (session.piSession.isStreaming) {
-      await session.piSession.followUp(content, hasImages ? images : undefined);
+      await session.piSession.followUp(turnContent, hasImages ? images : undefined);
       return true;
     }
 
