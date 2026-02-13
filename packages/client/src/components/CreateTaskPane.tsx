@@ -2,8 +2,8 @@ import { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react
 import type { ModelConfig, NewTaskFormState, TaskDefaults, ExecutionWrapper } from '@pi-factory/shared'
 import { DEFAULT_PRE_EXECUTION_SKILLS, DEFAULT_POST_EXECUTION_SKILLS } from '@pi-factory/shared'
 import { MarkdownEditor } from './MarkdownEditor'
-import { SkillSelector } from './SkillSelector'
 import { ModelSelector } from './ModelSelector'
+import { ExecutionPipelineEditor } from './ExecutionPipelineEditor'
 import { InlineWhiteboardPanel } from './InlineWhiteboardPanel'
 import { clearStoredWhiteboardScene, createWhiteboardAttachmentFilename, exportWhiteboardPngFile, hasWhiteboardContent, loadStoredWhiteboardScene, persistWhiteboardScene, type WhiteboardSceneSnapshot } from './whiteboard'
 import { useLocalStorageDraft } from '../hooks/useLocalStorageDraft'
@@ -124,10 +124,16 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
   // Apply incoming updates from the planning agent
   useEffect(() => {
     if (!agentFormUpdates) return
+
+    const hasPipelineUpdate =
+      agentFormUpdates.selectedSkillIds !== undefined ||
+      agentFormUpdates.selectedPreSkillIds !== undefined
+
     if (agentFormUpdates.content !== undefined) setContent(agentFormUpdates.content)
     if (agentFormUpdates.selectedSkillIds !== undefined) setSelectedSkillIds(agentFormUpdates.selectedSkillIds)
     if (agentFormUpdates.selectedPreSkillIds !== undefined) setSelectedPreSkillIds(agentFormUpdates.selectedPreSkillIds)
     if (agentFormUpdates.modelConfig !== undefined) setModelConfig(agentFormUpdates.modelConfig)
+    if (hasPipelineUpdate) setSelectedWrapperId('')
   }, [agentFormUpdates])
 
   // Measure container width to decide side-by-side vs stacked layout
@@ -159,6 +165,10 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
   useEffect(() => {
     updateDraft({ selectedSkillIds })
   }, [selectedSkillIds, updateDraft])
+
+  useEffect(() => {
+    updateDraft({ selectedPreSkillIds })
+  }, [selectedPreSkillIds, updateDraft])
 
   useEffect(() => {
     updateDraft({ modelConfig })
@@ -401,116 +411,28 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
     </div>
   )
 
-  const handleWrapperToggle = (wrapperId: string) => {
-    if (selectedWrapperId === wrapperId) {
-      // Deselect — clear wrapper and reset skills to defaults
-      setSelectedWrapperId('')
-      setSelectedPreSkillIds([...taskDefaults.preExecutionSkills])
-      setSelectedSkillIds([...taskDefaults.postExecutionSkills])
-    } else {
-      // Select — apply wrapper's skill arrays
-      setSelectedWrapperId(wrapperId)
-      const wrapper = availableWrappers.find(w => w.id === wrapperId)
-      if (wrapper) {
-        setSelectedPreSkillIds([...wrapper.preExecutionSkills])
-        setSelectedSkillIds([...wrapper.postExecutionSkills])
-      }
-    }
-  }
-
-  const wrapperSection = availableWrappers.length > 0 ? (
+  const executionPipelineSection = (
     <div className="shrink-0">
       <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
-        Execution Wrapper
+        Execution Pipeline
       </label>
       <p className="text-xs text-slate-400 mb-2">
-        Pre-configured skill pairs that wrap execution. Click to apply.
+        Add skills or wrappers, then drag cards to pre/post lanes to control execution order.
       </p>
-      <div className="space-y-1.5">
-        {availableWrappers.map(w => {
-          const isSelected = selectedWrapperId === w.id
-          return (
-            <div
-              key={w.id}
-              onClick={() => handleWrapperToggle(w.id)}
-              className={`flex items-center justify-between p-2.5 rounded-lg border cursor-pointer transition-colors ${
-                isSelected
-                  ? 'border-violet-400 bg-violet-50'
-                  : 'border-slate-200 hover:border-slate-300'
-              }`}
-            >
-              <div className="flex items-center gap-2.5 min-w-0">
-                <span className="text-[10px] text-slate-400 font-mono shrink-0">wrap</span>
-                <div className="min-w-0">
-                  <div className="text-sm font-medium text-slate-800 truncate">
-                    {w.name}
-                  </div>
-                  <div className="text-xs text-slate-500 truncate">
-                    {w.description}
-                  </div>
-                  {isSelected && (
-                    <div className="flex flex-wrap gap-1 mt-1">
-                      {w.preExecutionSkills.length > 0 && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-600">
-                          pre: {w.preExecutionSkills.join(', ')}
-                        </span>
-                      )}
-                      {w.postExecutionSkills.length > 0 && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-100 text-orange-600">
-                          post: {w.postExecutionSkills.join(', ')}
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-              <div className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 text-[10px] transition-colors ${
-                isSelected
-                  ? 'border-violet-500 bg-violet-500 text-white'
-                  : 'border-slate-300'
-              }`}>
-                {isSelected && '✓'}
-              </div>
-            </div>
-          )
-        })}
-      </div>
-    </div>
-  ) : null
-
-  const preSkillsSection = availableSkills.length > 0 ? (
-    <div className="shrink-0">
-      <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
-        Pre-Execution Skills
-      </label>
-      <p className="text-xs text-slate-400 mb-2">
-        Run before the agent starts its main work. Failure blocks execution.
-      </p>
-      <SkillSelector
+      <ExecutionPipelineEditor
         availableSkills={availableSkills}
-        selectedSkillIds={selectedPreSkillIds}
-        onChange={setSelectedPreSkillIds}
-      />
-    </div>
-  ) : null
-
-  const skillsSection = availableSkills.length > 0 ? (
-    <div className="shrink-0">
-      <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
-        Post-Execution Skills
-      </label>
-      <p className="text-xs text-slate-400 mb-2">
-        Run automatically after the agent completes its main work.
-      </p>
-      <SkillSelector
-        availableSkills={availableSkills}
+        availableWrappers={availableWrappers}
+        selectedPreSkillIds={selectedPreSkillIds}
         selectedSkillIds={selectedSkillIds}
-        onChange={setSelectedSkillIds}
+        selectedWrapperId={selectedWrapperId}
+        onPreSkillsChange={setSelectedPreSkillIds}
+        onPostSkillsChange={setSelectedSkillIds}
+        onWrapperChange={setSelectedWrapperId}
         skillConfigs={skillConfigs}
         onSkillConfigChange={setSkillConfigs}
       />
     </div>
-  ) : null
+  )
 
   return (
     <div ref={containerRef} className="flex flex-col h-full bg-white">
@@ -577,9 +499,7 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
           {/* Right panel — configuration */}
           <div className="flex-1 min-w-0 p-5 space-y-5 overflow-y-auto">
             {modelSection}
-            {wrapperSection}
-            {preSkillsSection}
-            {skillsSection}
+            {executionPipelineSection}
           </div>
         </div>
       ) : (
@@ -588,9 +508,7 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
           {descriptionSection}
           {attachmentsSection}
           {modelSection}
-          {wrapperSection}
-          {preSkillsSection}
-          {skillsSection}
+          {executionPipelineSection}
         </div>
       )}
     </div>
