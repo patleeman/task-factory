@@ -1779,6 +1779,7 @@ import {
   unregisterTaskFormCallbacks,
   resolveQARequest,
   abortQARequest,
+  getPendingQARequest,
 } from './planning-agent-service.js';
 
 import {
@@ -1948,6 +1949,17 @@ app.post('/api/workspaces/:workspaceId/planning/reset', async (req, res) => {
     (event) => broadcastToWorkspace(workspace.id, event),
   );
   res.json({ ok: true, sessionId: newSessionId });
+});
+
+// Poll for pending QA request (reliable fallback when WebSocket broadcasts don't arrive)
+app.get('/api/workspaces/:workspaceId/qa/pending', (req, res) => {
+  const workspace = getWorkspaceById(req.params.workspaceId);
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return;
+  }
+  const request = getPendingQARequest(workspace.id);
+  res.json({ request });
 });
 
 // Submit Q&A response (user answers to agent's ask_questions call)

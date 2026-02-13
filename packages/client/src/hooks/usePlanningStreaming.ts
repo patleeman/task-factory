@@ -1,6 +1,7 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import type { ServerEvent, PlanningMessage, ActivityEntry, Shelf, QARequest } from '@pi-factory/shared'
 import type { AgentStreamState, ToolCallState } from './useAgentStreaming'
+import { api } from '../api'
 
 export interface PlanningStreamState {
   /** Agent stream state — same type as execution agent, drop into TaskChat directly */
@@ -88,12 +89,35 @@ export function usePlanningStreaming(
   const [activeQARequest, setActiveQARequest] = useState<QARequest | null>(null)
   const workspaceIdRef = useRef(workspaceId)
   workspaceIdRef.current = workspaceId
+  const qaPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const stopQAPoll = useCallback(() => {
+    if (qaPollRef.current) { clearInterval(qaPollRef.current); qaPollRef.current = null }
+  }, [])
+
+  // Poll for pending QA request via HTTP (reliable fallback for WebSocket broadcasts)
+  const startQAPoll = useCallback((wsId: string) => {
+    if (qaPollRef.current) return
+    qaPollRef.current = setInterval(async () => {
+      try {
+        const request = await api.getPendingQA(wsId)
+        if (request) {
+          setActiveQARequest(request)
+          setAgentStream((prev) => ({ ...prev, status: 'awaiting_qa' as any, isActive: false }))
+          stopQAPoll()
+        }
+      } catch { /* ignore */ }
+    }, 500)
+  }, [stopQAPoll])
 
   useEffect(() => {
     setMessages([])
     setAgentStream(INITIAL_AGENT_STREAM)
     setActiveQARequest(null)
-  }, [workspaceId])
+    stopQAPoll()
+  }, [workspaceId, stopQAPoll])
+
+  useEffect(() => stopQAPoll, [stopQAPoll])
 
   // Seed with initial messages loaded from server, or clear on reset
   useEffect(() => {
@@ -123,6 +147,7 @@ export function usePlanningStreaming(
           // Clear QA dialog when agent resumes (not awaiting anymore)
           if (msg.status !== 'awaiting_qa') {
             setActiveQARequest(null)
+            stopQAPoll()
           }
           break
 
@@ -189,6 +214,10 @@ export function usePlanningStreaming(
               } as ToolCallState,
             ],
           }))
+          // When ask_questions starts, poll for the QA request via HTTP
+          if (msg.toolName === 'ask_questions' && currentWsId) {
+            startQAPoll(currentWsId)
+          }
           break
 
         case 'planning:tool_update':
@@ -224,6 +253,7 @@ export function usePlanningStreaming(
           setMessages([])
           setAgentStream(INITIAL_AGENT_STREAM)
           setActiveQARequest(null)
+          stopQAPoll()
           break
 
         case 'shelf:updated':

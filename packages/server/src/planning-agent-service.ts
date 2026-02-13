@@ -151,6 +151,8 @@ function ensureQACallbackRegistry(): Map<string, QACallbacks> {
 const pendingQARequests = new Map<string, {
   resolve: (answers: QAAnswer[]) => void;
   reject: (err: Error) => void;
+  workspaceId: string;
+  request: QARequest;
 }>();
 
 function registerQACallbacks(
@@ -162,8 +164,17 @@ function registerQACallbacks(
   registry.set(workspaceId, {
     askQuestions: (requestId, questions) => {
       return new Promise<QAAnswer[]>((resolve, reject) => {
-        // Store the resolver so the HTTP endpoint can complete it
-        pendingQARequests.set(requestId, { resolve, reject });
+        const qaRequest: QARequest = {
+          requestId,
+          questions: questions.map((q) => ({
+            id: q.id,
+            text: q.text,
+            options: q.options,
+          })),
+        };
+
+        // Store resolver AND request data so the HTTP polling endpoint can return it
+        pendingQARequests.set(requestId, { resolve, reject, workspaceId, request: qaRequest });
 
         const session = getSession();
         // Use session's current broadcast (updated on each message) rather than
@@ -175,15 +186,6 @@ function registerQACallbacks(
           session.status = 'awaiting_qa';
           broadcast({ type: 'planning:status', workspaceId, status: 'awaiting_qa' });
         }
-
-        const qaRequest: QARequest = {
-          requestId,
-          questions: questions.map((q) => ({
-            id: q.id,
-            text: q.text,
-            options: q.options,
-          })),
-        };
 
         // Persist the QA request as a planning message
         if (session) {
@@ -971,6 +973,20 @@ export async function sendPlanningMessage(
 export function getPlanningMessages(workspaceId: string): PlanningMessage[] {
   const session = planningSessions.get(workspaceId);
   return session?.messages || loadPersistedMessages(workspaceId);
+}
+
+/**
+ * Get the pending QA request for a workspace (if any).
+ * Used by the HTTP polling endpoint as a reliable fallback when WebSocket
+ * broadcasts from inside the QA callback don't reach the client.
+ */
+export function getPendingQARequest(workspaceId: string): QARequest | null {
+  for (const pending of pendingQARequests.values()) {
+    if (pending.workspaceId === workspaceId) {
+      return pending.request;
+    }
+  }
+  return null;
 }
 
 /**

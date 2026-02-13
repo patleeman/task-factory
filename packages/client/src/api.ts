@@ -1,4 +1,4 @@
-import type { Task, Workspace, ActivityEntry, Phase, Attachment, QueueStatus, PlanningMessage, PlanningAgentStatus, Shelf, DraftTask, TaskDefaults, PostExecutionSummary, CriterionStatus, QAAnswer } from '@pi-factory/shared'
+import type { Task, Workspace, ActivityEntry, Phase, Attachment, QueueStatus, PlanningMessage, PlanningAgentStatus, Shelf, DraftTask, TaskDefaults, PostExecutionSummary, CriterionStatus, QAAnswer, QARequest } from '@pi-factory/shared'
 
 export interface AvailableModel {
   provider: string
@@ -504,6 +504,13 @@ export const api = {
   // ─────────────────────────────────────────────────────────────────────────
   // Q&A Disambiguation
   // ─────────────────────────────────────────────────────────────────────────
+
+  async getPendingQA(workspaceId: string): Promise<QARequest | null> {
+    const res = await fetch(`/api/workspaces/${workspaceId}/qa/pending`)
+    if (!res.ok) return null
+    const data = await res.json()
+    return data.request || null
+  },
 
   async submitQAResponse(workspaceId: string, requestId: string, answers: QAAnswer[]): Promise<void> {
     const res = await fetch(`/api/workspaces/${workspaceId}/qa/respond`, {
