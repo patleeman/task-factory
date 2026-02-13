@@ -67,6 +67,10 @@ export function PipelineBar({
   // avoiding stale-closure issues when React hasn't committed the latest re-render.
   const dropTargetRef = useRef<DropTarget | null>(null)
   const archiveRef = useRef<HTMLDivElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const [hasOverflow, setHasOverflow] = useState(false)
+  const [canScrollLeft, setCanScrollLeft] = useState(false)
+  const [canScrollRight, setCanScrollRight] = useState(false)
 
   // Group tasks by phase, sorted by order (memoized to avoid recreating on every render)
   const tasksByPhase = useMemo(() => {
@@ -78,6 +82,52 @@ export function PipelineBar({
     }
     return map
   }, [tasks])
+
+  const updateScrollState = useCallback(() => {
+    const el = scrollRef.current
+    if (!el) return
+
+    const maxScrollLeft = el.scrollWidth - el.clientWidth
+    const overflow = maxScrollLeft > 1
+
+    setHasOverflow(overflow)
+    setCanScrollLeft(overflow && el.scrollLeft > 1)
+    setCanScrollRight(overflow && el.scrollLeft < maxScrollLeft - 1)
+  }, [])
+
+  const scrollPipeline = useCallback((direction: 'left' | 'right') => {
+    const el = scrollRef.current
+    if (!el) return
+
+    const step = Math.max(220, Math.round(el.clientWidth * 0.65))
+    const delta = direction === 'left' ? -step : step
+    el.scrollBy({ left: delta, behavior: 'smooth' })
+  }, [])
+
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+
+    const handleScroll = () => updateScrollState()
+    el.addEventListener('scroll', handleScroll, { passive: true })
+
+    let resizeObserver: ResizeObserver | null = null
+    if (typeof ResizeObserver !== 'undefined') {
+      resizeObserver = new ResizeObserver(() => updateScrollState())
+      resizeObserver.observe(el)
+    }
+
+    updateScrollState()
+
+    return () => {
+      el.removeEventListener('scroll', handleScroll)
+      resizeObserver?.disconnect()
+    }
+  }, [updateScrollState])
+
+  useEffect(() => {
+    updateScrollState()
+  }, [updateScrollState, tasksByPhase, archivedTasks.length])
 
   const getAdvanceAction = (task: Task): { label: string; toPhase: Phase } | null => {
     switch (task.frontmatter.phase) {
@@ -201,138 +251,192 @@ export function PipelineBar({
   }, [findTask, onMoveTask])
 
   return (
-    <div className="flex items-stretch justify-start min-h-[148px] h-full overflow-x-auto pipeline-scroll">
-      {VISIBLE_PHASES.map(phase => {
-        const phaseTasks = tasksByPhase[phase]
-        const isEmpty = phaseTasks.length === 0
-        const isDragOver = dragOverPhase === phase
-        const isBacklog = phase === 'backlog'
+    <div className="flex items-stretch min-h-[148px] h-full">
+      {hasOverflow && (
+        <PipelineScrollControl
+          direction="left"
+          disabled={!canScrollLeft}
+          onClick={() => scrollPipeline('left')}
+        />
+      )}
 
-        return (
+      <div
+        ref={scrollRef}
+        className="flex-1 min-w-0 overflow-x-auto overflow-y-hidden pipeline-scroll"
+      >
+        <div className="flex items-stretch justify-start min-h-[148px] h-full w-max">
+          {VISIBLE_PHASES.map(phase => {
+            const phaseTasks = tasksByPhase[phase]
+            const isEmpty = phaseTasks.length === 0
+            const isDragOver = dragOverPhase === phase
+            const isBacklog = phase === 'backlog'
+
+            return (
+              <div
+                key={phase}
+                onDragOver={(e) => handlePhaseDragOver(e, phase)}
+                onDragLeave={handlePhaseDragLeave}
+                onDrop={(e) => handlePhaseDrop(e, phase)}
+                className={`flex flex-col items-center py-2 px-2 transition-colors ${
+                  isDragOver ? 'bg-blue-50/60' : ''
+                }`}
+              >
+                {/* Phase label */}
+                <div className={`text-[10px] font-semibold uppercase tracking-wider mb-1.5 ${PHASE_LABEL_COLOR[phase]}`}>
+                  {PHASE_DISPLAY_NAMES[phase]}
+                </div>
+
+                {/* Cards or empty placeholder */}
+                <div className="flex items-center gap-0">
+                  {isEmpty ? (
+                    <div
+                      onClick={isBacklog ? onCreateTask : undefined}
+                      className={`w-[190px] h-[112px] rounded-xl border border-dashed flex items-center justify-center transition-colors ${
+                        isDragOver
+                          ? 'border-blue-400 bg-blue-100/50'
+                          : `border-slate-200 ${PHASE_EMPTY_BG[phase]}`
+                      } ${isBacklog ? 'cursor-pointer hover:border-slate-400 hover:bg-slate-100' : ''}`}
+                    >
+                      <span className={`text-xs ${isDragOver ? 'text-blue-500' : 'text-slate-300'}`}>
+                        {isDragOver ? 'Drop here' : isBacklog ? '+ New Task' : 'Empty'}
+                      </span>
+                    </div>
+                  ) : (
+                    <>
+                      {phaseTasks.map((task, i) => {
+                        const isSamePhase = dragSourceRef.current?.fromPhase === phase
+                        const showIndicatorBefore =
+                          isDragOver &&
+                          isSamePhase &&
+                          dropTarget?.phase === phase &&
+                          dropTarget.index === i &&
+                          dragSourceRef.current?.taskId !== task.id
+
+                        return (
+                          <div key={task.id} className="flex items-center" data-task-id={task.id}>
+                            {showIndicatorBefore && <VerticalDropIndicator />}
+                            <div className="px-1">
+                              <PipelineCard
+                                task={task}
+                                isRunning={runningTaskIds.has(task.id)}
+                                isSelected={task.id === selectedTaskId}
+                                advanceAction={getAdvanceAction(task)}
+                                onTaskClick={onTaskClick}
+                                onMoveTask={onMoveTask}
+                                onDragStartNotify={() => handleCardDragStart(task.id, phase)}
+                                onDragEndNotify={handleCardDragEnd}
+                              />
+                            </div>
+                          </div>
+                        )
+                      })}
+                      {/* Drop indicator after last card */}
+                      {isDragOver &&
+                        dragSourceRef.current?.fromPhase === phase &&
+                        dropTarget?.phase === phase &&
+                        dropTarget.index === phaseTasks.length &&
+                        phaseTasks.length > 0 && (
+                          <VerticalDropIndicator />
+                        )}
+                      {isBacklog && (
+                        <div
+                          onClick={onCreateTask}
+                          className="shrink-0 w-[80px] h-[112px] rounded-xl border border-dashed border-slate-200 flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors hover:border-slate-400 hover:bg-slate-100 mx-1"
+                        >
+                          <span className="text-lg text-slate-300">+</span>
+                          <span className="text-[10px] text-slate-400 font-medium">New Task</span>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+
+          {/* Archive column — skeleton drop target + popover */}
           <div
-            key={phase}
-            onDragOver={(e) => handlePhaseDragOver(e, phase)}
-            onDragLeave={handlePhaseDragLeave}
-            onDrop={(e) => handlePhaseDrop(e, phase)}
-            className={`flex flex-col items-center py-2 px-2 transition-colors ${
-              isDragOver ? 'bg-blue-50/60' : ''
+            onDragOver={(e) => { e.preventDefault(); setDragOverArchive(true) }}
+            onDragLeave={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                setDragOverArchive(false)
+              }
+            }}
+            onDrop={handleArchiveDrop}
+            className={`flex flex-col items-center py-2 px-2 relative transition-colors ${
+              dragOverArchive ? 'bg-blue-50/60' : ''
             }`}
           >
-            {/* Phase label */}
-            <div className={`text-[10px] font-semibold uppercase tracking-wider mb-1.5 ${PHASE_LABEL_COLOR[phase]}`}>
-              {PHASE_DISPLAY_NAMES[phase]}
+            <div className="text-[10px] font-semibold uppercase tracking-wider mb-1.5 text-slate-400">
+              Archived
+            </div>
+            <div
+              ref={archiveRef}
+              onClick={() => setShowArchived(!showArchived)}
+              className={`w-[190px] h-[112px] rounded-xl border border-dashed flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors ${
+                dragOverArchive
+                  ? 'border-blue-400 bg-blue-100/50'
+                  : 'border-slate-200 bg-slate-50 hover:border-slate-300 hover:bg-slate-100'
+              }`}
+            >
+              <span className="text-xs text-slate-400 font-semibold uppercase">Archive</span>
+              <span className={`text-xs ${dragOverArchive ? 'text-blue-500' : 'text-slate-400'}`}>
+                {dragOverArchive ? 'Drop to archive' : `${archivedTasks.length} archived`}
+              </span>
             </div>
 
-            {/* Cards or empty placeholder */}
-            <div className="flex items-center gap-0">
-              {isEmpty ? (
-                <div
-                  onClick={isBacklog ? onCreateTask : undefined}
-                  className={`w-[190px] h-[112px] rounded-xl border border-dashed flex items-center justify-center transition-colors ${
-                    isDragOver
-                      ? 'border-blue-400 bg-blue-100/50'
-                      : `border-slate-200 ${PHASE_EMPTY_BG[phase]}`
-                  } ${isBacklog ? 'cursor-pointer hover:border-slate-400 hover:bg-slate-100' : ''}`}
-                >
-                  <span className={`text-xs ${isDragOver ? 'text-blue-500' : 'text-slate-300'}`}>
-                    {isDragOver ? 'Drop here' : isBacklog ? '+ New Task' : 'Empty'}
-                  </span>
-                </div>
-              ) : (
-                <>
-                  {phaseTasks.map((task, i) => {
-                    const isSamePhase = dragSourceRef.current?.fromPhase === phase
-                    const showIndicatorBefore =
-                      isDragOver &&
-                      isSamePhase &&
-                      dropTarget?.phase === phase &&
-                      dropTarget.index === i &&
-                      dragSourceRef.current?.taskId !== task.id
-
-                    return (
-                      <div key={task.id} className="flex items-center" data-task-id={task.id}>
-                        {showIndicatorBefore && <VerticalDropIndicator />}
-                        <div className="px-1">
-                          <PipelineCard
-                            task={task}
-                            isRunning={runningTaskIds.has(task.id)}
-                            isSelected={task.id === selectedTaskId}
-                            advanceAction={getAdvanceAction(task)}
-                            onTaskClick={onTaskClick}
-                            onMoveTask={onMoveTask}
-                            onDragStartNotify={() => handleCardDragStart(task.id, phase)}
-                            onDragEndNotify={handleCardDragEnd}
-                          />
-                        </div>
-                      </div>
-                    )
-                  })}
-                  {/* Drop indicator after last card */}
-                  {isDragOver &&
-                    dragSourceRef.current?.fromPhase === phase &&
-                    dropTarget?.phase === phase &&
-                    dropTarget.index === phaseTasks.length &&
-                    phaseTasks.length > 0 && (
-                      <VerticalDropIndicator />
-                    )}
-                  {isBacklog && (
-                    <div
-                      onClick={onCreateTask}
-                      className="shrink-0 w-[80px] h-[112px] rounded-xl border border-dashed border-slate-200 flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors hover:border-slate-400 hover:bg-slate-100 mx-1"
-                    >
-                      <span className="text-lg text-slate-300">+</span>
-                      <span className="text-[10px] text-slate-400 font-medium">New Task</span>
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
+            {/* Archived tasks popover — portal to escape overflow clipping */}
+            {showArchived && (
+              <ArchivedPopover
+                anchorRef={archiveRef}
+                archivedTasks={archivedTasks}
+                onTaskClick={(task) => { onTaskClick(task); setShowArchived(false) }}
+                onRestore={(task) => { onMoveTask(task, 'backlog'); setShowArchived(false) }}
+                onClose={() => setShowArchived(false)}
+              />
+            )}
           </div>
-        )
-      })}
-
-      {/* Archive column — skeleton drop target + popover */}
-      <div
-        onDragOver={(e) => { e.preventDefault(); setDragOverArchive(true) }}
-        onDragLeave={(e) => {
-          if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-            setDragOverArchive(false)
-          }
-        }}
-        onDrop={handleArchiveDrop}
-        className={`flex flex-col items-center py-2 px-2 relative transition-colors ${
-          dragOverArchive ? 'bg-blue-50/60' : ''
-        }`}
-      >
-        <div className="text-[10px] font-semibold uppercase tracking-wider mb-1.5 text-slate-400">
-          Archived
         </div>
-        <div
-          ref={archiveRef}
-          onClick={() => setShowArchived(!showArchived)}
-          className={`w-[190px] h-[112px] rounded-xl border border-dashed flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors ${
-            dragOverArchive
-              ? 'border-blue-400 bg-blue-100/50'
-              : 'border-slate-200 bg-slate-50 hover:border-slate-300 hover:bg-slate-100'
-          }`}
-        >
-          <span className="text-xs text-slate-400 font-semibold uppercase">Archive</span>
-          <span className={`text-xs ${dragOverArchive ? 'text-blue-500' : 'text-slate-400'}`}>
-            {dragOverArchive ? 'Drop to archive' : `${archivedTasks.length} archived`}
-          </span>
-        </div>
-
-        {/* Archived tasks popover — portal to escape overflow clipping */}
-        {showArchived && (
-          <ArchivedPopover
-            anchorRef={archiveRef}
-            archivedTasks={archivedTasks}
-            onTaskClick={(task) => { onTaskClick(task); setShowArchived(false) }}
-            onRestore={(task) => { onMoveTask(task, 'backlog'); setShowArchived(false) }}
-            onClose={() => setShowArchived(false)}
-          />
-        )}
       </div>
+
+      {hasOverflow && (
+        <PipelineScrollControl
+          direction="right"
+          disabled={!canScrollRight}
+          onClick={() => scrollPipeline('right')}
+        />
+      )}
+    </div>
+  )
+}
+
+// =============================================================================
+// Horizontal Scroll Controls
+// =============================================================================
+
+function PipelineScrollControl({
+  direction,
+  disabled,
+  onClick,
+}: {
+  direction: 'left' | 'right'
+  disabled: boolean
+  onClick: () => void
+}) {
+  const arrow = direction === 'left' ? '←' : '→'
+  const label = direction === 'left' ? 'Scroll pipeline left' : 'Scroll pipeline right'
+
+  return (
+    <div className="shrink-0 flex items-center px-1">
+      <button
+        type="button"
+        aria-label={label}
+        onClick={onClick}
+        disabled={disabled}
+        className="h-[88px] w-8 rounded-md border border-slate-200 bg-white/70 text-slate-500 hover:bg-white hover:text-slate-700 transition-colors disabled:opacity-35 disabled:cursor-default"
+      >
+        {arrow}
+      </button>
     </div>
   )
 }

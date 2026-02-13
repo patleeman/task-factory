@@ -426,12 +426,12 @@ body {
 
 /* Pipeline Bar */
 .pipeline-scroll {
-  scrollbar-width: thin;
-  scrollbar-color: var(--slate-300) transparent;
+  scrollbar-width: auto;
+  scrollbar-color: var(--slate-400) transparent;
 }
 
 .pipeline-scroll::-webkit-scrollbar {
-  height: 4px;
+  height: 12px;
 }
 
 .pipeline-scroll::-webkit-scrollbar-track {
@@ -440,7 +440,13 @@ body {
 
 .pipeline-scroll::-webkit-scrollbar-thumb {
   background: var(--slate-300);
-  border-radius: 2px;
+  border-radius: 9999px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+
+.pipeline-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--slate-400);
 }
 
 /* Pipeline executing card glow */
