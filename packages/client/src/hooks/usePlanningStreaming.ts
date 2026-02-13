@@ -132,6 +132,16 @@ export function usePlanningStreaming(
 
         case 'planning:message':
           setMessages((prev) => [...prev, msg.message])
+          // Fallback: also derive activeQARequest from the persisted QA message.
+          // This covers cases where the separate qa:request event doesn't arrive.
+          if (msg.message.role === 'qa' && msg.message.metadata?.qaRequest && !msg.message.metadata?.qaResponse) {
+            setActiveQARequest(msg.message.metadata.qaRequest as QARequest)
+            setAgentStream((prev) => ({
+              ...prev,
+              status: 'awaiting_qa' as any,
+              isActive: false,
+            }))
+          }
           break
 
         case 'planning:streaming_text':

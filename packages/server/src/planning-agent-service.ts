@@ -155,7 +155,7 @@ const pendingQARequests = new Map<string, {
 
 function registerQACallbacks(
   workspaceId: string,
-  broadcast: (event: ServerEvent) => void,
+  _broadcast: (event: ServerEvent) => void,
   getSession: () => PlanningSession | undefined,
 ): void {
   const registry = ensureQACallbackRegistry();
@@ -166,6 +166,9 @@ function registerQACallbacks(
         pendingQARequests.set(requestId, { resolve, reject });
 
         const session = getSession();
+        // Use session's current broadcast (updated on each message) rather than
+        // the captured reference from registration time which may go stale.
+        const broadcast = session?.broadcast || _broadcast;
 
         // Update status to awaiting_qa
         if (session) {
