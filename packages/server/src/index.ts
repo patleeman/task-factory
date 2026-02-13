@@ -35,6 +35,7 @@ import {
   saveTaskFile,
   shouldResumeInterruptedPlanning,
 } from './task-service.js';
+import { prepareTaskUpdateRequest } from './task-update-service.js';
 import {
   createWorkspace,
   loadWorkspace,
@@ -326,13 +327,14 @@ app.patch('/api/workspaces/:workspaceId/tasks/:taskId', async (req, res) => {
 
   try {
     const request = req.body as UpdateTaskRequest;
+    const preparedUpdate = await prepareTaskUpdateRequest(task, request);
 
-    task = updateTask(task, request);
+    task = updateTask(task, preparedUpdate.request);
 
     broadcastToWorkspace(workspace.id, {
       type: 'task:updated',
       task,
-      changes: req.body,
+      changes: preparedUpdate.request as unknown as Partial<Task>,
     });
 
     res.json(task);
