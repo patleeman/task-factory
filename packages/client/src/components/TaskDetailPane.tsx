@@ -2,6 +2,8 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import type { Task, Phase, ModelConfig, PostExecutionSummary as PostExecutionSummaryType } from '@pi-factory/shared'
 import { PHASES, PHASE_DISPLAY_NAMES, getPromotePhase, getDemotePhase } from '@pi-factory/shared'
 import { MarkdownEditor } from './MarkdownEditor'
+import { InlineWhiteboardPanel } from './InlineWhiteboardPanel'
+import { buildWhiteboardSceneSignature, createWhiteboardAttachmentFilename, exportWhiteboardPngFile, hasWhiteboardContent, isWhiteboardAttachmentFilename, type WhiteboardSceneSnapshot } from './whiteboard'
 import type { PostExecutionSkill } from '../types/pi'
 import { SkillSelector } from './SkillSelector'
 import { ModelSelector } from './ModelSelector'
@@ -553,8 +555,34 @@ function AttachmentsSection({ task, workspaceId }: { task: Task; workspaceId: st
   const [isUploading, setIsUploading] = useState(false)
   const [isDragOver, setIsDragOver] = useState(false)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [isWhiteboardExpanded, setIsWhiteboardExpanded] = useState(false)
+  const [whiteboardScene, setWhiteboardScene] = useState<WhiteboardSceneSnapshot | null>(null)
+  const [isSavingWhiteboard, setIsSavingWhiteboard] = useState(false)
+  const [whiteboardSaveError, setWhiteboardSaveError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const whiteboardSaveTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const lastSavedWhiteboardSignatureRef = useRef('')
   const attachments = task.frontmatter.attachments || []
+
+  useEffect(() => {
+    setIsWhiteboardExpanded(false)
+    setWhiteboardScene(null)
+    setIsSavingWhiteboard(false)
+    setWhiteboardSaveError(null)
+    lastSavedWhiteboardSignatureRef.current = ''
+    if (whiteboardSaveTimerRef.current) {
+      clearTimeout(whiteboardSaveTimerRef.current)
+      whiteboardSaveTimerRef.current = undefined
+    }
+  }, [task.id])
+
+  useEffect(() => {
+    return () => {
+      if (whiteboardSaveTimerRef.current) {
+        clearTimeout(whiteboardSaveTimerRef.current)
+      }
+    }
+  }, [])
 
   const handleUpload = useCallback(async (files: FileList | File[]) => {
     const fileArray = Array.from(files)
@@ -569,6 +597,67 @@ function AttachmentsSection({ task, workspaceId }: { task: Task; workspaceId: st
       setIsUploading(false)
     }
   }, [workspaceId, task.id])
+
+  const saveWhiteboardAttachment = useCallback(async (
+    scene: WhiteboardSceneSnapshot,
+    signature: string,
+    existingAttachments: Task['frontmatter']['attachments'],
+  ) => {
+    setIsSavingWhiteboard(true)
+    setWhiteboardSaveError(null)
+
+    try {
+      const sketchFile = await exportWhiteboardPngFile(
+        scene,
+        createWhiteboardAttachmentFilename(),
+      )
+
+      const existingSketches = existingAttachments.filter((attachment) =>
+        isWhiteboardAttachmentFilename(attachment.filename)
+      )
+
+      for (const attachment of existingSketches) {
+        try {
+          await api.deleteAttachment(workspaceId, task.id, attachment.id)
+        } catch (err) {
+          console.error('Failed to remove previous whiteboard attachment:', err)
+        }
+      }
+
+      await api.uploadAttachments(workspaceId, task.id, [sketchFile])
+      lastSavedWhiteboardSignatureRef.current = signature
+    } catch (err) {
+      console.error('Failed to auto-save whiteboard attachment:', err)
+      setWhiteboardSaveError('Auto-save failed. Keep drawing to retry.')
+    } finally {
+      setIsSavingWhiteboard(false)
+    }
+  }, [workspaceId, task.id])
+
+  useEffect(() => {
+    if (!isWhiteboardExpanded) return
+
+    const sceneToSave = whiteboardScene
+    if (!sceneToSave || !hasWhiteboardContent(sceneToSave)) return
+
+    const signature = buildWhiteboardSceneSignature(sceneToSave)
+    if (!signature || signature === lastSavedWhiteboardSignatureRef.current) return
+
+    if (whiteboardSaveTimerRef.current) {
+      clearTimeout(whiteboardSaveTimerRef.current)
+    }
+
+    whiteboardSaveTimerRef.current = setTimeout(() => {
+      void saveWhiteboardAttachment(sceneToSave, signature, attachments)
+    }, 1200)
+
+    return () => {
+      if (whiteboardSaveTimerRef.current) {
+        clearTimeout(whiteboardSaveTimerRef.current)
+        whiteboardSaveTimerRef.current = undefined
+      }
+    }
+  }, [isWhiteboardExpanded, whiteboardScene, saveWhiteboardAttachment])
 
   const handleDelete = async (attachmentId: string) => {
     if (!confirm('Delete this attachment?')) return
@@ -596,7 +685,7 @@ function AttachmentsSection({ task, workspaceId }: { task: Task; workspaceId: st
     e.stopPropagation()
     setIsDragOver(false)
     if (e.dataTransfer.files.length > 0) {
-      handleUpload(e.dataTransfer.files)
+      void handleUpload(e.dataTransfer.files)
     }
   }
 
@@ -609,25 +698,54 @@ function AttachmentsSection({ task, workspaceId }: { task: Task; workspaceId: st
             <span className="ml-1.5 text-slate-400 font-normal">({attachments.length})</span>
           )}
         </h3>
-        <button
-          onClick={() => fileInputRef.current?.click()}
-          disabled={isUploading}
-          className="text-xs text-blue-600 hover:text-blue-800 font-medium disabled:opacity-50"
-        >
-          {isUploading ? 'Uploading...' : '+ Add Files'}
-        </button>
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          accept="image/*,.pdf,.txt,.md,.json,.csv,.log"
-          className="hidden"
-          onChange={(e) => {
-            if (e.target.files) handleUpload(e.target.files)
-            e.target.value = ''
-          }}
-        />
+        <div className="flex items-center gap-2">
+          {!isWhiteboardExpanded && (
+            <button
+              type="button"
+              onClick={() => setIsWhiteboardExpanded(true)}
+              className="text-xs text-violet-600 hover:text-violet-800 font-medium"
+            >
+              + Add Excalidraw
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isUploading}
+            className="text-xs text-blue-600 hover:text-blue-800 font-medium disabled:opacity-50"
+          >
+            {isUploading ? 'Uploading...' : '+ Add Files'}
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept="image/*,.pdf,.txt,.md,.json,.csv,.log"
+            className="hidden"
+            onChange={(e) => {
+              if (e.target.files) {
+                void handleUpload(e.target.files)
+              }
+              e.target.value = ''
+            }}
+          />
+        </div>
       </div>
+
+      {isWhiteboardExpanded && (
+        <div className="mb-3">
+          <InlineWhiteboardPanel
+            isActive
+            onSceneChange={setWhiteboardScene}
+          />
+          <div className="mt-1.5 text-xs text-slate-400">
+            {isSavingWhiteboard ? 'Saving Excalidraw sketch…' : 'Excalidraw sketch auto-saves as an attachment.'}
+          </div>
+          {whiteboardSaveError && (
+            <div className="mt-1 text-xs text-red-600">{whiteboardSaveError}</div>
+          )}
+        </div>
+      )}
 
       {/* Drop zone (shown when no attachments or dragging) */}
       {(attachments.length === 0 || isDragOver) && (

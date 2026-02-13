@@ -16,6 +16,7 @@
     "@codemirror/language-data": "^6.5.2",
     "@codemirror/state": "^6.5.4",
     "@codemirror/view": "^6.39.13",
+    "@excalidraw/excalidraw": "^0.18.0",
     "@pi-factory/shared": "file:../shared",
     "codemirror": "^6.0.2",
     "date-fns": "^3.6.0",

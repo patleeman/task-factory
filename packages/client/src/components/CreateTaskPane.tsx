@@ -4,6 +4,8 @@ import { DEFAULT_PRE_EXECUTION_SKILLS, DEFAULT_POST_EXECUTION_SKILLS } from '@pi
 import { MarkdownEditor } from './MarkdownEditor'
 import { SkillSelector } from './SkillSelector'
 import { ModelSelector } from './ModelSelector'
+import { InlineWhiteboardPanel } from './InlineWhiteboardPanel'
+import { createWhiteboardAttachmentFilename, exportWhiteboardPngFile, hasWhiteboardContent, type WhiteboardSceneSnapshot } from './whiteboard'
 import { useLocalStorageDraft } from '../hooks/useLocalStorageDraft'
 import { api } from '../api'
 import type { PostExecutionSkill } from '../types/pi'
@@ -50,6 +52,8 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
     postExecutionSkills: [...DEFAULT_POST_EXECUTION_SKILLS],
   })
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
+  const [isWhiteboardActive, setIsWhiteboardActive] = useState(false)
+  const [whiteboardScene, setWhiteboardScene] = useState<WhiteboardSceneSnapshot | null>(null)
   const [isDragOver, setIsDragOver] = useState(false)
   const [isWide, setIsWide] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -153,6 +157,8 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
     setModelConfig(taskDefaults.modelConfig ? { ...taskDefaults.modelConfig } : undefined)
     setSelectedWrapperId('')
     setPendingFiles([])
+    setIsWhiteboardActive(false)
+    setWhiteboardScene(null)
     clearDraft()
   }, [clearDraft, taskDefaults])
 
@@ -190,18 +196,37 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
   const handleSubmit = async () => {
     if (!content.trim()) return
     setIsSubmitting(true)
-    // Only include skillConfigs if there are actual overrides
-    const hasSkillConfigs = Object.keys(skillConfigs).length > 0
-    await onSubmit({
-      content,
-      preExecutionSkills: selectedPreSkillIds,
-      postExecutionSkills: selectedSkillIds,
-      skillConfigs: hasSkillConfigs ? skillConfigs : undefined,
-      modelConfig,
-      pendingFiles: pendingFiles.length > 0 ? pendingFiles : undefined,
-    })
-    clearDraft()
-    setIsSubmitting(false)
+
+    try {
+      // Only include skillConfigs if there are actual overrides
+      const hasSkillConfigs = Object.keys(skillConfigs).length > 0
+      const filesToSubmit = [...pendingFiles]
+
+      const sceneToAttach = whiteboardScene
+      if (sceneToAttach && hasWhiteboardContent(sceneToAttach)) {
+        try {
+          const whiteboardFile = await exportWhiteboardPngFile(
+            sceneToAttach,
+            createWhiteboardAttachmentFilename(),
+          )
+          filesToSubmit.push(whiteboardFile)
+        } catch (err) {
+          console.error('Failed to export whiteboard image:', err)
+        }
+      }
+
+      await onSubmit({
+        content,
+        preExecutionSkills: selectedPreSkillIds,
+        postExecutionSkills: selectedSkillIds,
+        skillConfigs: hasSkillConfigs ? skillConfigs : undefined,
+        modelConfig,
+        pendingFiles: filesToSubmit.length > 0 ? filesToSubmit : undefined,
+      })
+      clearDraft()
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   // Shared sub-components for DRY between layouts
@@ -217,6 +242,22 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
         autoFocus
         fill
       />
+
+      <div className="mt-3 shrink-0">
+        <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">
+          Whiteboard (Optional)
+        </label>
+        <p className="text-xs text-slate-400 mb-2">
+          Draw inline and we will auto-attach a PNG when you create the task.
+        </p>
+        <InlineWhiteboardPanel
+          isActive={isWhiteboardActive}
+          onActivate={() => setIsWhiteboardActive(true)}
+          onSceneChange={setWhiteboardScene}
+          activateLabel="Open Excalidraw"
+          inactiveHint="No manual save needed — non-empty boards are exported automatically on submit."
+        />
+      </div>
     </div>
   )
 
