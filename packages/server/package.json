@@ -11,7 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@mariozechner/pi-coding-agent": "^0.52.6",
+    "@mariozechner/pi-coding-agent": "^0.52.10",
     "@pi-factory/shared": "file:../shared",
     "cors": "^2.8.5",
     "express": "^4.21.2",
