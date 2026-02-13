@@ -401,8 +401,10 @@ export function TaskChat({
   // still displays running status while the model responds.
   const isAgentActive = agentStream.isActive
 
-  // Steering/follow-up controls are only shown for executing tasks.
-  const canSteer = taskPhase === 'executing' && !!onSteer
+  // Steering controls are available in task chat whenever callbacks are provided.
+  // Foreman/planning chat does not provide these callbacks.
+  const canSteer = !!onSteer
+  const showSteerControls = isAgentActive && canSteer
 
   const isWaitingForInput = taskPhase
     ? !agentStream.isActive && taskPhase === 'executing' && agentStream.status === 'idle'
@@ -418,8 +420,8 @@ export function TaskChat({
   }, [taskEntries.length, agentStream.streamingText.length])
 
   useEffect(() => {
-    setSendMode(isAgentActive && canSteer ? 'steer' : 'message')
-  }, [isAgentActive, canSteer])
+    setSendMode(showSteerControls ? 'steer' : 'message')
+  }, [showSteerControls])
 
   const addFiles = useCallback((files: FileList | File[]) => {
     const newFiles = Array.from(files)
@@ -434,9 +436,11 @@ export function TaskChat({
   // Determine if file upload is supported (either via custom callback or task-specific upload)
   const canUploadFiles = !!(onUploadFiles || (workspaceId && taskId && attachments))
 
-  const handleSend = async () => {
+  const handleSend = async (modeOverride?: SendMode) => {
     const trimmed = input.trim()
     if (!trimmed && pendingFiles.length === 0) return
+
+    const activeSendMode = modeOverride ?? sendMode
 
     // Upload pending files first (for any send mode)
     let attachmentIds: string[] | undefined
@@ -462,9 +466,9 @@ export function TaskChat({
       setIsUploading(false)
     }
 
-    if (sendMode === 'steer' && onSteer) {
+    if (activeSendMode === 'steer' && onSteer) {
       if (trimmed) onSteer(trimmed, attachmentIds)
-    } else if (sendMode === 'followUp' && onFollowUp) {
+    } else if (activeSendMode === 'followUp' && onFollowUp) {
       if (trimmed) onFollowUp(trimmed, attachmentIds)
     } else {
       if (trimmed || attachmentIds) {
@@ -502,11 +506,10 @@ export function TaskChat({
     if (isComposing) return
     if (e.key === 'Enter' && !e.shiftKey && !e.altKey) {
       e.preventDefault()
-      handleSend()
-    } else if (e.key === 'Enter' && e.altKey && isAgentActive && canSteer && onFollowUp) {
+      void handleSend()
+    } else if (e.key === 'Enter' && e.altKey && showSteerControls && onFollowUp) {
       e.preventDefault()
-      const trimmed = input.trim()
-      if (trimmed) { onFollowUp(trimmed); setInput('') }
+      void handleSend('followUp')
     }
   }
 
@@ -707,7 +710,7 @@ export function TaskChat({
 
       {/* Input */}
       <div className="shrink-0 border-t border-slate-200 bg-white">
-        {isAgentActive && canSteer && (
+        {showSteerControls && (
           <div className="flex items-center gap-1 px-3 pt-2 pb-0">
             <button
               onClick={() => setSendMode('steer')}
@@ -804,7 +807,7 @@ export function TaskChat({
             onCompositionStart={() => setIsComposing(true)}
             onCompositionEnd={() => setIsComposing(false)}
             placeholder={
-              isAgentActive && canSteer
+              showSteerControls
                 ? sendMode === 'steer'
                   ? 'steer the agent… (enter to send)'
                   : 'queue follow-up… (enter to send)'
@@ -817,9 +820,9 @@ export function TaskChat({
                       : 'message the agent… (enter to send)'
             }
             className={`flex-1 resize-none rounded-lg border bg-white text-slate-800 placeholder-slate-400 px-3 py-2 text-sm focus:outline-none focus:ring-1 min-h-[40px] max-h-[120px] transition-colors ${
-              isAgentActive && canSteer && sendMode === 'steer'
+              showSteerControls && sendMode === 'steer'
                 ? 'border-amber-300 focus:border-amber-400 focus:ring-amber-200'
-                : isAgentActive && canSteer && sendMode === 'followUp'
+                : showSteerControls && sendMode === 'followUp'
                 ? 'border-blue-300 focus:border-blue-400 focus:ring-blue-200'
                 : 'border-slate-200 focus:border-slate-400 focus:ring-slate-200'
             }`}
@@ -831,15 +834,15 @@ export function TaskChat({
             }}
           />
           <button
-            onClick={handleSend}
+            onClick={() => void handleSend()}
             disabled={!input.trim() && pendingFiles.length === 0}
             className={`text-sm font-mono py-2 px-3 rounded-lg shrink-0 disabled:opacity-30 transition-colors ${
-              isAgentActive && canSteer && sendMode === 'steer'
+              showSteerControls && sendMode === 'steer'
                 ? 'bg-amber-500 text-white hover:bg-amber-600'
                 : 'bg-slate-700 text-white hover:bg-slate-600'
             }`}
           >
-            {isUploading ? '…' : isAgentActive && canSteer && sendMode === 'steer' ? '⚡' : '↩'}
+            {isUploading ? '…' : showSteerControls && sendMode === 'steer' ? '⚡' : '↩'}
           </button>
         </div>
       </div>
