@@ -40,10 +40,11 @@ import { generateAndPersistSummary } from './summary-service.js';
 import { attachTaskFileAndBroadcast, type AttachTaskFileRequest } from './task-attachment-service.js';
 import { logTaskStateTransition } from './state-transition.js';
 import {
-  buildStateContractReferenceSection,
-  buildCurrentStateContractBlock,
-  prependCurrentStateToTurn,
+  buildContractReference,
+  buildStateBlock,
+  prependStateToTurn,
   buildTaskStateSnapshot,
+  isForbidden,
   stripStateContractEcho,
 } from './state-contract.js';
 
@@ -442,9 +443,9 @@ function buildTaskPrompt(
   let prompt = `# Task: ${frontmatter.title}\n\n`;
   prompt += `**Task ID:** ${task.id}\n\n`;
   const currentState = buildTaskStateSnapshot(frontmatter);
-  prompt += buildStateContractReferenceSection() + '\n';
+  prompt += buildContractReference() + '\n';
   prompt += `## Current State\n`;
-  prompt += `${buildCurrentStateContractBlock(currentState)}\n\n`;
+  prompt += `${buildStateBlock(currentState)}\n\n`;
 
   if (frontmatter.acceptanceCriteria.length > 0) {
     prompt += `## Acceptance Criteria\n`;
@@ -516,9 +517,9 @@ function buildReworkPrompt(
   prompt += `You have the full conversation history from the previous execution above.\n\n`;
   prompt += `**Task ID:** ${task.id}\n\n`;
   const currentState = buildTaskStateSnapshot(frontmatter);
-  prompt += buildStateContractReferenceSection() + '\n';
+  prompt += buildContractReference() + '\n';
   prompt += `## Current State\n`;
-  prompt += `${buildCurrentStateContractBlock(currentState)}\n\n`;
+  prompt += `${buildStateBlock(currentState)}\n\n`;
 
   if (frontmatter.acceptanceCriteria.length > 0) {
     prompt += `## Current Acceptance Criteria\n`;
@@ -1294,32 +1295,8 @@ function refreshSessionTaskSnapshot(session: TaskSession): Task | undefined {
   }
 }
 
-function resolveTaskTurnMode(task: Task): 'task_planning' | 'task_execution' | 'task_rework' | 'task_chat' {
-  const phase = task.frontmatter.phase;
-  const planningStatus = task.frontmatter.planningStatus;
-  const hasPlan = !!task.frontmatter.plan;
-
-  if (phase === 'backlog' && planningStatus === 'running' && !hasPlan) {
-    return 'task_planning';
-  }
-
-  if (phase === 'executing') {
-    return 'task_execution';
-  }
-
-  if (phase === 'complete') {
-    return 'task_rework';
-  }
-
-  return 'task_chat';
-}
-
 function prependTaskTurnState(task: Task, content: string): string {
-  const phase = task.frontmatter.phase;
-  const planningStatus = task.frontmatter.planningStatus ?? 'none';
-  const mode = resolveTaskTurnMode(task);
-
-  return `## Current Turn State\n<state_contract version="1">\n  <mode>${mode}</mode>\n  <phase>${phase}</phase>\n  <planning_status>${planningStatus}</planning_status>\n</state_contract>\n\nUse <state_contract> as the highest-priority behavior contract for this turn.\nDo not ask the user to send manual state updates; rely on this injected state.\n\n${content}`;
+  return prependStateToTurn(content, buildTaskStateSnapshot(task.frontmatter));
 }
 
 export async function steerTask(taskId: string, content: string, images?: ImageContent[]): Promise<boolean> {
@@ -1366,7 +1343,7 @@ export async function followUpTask(taskId: string, content: string, images?: Ima
     session.completionSummary = '';
 
     const savePlanCallbackCleanup =
-      session.task && buildTaskStateSnapshot(session.task.frontmatter).mode === 'task_planning'
+      session.task && !isForbidden(buildTaskStateSnapshot(session.task.frontmatter).mode, 'save_plan')
         ? registerSavePlanCallbackForChatTurn(session.task, session.workspaceId, session.broadcastToWorkspace)
         : undefined;
 
@@ -1468,13 +1445,13 @@ export async function resumeChat(
     const promptContent = sharedContextSection
       ? `${sharedContextSection}## User Message\n${content}`
       : content;
-    const promptWithState = `${buildStateContractReferenceSection()}\n\n${prependCurrentStateToTurn(
+    const promptWithState = `${buildContractReference()}\n\n${prependStateToTurn(
       promptContent,
       buildTaskStateSnapshot(task.frontmatter),
     )}`;
 
     const savePlanCallbackCleanup =
-      buildTaskStateSnapshot(task.frontmatter).mode === 'task_planning'
+      !isForbidden(buildTaskStateSnapshot(task.frontmatter).mode, 'save_plan')
         ? registerSavePlanCallbackForChatTurn(task, workspaceId, broadcastToWorkspace)
         : undefined;
 
@@ -1576,13 +1553,13 @@ export async function startChat(
       (task.frontmatter.plan ? `This task has a plan with goal: ${task.frontmatter.plan.goal}\n` : '') +
       `Current phase: ${task.frontmatter.phase}\n\n` +
       `User message: ${content}`;
-    const taskContextWithState = `${buildStateContractReferenceSection()}\n\n${prependCurrentStateToTurn(
+    const taskContextWithState = `${buildContractReference()}\n\n${prependStateToTurn(
       taskContext,
       buildTaskStateSnapshot(task.frontmatter),
     )}`;
 
     const savePlanCallbackCleanup =
-      buildTaskStateSnapshot(task.frontmatter).mode === 'task_planning'
+      !isForbidden(buildTaskStateSnapshot(task.frontmatter).mode, 'save_plan')
         ? registerSavePlanCallbackForChatTurn(task, workspaceId, broadcastToWorkspace)
         : undefined;
 
@@ -1724,9 +1701,9 @@ export function buildPlanningPrompt(
     ...buildTaskStateSnapshot(frontmatter),
     mode: 'task_planning' as const,
   };
-  prompt += buildStateContractReferenceSection() + '\n';
+  prompt += buildContractReference() + '\n';
   prompt += `## Current State\n`;
-  prompt += `${buildCurrentStateContractBlock(currentState)}\n\n`;
+  prompt += `${buildStateBlock(currentState)}\n\n`;
 
   if (frontmatter.acceptanceCriteria.length > 0) {
     prompt += `## Acceptance Criteria\n`;
@@ -1753,15 +1730,16 @@ export function buildPlanningPrompt(
   prompt += `## Instructions\n\n`;
   prompt += `1. Research the codebase to understand the current state. Read relevant files, understand architecture, and trace call sites.\n`;
   prompt += `2. You are in planning-only mode. Do not edit files, do not run write/edit tools, and do not implement code changes.\n`;
-  prompt += `3. From your investigation, produce 3-7 specific, testable acceptance criteria for this task.\n`;
-  prompt += `4. Then produce a plan that directly satisfies those acceptance criteria.\n`;
-  prompt += `5. The plan is a high-level task summary for humans. Keep it concise and easy to parse.\n`;
-  prompt += `6. Steps should be short outcome-focused summaries (usually 3-6 steps). Avoid line-level implementation details, exact file paths, and low-level function-by-function instructions.\n`;
-  prompt += `7. Validation items must verify the acceptance criteria and overall outcome without turning into a detailed test script.\n`;
-  prompt += `8. Call the \`save_plan\` tool **exactly once** with taskId "${task.id}", acceptanceCriteria, goal, steps, validation, and cleanup.\n`;
-  prompt += `9. Cleanup items are post-completion tasks (pass an empty array if none needed).\n`;
-  prompt += `10. After calling \`save_plan\`, stop immediately. Do not run any further tools or actions.\n`;
-  prompt += `11. Stay within planning guardrails: at most ${guardrails.maxToolCalls} tool calls and about ${Math.round(guardrails.maxReadBytes / 1024)}KB of total read output. Prefer targeted reads over broad scans.\n`;
+  prompt += `3. Do NOT read other task files in .pi/tasks/. They are irrelevant to your investigation and waste your tool budget.\n`;
+  prompt += `4. From your investigation, produce 3-7 specific, testable acceptance criteria for this task.\n`;
+  prompt += `5. Then produce a plan that directly satisfies those acceptance criteria.\n`;
+  prompt += `6. The plan is a high-level task summary for humans. Keep it concise and easy to parse.\n`;
+  prompt += `7. Steps should be short outcome-focused summaries (usually 3-6 steps). Avoid line-level implementation details, exact file paths, and low-level function-by-function instructions.\n`;
+  prompt += `8. Validation items must verify the acceptance criteria and overall outcome without turning into a detailed test script.\n`;
+  prompt += `9. Call the \`save_plan\` tool **exactly once** with taskId "${task.id}", acceptanceCriteria, goal, steps, validation, and cleanup.\n`;
+  prompt += `10. Cleanup items are post-completion tasks (pass an empty array if none needed).\n`;
+  prompt += `11. After calling \`save_plan\`, stop immediately. Do not run any further tools or actions.\n`;
+  prompt += `12. Stay within planning guardrails: at most ${guardrails.maxToolCalls} tool calls and about ${Math.round(guardrails.maxReadBytes / 1024)}KB of total read output. Prefer targeted reads over broad scans.\n`;
 
   return prompt;
 }
@@ -1781,9 +1759,9 @@ export function buildPlanningResumePrompt(
     ...buildTaskStateSnapshot(frontmatter),
     mode: 'task_planning' as const,
   };
-  prompt += buildStateContractReferenceSection() + '\n';
+  prompt += buildContractReference() + '\n';
   prompt += `## Current State\n`;
-  prompt += `${buildCurrentStateContractBlock(currentState)}\n\n`;
+  prompt += `${buildStateBlock(currentState)}\n\n`;
 
   if (frontmatter.acceptanceCriteria.length > 0) {
     prompt += `## Existing Acceptance Criteria\n`;
@@ -1809,11 +1787,12 @@ export function buildPlanningResumePrompt(
   prompt += `## Instructions\n\n`;
   prompt += `1. Continue from prior context and investigation.\n`;
   prompt += `2. Fill only remaining gaps needed to produce a strong plan package.\n`;
-  prompt += `3. Produce 3-7 specific, testable acceptance criteria.\n`;
-  prompt += `4. Produce a concise high-level plan aligned to those criteria.\n`;
-  prompt += `5. Call the \`save_plan\` tool exactly once with taskId "${task.id}", acceptanceCriteria, goal, steps, validation, and cleanup.\n`;
-  prompt += `6. After calling \`save_plan\`, stop immediately.\n`;
-  prompt += `7. Stay within planning guardrails: at most ${guardrails.maxToolCalls} tool calls and about ${Math.round(guardrails.maxReadBytes / 1024)}KB of total read output.\n`;
+  prompt += `3. Do NOT read other task files in .pi/tasks/. They are irrelevant and waste your tool budget.\n`;
+  prompt += `4. Produce 3-7 specific, testable acceptance criteria.\n`;
+  prompt += `5. Produce a concise high-level plan aligned to those criteria.\n`;
+  prompt += `6. Call the \`save_plan\` tool exactly once with taskId "${task.id}", acceptanceCriteria, goal, steps, validation, and cleanup.\n`;
+  prompt += `7. After calling \`save_plan\`, stop immediately.\n`;
+  prompt += `8. Stay within planning guardrails: at most ${guardrails.maxToolCalls} tool calls and about ${Math.round(guardrails.maxReadBytes / 1024)}KB of total read output.\n`;
 
   return prompt;
 }
@@ -1919,9 +1898,9 @@ function savePlanForTask(
   const latestTask = existsSync(task.filePath) ? parseTaskFile(task.filePath) : task;
   const currentState = buildTaskStateSnapshot(latestTask.frontmatter);
 
-  if (currentState.mode !== 'task_planning') {
+  if (isForbidden(currentState.mode, 'save_plan')) {
     throw new Error(
-      `save_plan is only available in task_planning mode. Current mode is ${currentState.mode}.`,
+      `save_plan is forbidden in mode ${currentState.mode}.`,
     );
   }
 
@@ -2065,6 +2044,7 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
   let planningToolCallCount = 0;
   let planningReadBytes = 0;
   let planningGuardrailAbortMessage: string | null = null;
+  let graceTurnActive = false;
 
   try {
     // Register callback so the save_plan extension tool can persist criteria + plan.
@@ -2110,7 +2090,7 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
           workspaceId,
           task.id,
           'phase-change',
-          `Planning stopped early: ${message}`,
+          `Planning guardrail hit: ${message}`,
         ),
         'planning guardrail event',
       );
@@ -2123,7 +2103,21 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
     session.unsubscribe = piSession.subscribe((event: AgentSessionEvent) => {
       handlePiEvent(event, session, workspaceId, task.id);
 
-      if (hasPersistedPlan || planningGuardrailAbortMessage) {
+      if (hasPersistedPlan) {
+        return;
+      }
+
+      // During the grace turn, abort if the agent calls any tool other than save_plan.
+      // save_plan fires the registry callback synchronously, setting hasPersistedPlan
+      // before this subscriber sees tool_execution_end, so it's caught above.
+      if (graceTurnActive) {
+        if (event.type === 'tool_execution_end') {
+          void session.piSession?.abort().catch(() => undefined);
+        }
+        return;
+      }
+
+      if (planningGuardrailAbortMessage) {
         return;
       }
 
@@ -2173,6 +2167,30 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
           void piSession.abort().catch(() => undefined);
         }, { once: true });
         await piSession.prompt(prompt, planPromptOpts);
+
+        // Grace turn: if a guardrail aborted planning but no plan was saved,
+        // give the agent one final turn to call save_plan with what it gathered.
+        if (planningGuardrailAbortMessage && !savedPlan && !hasPersistedPlan) {
+          graceTurnActive = true;
+
+          broadcastActivityEntry(
+            broadcastToWorkspace,
+            createSystemEvent(
+              workspaceId,
+              task.id,
+              'phase-change',
+              'Budget exceeded — giving agent one final turn to save a plan.',
+            ),
+            'planning grace turn event',
+          );
+
+          const graceTurnPrompt =
+            `Your planning tool budget has been reached. You must call \`save_plan\` NOW with taskId "${task.id}" ` +
+            'using the research you have gathered so far. Do not call any other tools — only `save_plan`. ' +
+            'Produce your best plan from the information already collected.';
+
+          await piSession.prompt(graceTurnPrompt);
+        }
       },
       planningGuardrails.timeoutMs,
       planningTimeoutMessage,
@@ -2419,7 +2437,7 @@ function buildAcceptanceCriteriaRegenerationPrompt(task: Task): string {
     prompt += '\n';
   }
 
-  return `${buildStateContractReferenceSection()}\n\n${prependCurrentStateToTurn(
+  return `${buildContractReference()}\n\n${prependStateToTurn(
     prompt,
     buildTaskStateSnapshot(task.frontmatter),
   )}`;

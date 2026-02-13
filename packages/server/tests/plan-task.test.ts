@@ -1,9 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync } from 'fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import { DEFAULT_PLANNING_GUARDRAILS } from '@pi-factory/shared';
 
 const createAgentSessionMock = vi.fn();
+const sessionManagerCreateMock = vi.fn(() => ({}));
+const sessionManagerOpenMock = vi.fn(() => ({}));
 
 vi.mock('@mariozechner/pi-coding-agent', () => ({
   createAgentSession: (...args: any[]) => createAgentSessionMock(...args),
@@ -19,7 +22,8 @@ vi.mock('@mariozechner/pi-coding-agent', () => ({
     }
   },
   SessionManager: {
-    create: () => ({}),
+    create: (...args: any[]) => sessionManagerCreateMock(...args),
+    open: (...args: any[]) => sessionManagerOpenMock(...args),
   },
   SettingsManager: {
     create: () => ({
@@ -29,9 +33,17 @@ vi.mock('@mariozechner/pi-coding-agent', () => ({
 }));
 
 vi.mock('../src/activity-service.js', () => ({
-  createTaskSeparator: vi.fn(),
-  createChatMessage: vi.fn(),
-  createSystemEvent: vi.fn((workspaceId: string, taskId: string, event: string, message: string) => ({
+  createTaskSeparator: vi.fn(async () => undefined),
+  createChatMessage: vi.fn(async (workspaceId: string, taskId: string, role: 'user' | 'agent', content: string) => ({
+    type: 'chat-message',
+    id: crypto.randomUUID(),
+    taskId,
+    role,
+    content,
+    timestamp: new Date().toISOString(),
+    workspaceId,
+  })),
+  createSystemEvent: vi.fn(async (workspaceId: string, taskId: string, event: string, message: string) => ({
     type: 'system-event',
     id: crypto.randomUUID(),
     taskId,
@@ -47,6 +59,8 @@ describe('planTask', () => {
 
   beforeEach(() => {
     createAgentSessionMock.mockReset();
+    sessionManagerCreateMock.mockClear();
+    sessionManagerOpenMock.mockClear();
   });
 
   afterEach(() => {
@@ -151,6 +165,67 @@ describe('planTask', () => {
     expect(broadcasts.some((event) => event.type === 'task:plan_generated')).toBe(false);
   });
 
+  it('aborts the planning turn right after save_plan persists a plan', async () => {
+    const workspacePath = mkdtempSync(join(tmpdir(), 'pi-factory-plan-task-'));
+    tempDirs.push(workspacePath);
+
+    const tasksDir = join(workspacePath, '.pi', 'tasks');
+    mkdirSync(tasksDir, { recursive: true });
+
+    const { createTask } = await import('../src/task-service.js');
+    const { planTask } = await import('../src/agent-execution-service.js');
+
+    const task = createTask(workspacePath, tasksDir, {
+      content: 'Ensure planning stops once save_plan succeeds',
+      acceptanceCriteria: [],
+    });
+
+    const abortSpy = vi.fn(async () => {});
+
+    createAgentSessionMock.mockResolvedValue({
+      session: {
+        subscribe: () => () => {},
+        prompt: async () => {
+          const callback = (globalThis as any).__piFactoryPlanCallbacks?.get(task.id);
+          if (!callback) {
+            throw new Error('save_plan callback not registered');
+          }
+
+          callback({
+            acceptanceCriteria: ['Criterion one'],
+            plan: {
+              goal: 'Goal',
+              steps: ['Step one'],
+              validation: ['Validate one'],
+              cleanup: [],
+              generatedAt: new Date().toISOString(),
+            },
+          });
+        },
+        abort: abortSpy,
+      },
+    });
+
+    const broadcasts: any[] = [];
+    const result = await planTask({
+      task,
+      workspaceId: 'workspace-test',
+      workspacePath,
+      broadcastToWorkspace: (event: any) => broadcasts.push(event),
+    });
+
+    expect(result).not.toBeNull();
+    expect(task.frontmatter.plan).toBeDefined();
+    expect(task.frontmatter.planningStatus).toBe('completed');
+    expect(abortSpy).toHaveBeenCalled();
+
+    const statusEvents = broadcasts.filter((event) => event.type === 'agent:execution_status');
+    expect(statusEvents.at(-1)).toMatchObject({
+      taskId: task.id,
+      status: 'completed',
+    });
+  });
+
   it('keeps concurrent phase transitions when a plan is saved', async () => {
     const workspacePath = mkdtempSync(join(tmpdir(), 'pi-factory-plan-task-'));
     tempDirs.push(workspacePath);
@@ -217,5 +292,288 @@ describe('planTask', () => {
     const updateEvents = broadcasts.filter((event) => event.type === 'task:updated');
     expect(updateEvents.length).toBeGreaterThan(0);
     expect(updateEvents.at(-1)?.task?.frontmatter?.phase).toBe('ready');
+  });
+
+  it('reuses the existing task conversation when regenerating a plan', async () => {
+    const workspacePath = mkdtempSync(join(tmpdir(), 'pi-factory-plan-task-'));
+    tempDirs.push(workspacePath);
+
+    const tasksDir = join(workspacePath, '.pi', 'tasks');
+    mkdirSync(tasksDir, { recursive: true });
+
+    const sessionsDir = join(workspacePath, '.pi', 'sessions');
+    mkdirSync(sessionsDir, { recursive: true });
+
+    const existingSessionFile = join(sessionsDir, 'task-session.jsonl');
+    writeFileSync(existingSessionFile, '{"type":"header"}\n', 'utf-8');
+
+    const { createTask, parseTaskFile, saveTaskFile } = await import('../src/task-service.js');
+    const { planTask } = await import('../src/agent-execution-service.js');
+
+    const task = createTask(workspacePath, tasksDir, {
+      content: 'Resume planning from prior context instead of starting over',
+      acceptanceCriteria: [],
+    });
+
+    task.frontmatter.sessionFile = existingSessionFile;
+    saveTaskFile(task);
+
+    const promptSpy = vi.fn(async (prompt: string) => {
+      const callback = (globalThis as any).__piFactoryPlanCallbacks?.get(task.id);
+      if (!callback) {
+        throw new Error('save_plan callback not registered');
+      }
+
+      callback({
+        acceptanceCriteria: ['Criterion one'],
+        plan: {
+          goal: 'Goal',
+          steps: ['Step one'],
+          validation: ['Validate one'],
+          cleanup: [],
+          generatedAt: new Date().toISOString(),
+        },
+      });
+
+      expect(prompt).toContain('# Resume Planning Task:');
+    });
+
+    createAgentSessionMock.mockResolvedValue({
+      session: {
+        sessionFile: existingSessionFile,
+        subscribe: () => () => {},
+        prompt: promptSpy,
+        abort: async () => {},
+        compact: async () => ({ summary: 'ok' }),
+      },
+    });
+
+    const result = await planTask({
+      task,
+      workspaceId: 'workspace-test',
+      workspacePath,
+      broadcastToWorkspace: () => {},
+    });
+
+    expect(result).not.toBeNull();
+    expect(sessionManagerOpenMock).toHaveBeenCalledWith(existingSessionFile);
+    expect(sessionManagerCreateMock).not.toHaveBeenCalled();
+
+    const persistedTask = parseTaskFile(task.filePath);
+    expect(persistedTask.frontmatter.sessionFile).toBe(existingSessionFile);
+    expect(persistedTask.frontmatter.planningStatus).toBe('completed');
+  });
+
+  it('reuses the existing task conversation when regenerating acceptance criteria', async () => {
+    const workspacePath = mkdtempSync(join(tmpdir(), 'pi-factory-plan-task-'));
+    tempDirs.push(workspacePath);
+
+    const tasksDir = join(workspacePath, '.pi', 'tasks');
+    mkdirSync(tasksDir, { recursive: true });
+
+    const sessionsDir = join(workspacePath, '.pi', 'sessions');
+    mkdirSync(sessionsDir, { recursive: true });
+
+    const existingSessionFile = join(sessionsDir, 'task-session.jsonl');
+    writeFileSync(existingSessionFile, '{"type":"header"}\n', 'utf-8');
+
+    const { createTask, parseTaskFile, saveTaskFile } = await import('../src/task-service.js');
+    const { regenerateAcceptanceCriteriaForTask } = await import('../src/agent-execution-service.js');
+
+    const task = createTask(workspacePath, tasksDir, {
+      content: 'Reuse the task conversation for acceptance criteria regeneration',
+      acceptanceCriteria: [],
+    });
+
+    task.frontmatter.sessionFile = existingSessionFile;
+    saveTaskFile(task);
+
+    const listeners: Array<(event: any) => void> = [];
+    const disposeSpy = vi.fn();
+
+    createAgentSessionMock.mockResolvedValue({
+      session: {
+        sessionFile: existingSessionFile,
+        subscribe: (listener: (event: any) => void) => {
+          listeners.push(listener);
+          return () => {
+            const index = listeners.indexOf(listener);
+            if (index >= 0) listeners.splice(index, 1);
+          };
+        },
+        prompt: async (prompt: string) => {
+          expect(prompt).toContain('Regenerate acceptance criteria for task');
+          for (const listener of listeners) {
+            listener({
+              type: 'message_update',
+              assistantMessageEvent: {
+                type: 'text_delta',
+                delta: '1. Criterion one\n2. Criterion two\n',
+              },
+            });
+          }
+        },
+        abort: async () => {},
+        dispose: disposeSpy,
+      },
+    });
+
+    const criteria = await regenerateAcceptanceCriteriaForTask(
+      task,
+      'workspace-test',
+      () => {},
+    );
+
+    expect(criteria).toEqual(['Criterion one', 'Criterion two']);
+    expect(sessionManagerOpenMock).toHaveBeenCalledWith(existingSessionFile);
+    expect(sessionManagerCreateMock).not.toHaveBeenCalled();
+    expect(disposeSpy).toHaveBeenCalled();
+
+    const persistedTask = parseTaskFile(task.filePath);
+    expect(persistedTask.frontmatter.acceptanceCriteria).toEqual(['Criterion one', 'Criterion two']);
+    expect(persistedTask.frontmatter.sessionFile).toBe(existingSessionFile);
+  });
+
+  it('gives the agent a grace turn to call save_plan when tool budget is exceeded', async () => {
+    const workspacePath = mkdtempSync(join(tmpdir(), 'pi-factory-plan-task-'));
+    tempDirs.push(workspacePath);
+
+    const tasksDir = join(workspacePath, '.pi', 'tasks');
+    mkdirSync(tasksDir, { recursive: true });
+
+    const { createTask, parseTaskFile } = await import('../src/task-service.js');
+    const { planTask } = await import('../src/agent-execution-service.js');
+
+    const task = createTask(workspacePath, tasksDir, {
+      content: 'Test grace turn when budget exceeded',
+      acceptanceCriteria: [],
+    });
+
+    const subscribers: Array<(event: any) => void> = [];
+    let promptCount = 0;
+    let abortCalled = false;
+
+    createAgentSessionMock.mockResolvedValue({
+      session: {
+        subscribe: (listener: (event: any) => void) => {
+          subscribers.push(listener);
+          return () => {
+            const idx = subscribers.indexOf(listener);
+            if (idx >= 0) subscribers.splice(idx, 1);
+          };
+        },
+        prompt: vi.fn(async () => {
+          promptCount++;
+          if (promptCount === 1) {
+            // Fire enough tool_execution_end events to exceed the default budget
+            for (let i = 0; i <= DEFAULT_PLANNING_GUARDRAILS.maxToolCalls; i++) {
+              if (abortCalled) return;
+              for (const sub of [...subscribers]) {
+                sub({ type: 'tool_execution_end', toolName: 'bash', toolCallId: `call-${i}`, isError: false });
+              }
+            }
+          } else if (promptCount === 2) {
+            // Grace turn — agent calls save_plan
+            const callback = (globalThis as any).__piFactoryPlanCallbacks?.get(task.id);
+            if (!callback) throw new Error('save_plan callback not registered');
+            callback({
+              acceptanceCriteria: ['Grace turn criterion'],
+              plan: {
+                goal: 'Plan from grace turn',
+                steps: ['Step one'],
+                validation: ['Validate one'],
+                cleanup: [],
+                generatedAt: new Date().toISOString(),
+              },
+            });
+          }
+        }),
+        abort: vi.fn(async () => {
+          abortCalled = true;
+        }),
+      },
+    });
+
+    const broadcasts: any[] = [];
+    const result = await planTask({
+      task,
+      workspaceId: 'workspace-test',
+      workspacePath,
+      broadcastToWorkspace: (event: any) => broadcasts.push(event),
+    });
+
+    expect(result).not.toBeNull();
+    expect(result?.goal).toBe('Plan from grace turn');
+    expect(promptCount).toBe(2);
+
+    const persistedTask = parseTaskFile(task.filePath);
+    expect(persistedTask.frontmatter.plan).toBeDefined();
+    expect(persistedTask.frontmatter.planningStatus).toBe('completed');
+  });
+
+  it('still errors when the grace turn fails to produce a plan', async () => {
+    const workspacePath = mkdtempSync(join(tmpdir(), 'pi-factory-plan-task-'));
+    tempDirs.push(workspacePath);
+
+    const tasksDir = join(workspacePath, '.pi', 'tasks');
+    mkdirSync(tasksDir, { recursive: true });
+
+    const { createTask, parseTaskFile } = await import('../src/task-service.js');
+    const { planTask } = await import('../src/agent-execution-service.js');
+
+    const task = createTask(workspacePath, tasksDir, {
+      content: 'Test grace turn that fails',
+      acceptanceCriteria: [],
+    });
+
+    const subscribers: Array<(event: any) => void> = [];
+    let promptCount = 0;
+    let abortCalled = false;
+
+    createAgentSessionMock.mockResolvedValue({
+      session: {
+        subscribe: (listener: (event: any) => void) => {
+          subscribers.push(listener);
+          return () => {
+            const idx = subscribers.indexOf(listener);
+            if (idx >= 0) subscribers.splice(idx, 1);
+          };
+        },
+        prompt: vi.fn(async () => {
+          promptCount++;
+          if (promptCount === 1) {
+            for (let i = 0; i <= DEFAULT_PLANNING_GUARDRAILS.maxToolCalls; i++) {
+              if (abortCalled) return;
+              for (const sub of [...subscribers]) {
+                sub({ type: 'tool_execution_end', toolName: 'bash', toolCallId: `call-${i}`, isError: false });
+              }
+            }
+          }
+          // promptCount === 2: grace turn — agent does NOT call save_plan
+        }),
+        abort: vi.fn(async () => {
+          abortCalled = true;
+        }),
+      },
+    });
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const broadcasts: any[] = [];
+    const result = await planTask({
+      task,
+      workspaceId: 'workspace-test',
+      workspacePath,
+      broadcastToWorkspace: (event: any) => broadcasts.push(event),
+    });
+
+    expect(result).toBeNull();
+    expect(promptCount).toBe(2);
+    expect(task.frontmatter.planningStatus).toBe('error');
+
+    const persistedTask = parseTaskFile(task.filePath);
+    expect(persistedTask.frontmatter.plan).toBeUndefined();
+    expect(persistedTask.frontmatter.planningStatus).toBe('error');
+
+    errorSpy.mockRestore();
   });
 });
