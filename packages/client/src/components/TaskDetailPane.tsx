@@ -22,6 +22,7 @@ interface TaskDetailPaneProps {
   moveError: string | null
   isPlanGenerating?: boolean
   isAgentRunning?: boolean
+  isAwaitingInput?: boolean
   onClose: () => void
   onMove: (phase: Phase) => void
   onDelete?: () => void
@@ -35,6 +36,7 @@ export function TaskDetailPane({
   moveError,
   isPlanGenerating,
   isAgentRunning,
+  isAwaitingInput,
   onDelete,
 }: TaskDetailPaneProps) {
   const [showMoveMenu, setShowMoveMenu] = useState(false)
@@ -155,6 +157,12 @@ export function TaskDetailPane({
           <span className={`phase-badge phase-badge-${frontmatter.phase}`}>
             {PHASE_DISPLAY_NAMES[frontmatter.phase]}
           </span>
+          {isAwaitingInput && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-700 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+              Needs input
+            </span>
+          )}
           {isAgentRunning && (
             <span className="inline-flex items-center gap-1 rounded-full bg-orange-100 text-orange-700 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide">
               <span className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-pulse" />

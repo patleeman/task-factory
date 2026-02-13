@@ -14,6 +14,7 @@ describe('buildExecutionSnapshots', () => {
       workspaceId: 'ws-a',
       status: 'idle',
       startTime: '2026-02-12T10:05:00.000Z',
+      awaitingUserInput: true,
     },
     {
       taskId: 'PIFA-3',
@@ -21,6 +22,7 @@ describe('buildExecutionSnapshots', () => {
       status: 'running',
       startTime: '2026-02-12T10:10:00.000Z',
       endTime: '2026-02-12T10:11:00.000Z',
+      awaitingUserInput: true,
     },
   ];
 
@@ -35,6 +37,7 @@ describe('buildExecutionSnapshots', () => {
         startTime: '2026-02-12T10:00:00.000Z',
         endTime: undefined,
         isRunning: true,
+        awaitingInput: false,
       },
       {
         taskId: 'PIFA-2',
@@ -43,6 +46,7 @@ describe('buildExecutionSnapshots', () => {
         startTime: '2026-02-12T10:05:00.000Z',
         endTime: undefined,
         isRunning: false,
+        awaitingInput: true,
       },
       {
         taskId: 'PIFA-3',
@@ -51,6 +55,7 @@ describe('buildExecutionSnapshots', () => {
         startTime: '2026-02-12T10:10:00.000Z',
         endTime: '2026-02-12T10:11:00.000Z',
         isRunning: true,
+        awaitingInput: false,
       },
     ]);
   });
@@ -60,5 +65,18 @@ describe('buildExecutionSnapshots', () => {
 
     expect(snapshots).toHaveLength(2);
     expect(snapshots.map((s) => s.taskId)).toEqual(['PIFA-1', 'PIFA-2']);
+  });
+
+  it('does not infer awaitingInput for plain idle sessions', () => {
+    const snapshots = buildExecutionSnapshots([
+      {
+        taskId: 'PIFA-4',
+        workspaceId: 'ws-c',
+        status: 'idle',
+        startTime: '2026-02-12T12:00:00.000Z',
+      },
+    ]);
+
+    expect(snapshots[0]?.awaitingInput).toBe(false);
   });
 });

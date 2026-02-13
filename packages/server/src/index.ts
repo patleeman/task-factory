@@ -54,6 +54,7 @@ import {
 import { logger } from './logger.js';
 import { buildTaskStateSnapshot } from './state-contract.js';
 import { logTaskStateTransition } from './state-transition.js';
+import { buildWorkspaceAttentionSummary } from './workspace-attention.js';
 
 // =============================================================================
 // Configuration
@@ -141,6 +142,44 @@ app.get('/api/browse', async (req, res) => {
 app.get('/api/workspaces', async (_req, res) => {
   const workspaces = await listWorkspaces();
   res.json(workspaces);
+});
+
+// Workspace attention summary (tasks awaiting user input per workspace)
+app.get('/api/workspaces/attention', async (_req, res) => {
+  try {
+    const workspaces = await listWorkspaces();
+    const sessions = getAllActiveSessions();
+
+    const taskPhaseByWorkspace = new Map<string, Map<string, Phase>>();
+    for (const workspace of workspaces) {
+      const phaseByTask = new Map<string, Phase>();
+
+      try {
+        const tasks = discoverTasks(getTasksDir(workspace));
+        for (const task of tasks) {
+          phaseByTask.set(task.id, task.frontmatter.phase);
+        }
+      } catch (err) {
+        logger.warn('Failed to scan tasks while building workspace attention summary', {
+          workspaceId: workspace.id,
+          error: String(err),
+        });
+      }
+
+      taskPhaseByWorkspace.set(workspace.id, phaseByTask);
+    }
+
+    const summary = buildWorkspaceAttentionSummary(
+      workspaces.map((workspace) => workspace.id),
+      taskPhaseByWorkspace,
+      sessions,
+    );
+
+    res.json(summary);
+  } catch (err) {
+    logger.error('Failed to build workspace attention summary', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
 });
 
 // Create workspace

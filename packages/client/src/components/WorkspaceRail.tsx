@@ -43,9 +43,51 @@ export function WorkspaceRail() {
   const navigate = useNavigate()
   const [workspaces, setWorkspaces] = useState<Workspace[]>([])
   const [hoveredId, setHoveredId] = useState<string | null>(null)
+  const [attentionByWorkspaceId, setAttentionByWorkspaceId] = useState<Map<string, number>>(new Map())
 
   useEffect(() => {
     api.getWorkspaces().then(setWorkspaces).catch(console.error)
+  }, [])
+
+  useEffect(() => {
+    let mounted = true
+
+    const refreshAttention = async () => {
+      try {
+        const attention = await api.getWorkspaceAttention()
+        if (!mounted) return
+
+        const next = new Map<string, number>()
+        for (const item of attention) {
+          next.set(item.workspaceId, item.awaitingInputCount)
+        }
+        setAttentionByWorkspaceId(next)
+      } catch (err) {
+        if (mounted) {
+          console.warn('Failed to load workspace attention summary:', err)
+        }
+      }
+    }
+
+    const intervalId = window.setInterval(() => {
+      void refreshAttention()
+    }, 5000)
+
+    const handleFocus = () => {
+      if (document.visibilityState === 'hidden') return
+      void refreshAttention()
+    }
+
+    window.addEventListener('focus', handleFocus)
+    document.addEventListener('visibilitychange', handleFocus)
+    void refreshAttention()
+
+    return () => {
+      mounted = false
+      window.clearInterval(intervalId)
+      window.removeEventListener('focus', handleFocus)
+      document.removeEventListener('visibilitychange', handleFocus)
+    }
   }, [])
 
   return (
@@ -57,6 +99,7 @@ export function WorkspaceRail() {
           const folderName = getFolderName(ws)
           const initials = getInitials(folderName)
           const hue = nameToHue(folderName)
+          const awaitingInputCount = attentionByWorkspaceId.get(ws.id) || 0
 
           return (
             <div key={ws.id} className="relative group flex items-center justify-center w-full shrink-0">
@@ -72,15 +115,20 @@ export function WorkspaceRail() {
                 onClick={() => navigate(`/workspace/${ws.id}`)}
                 onMouseEnter={() => setHoveredId(ws.id)}
                 onMouseLeave={() => setHoveredId(null)}
-                className={`w-10 h-10 rounded-xl flex items-center justify-center text-white text-sm font-semibold transition-all duration-200 cursor-pointer ${
+                className={`relative w-10 h-10 rounded-xl flex items-center justify-center text-white text-sm font-semibold transition-all duration-200 cursor-pointer ${
                   isActive
                     ? 'ring-2 ring-white/30 scale-110'
                     : 'hover:scale-105 hover:brightness-110'
-                }`}
+                } ${awaitingInputCount > 0 ? 'ring-2 ring-amber-300/80' : ''}`}
                 style={{ backgroundColor: `hsl(${hue}, 55%, 45%)` }}
                 title={folderName}
               >
                 {initials}
+                {awaitingInputCount > 0 && (
+                  <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-amber-500 text-[9px] leading-4 font-bold text-white shadow">
+                    {awaitingInputCount > 9 ? '9+' : awaitingInputCount}
+                  </span>
+                )}
               </button>
 
               {/* Tooltip */}
@@ -88,6 +136,9 @@ export function WorkspaceRail() {
                 <div className="absolute left-[60px] z-50 px-3 py-2 bg-slate-800 text-white rounded-lg shadow-xl text-xs whitespace-nowrap pointer-events-none animate-fade-in">
                   <div className="font-semibold">{folderName}</div>
                   <div className="text-slate-400 text-[10px] mt-0.5">{ws.path}</div>
+                  {awaitingInputCount > 0 && (
+                    <div className="text-amber-300 text-[10px] mt-1">{awaitingInputCount} task{awaitingInputCount === 1 ? '' : 's'} awaiting input</div>
+                  )}
                   {/* Arrow */}
                   <div className="absolute left-[-4px] top-1/2 -translate-y-1/2 w-2 h-2 bg-slate-800 rotate-45" />
                 </div>

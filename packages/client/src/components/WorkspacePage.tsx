@@ -55,6 +55,7 @@ export function WorkspacePage() {
   const [shelf, setShelf] = useState<Shelf>({ items: [] })
   const [planningMessages, setPlanningMessages] = useState<PlanningMessage[]>([])
   const [runningExecutionTaskIds, setRunningExecutionTaskIds] = useState<Set<string>>(new Set())
+  const [awaitingInputTaskIds, setAwaitingInputTaskIds] = useState<Set<string>>(new Set())
   const tasksByIdRef = useRef<Map<string, Task>>(new Map())
 
   const selectedTask = taskId ? tasks.find((t) => t.id === taskId) || null : null
@@ -75,6 +76,8 @@ export function WorkspacePage() {
     )
   const nonArchivedTasks = tasks.filter(t => t.frontmatter.phase !== 'archived')
   const runningTaskIds = runningExecutionTaskIds
+  const awaitingTaskIds = awaitingInputTaskIds
+  const awaitingInputCount = nonArchivedTasks.filter((task) => awaitingTaskIds.has(task.id)).length
   const planGeneratingTaskIds = useMemo(() => {
     return new Set(
       tasks
@@ -111,6 +114,29 @@ export function WorkspacePage() {
     })
   }, [tasks])
 
+  useEffect(() => {
+    setAwaitingInputTaskIds((prev) => {
+      const tasksById = new Map(tasks.map((task) => [task.id, task]))
+
+      let changed = false
+      const next = new Set<string>()
+      for (const trackedTaskId of prev) {
+        const task = tasksById.get(trackedTaskId)
+        if (task && task.frontmatter.phase === 'executing') {
+          next.add(trackedTaskId)
+        } else {
+          changed = true
+        }
+      }
+
+      if (!changed && next.size === prev.size) {
+        return prev
+      }
+
+      return next
+    })
+  }, [tasks])
+
   // Load workspace data
   useEffect(() => {
     if (!workspaceId) return
@@ -119,6 +145,7 @@ export function WorkspacePage() {
     setError(null)
     setActivity([])
     setRunningExecutionTaskIds(new Set())
+    setAwaitingInputTaskIds(new Set())
 
     Promise.all([
       api.getWorkspace(workspaceId),
@@ -169,6 +196,17 @@ export function WorkspacePage() {
             })
             .map((session) => session.taskId),
         ))
+
+        setAwaitingInputTaskIds(new Set(
+          activeExecutions
+            .filter((session) => {
+              if (!session.awaitingInput) return false
+              const task = tasksById.get(session.taskId)
+              return task?.frontmatter.phase === 'executing'
+            })
+            .map((session) => session.taskId),
+        ))
+
         setIsLoading(false)
       })
       .catch((err) => {
@@ -279,6 +317,24 @@ export function WorkspacePage() {
             }
             return next
           })
+
+          setAwaitingInputTaskIds((prev) => {
+            const next = new Set(prev)
+
+            if (!task || task.frontmatter.phase !== 'executing') {
+              next.delete(msg.taskId)
+              return next
+            }
+
+            if (msg.status === 'awaiting_input') {
+              next.add(msg.taskId)
+            } else {
+              next.delete(msg.taskId)
+            }
+
+            return next
+          })
+
           break
         }
         case 'shelf:updated':
@@ -335,6 +391,12 @@ export function WorkspacePage() {
     setTasks((prev) => prev.map((t) => (t.id === task.id ? updatedTask : t)))
     if (task.frontmatter.phase === 'executing' && toPhase !== 'executing') {
       setRunningExecutionTaskIds((prev) => {
+        if (!prev.has(task.id)) return prev
+        const next = new Set(prev)
+        next.delete(task.id)
+        return next
+      })
+      setAwaitingInputTaskIds((prev) => {
         if (!prev.has(task.id)) return prev
         const next = new Set(prev)
         next.delete(task.id)
@@ -593,7 +655,8 @@ export function WorkspacePage() {
             const runningCount = nonArchivedTasks.filter((task) => runningTaskIds.has(task.id)).length
             return (
               <span className="text-xs text-slate-500 font-mono">
-                {runningCount > 0 && <span className="text-orange-400">{runningCount} running</span>}
+                {awaitingInputCount > 0 && <span className="text-amber-500">{awaitingInputCount} needs input</span>}
+                {runningCount > 0 && <span className={awaitingInputCount > 0 ? 'text-orange-400 ml-2' : 'text-orange-400'}>{runningCount} running</span>}
                 {counts.ready > 0 && <span className="text-blue-400 ml-2">{counts.ready} ready</span>}
                 {counts.complete > 0 && <span className="text-emerald-400 ml-2">{counts.complete} done</span>}
               </span>
@@ -723,6 +786,7 @@ export function WorkspacePage() {
                     <TaskChat
                       taskId={selectedTask.id}
                       taskPhase={selectedTask.frontmatter.phase}
+                      isAwaitingInput={awaitingTaskIds.has(selectedTask.id)}
                       workspaceId={workspaceId || ''}
                       entries={activity}
                       attachments={selectedTask.frontmatter.attachments || []}
@@ -768,6 +832,7 @@ export function WorkspacePage() {
                 moveError={moveError}
                 isPlanGenerating={planGeneratingTaskIds.has(selectedTask.id)}
                 isAgentRunning={runningTaskIds.has(selectedTask.id)}
+                isAwaitingInput={awaitingTaskIds.has(selectedTask.id)}
                 onClose={() => navigate(workspaceRootPath)}
                 onMove={(phase) => handleMoveTask(selectedTask, phase)}
                 onDelete={() => {
@@ -786,6 +851,7 @@ export function WorkspacePage() {
           <PipelineBar
             tasks={nonArchivedTasks}
             runningTaskIds={runningTaskIds}
+            awaitingInputTaskIds={awaitingTaskIds}
             selectedTaskId={selectedTask?.id || null}
             onTaskClick={handleSelectTask}
             onMoveTask={handleMoveTask}

@@ -14,6 +14,12 @@ export interface ExecutionSnapshot {
   startTime: string
   endTime?: string
   isRunning: boolean
+  awaitingInput: boolean
+}
+
+export interface WorkspaceAttentionSummary {
+  workspaceId: string
+  awaitingInputCount: number
 }
 
 export type PiProviderAuthState = 'none' | 'api_key' | 'oauth' | 'external'
@@ -374,6 +380,16 @@ export const api = {
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: 'Failed to load active executions' }))
       throw new Error(err.error || `Failed to load active executions (${res.status})`)
+    }
+    const data = await res.json()
+    return Array.isArray(data) ? data : []
+  },
+
+  async getWorkspaceAttention(): Promise<WorkspaceAttentionSummary[]> {
+    const res = await fetch('/api/workspaces/attention')
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to load workspace attention' }))
+      throw new Error(err.error || `Failed to load workspace attention (${res.status})`)
     }
     const data = await res.json()
     return Array.isArray(data) ? data : []

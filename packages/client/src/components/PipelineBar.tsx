@@ -8,6 +8,7 @@ import { AppIcon } from './AppIcon'
 interface PipelineBarProps {
   tasks: Task[]
   runningTaskIds: ReadonlySet<string>
+  awaitingInputTaskIds: ReadonlySet<string>
   selectedTaskId: string | null
   onTaskClick: (task: Task) => void
   onMoveTask: (task: Task, toPhase: Phase) => void
@@ -53,6 +54,7 @@ const DRAG_MIME = 'application/pi-factory-task'
 export function PipelineBar({
   tasks,
   runningTaskIds,
+  awaitingInputTaskIds,
   selectedTaskId,
   onTaskClick,
   onMoveTask,
@@ -328,6 +330,7 @@ export function PipelineBar({
                               <PipelineCard
                                 task={task}
                                 isRunning={runningTaskIds.has(task.id)}
+                                isAwaitingInput={awaitingInputTaskIds.has(task.id)}
                                 isSelected={task.id === selectedTaskId}
                                 advanceAction={getAdvanceAction(task)}
                                 onTaskClick={onTaskClick}
@@ -471,6 +474,7 @@ function VerticalDropIndicator() {
 function PipelineCard({
   task,
   isRunning,
+  isAwaitingInput,
   isSelected,
   advanceAction,
   onTaskClick,
@@ -480,6 +484,7 @@ function PipelineCard({
 }: {
   task: Task
   isRunning: boolean
+  isAwaitingInput: boolean
   isSelected: boolean
   advanceAction?: { label: string; toPhase: Phase } | null
   onTaskClick: (task: Task) => void
@@ -530,6 +535,12 @@ function PipelineCard({
             </span>
           )}
           <span className="text-xs font-mono text-slate-400 truncate">{task.id}</span>
+          {isAwaitingInput && (
+            <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-700 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide shrink-0">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+              Needs input
+            </span>
+          )}
           {isPlanning && (
             <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-sky-100 text-sky-700 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide shrink-0">
               <span className="w-1.5 h-1.5 rounded-full bg-sky-500 animate-pulse" />
@@ -543,7 +554,8 @@ function PipelineCard({
       </div>
       <div className="flex items-center justify-between gap-1.5">
         <span className={`text-[10px] font-semibold uppercase tracking-wider flex items-center gap-1.5 ${
-          isExecuting ? 'text-orange-600'
+          isAwaitingInput ? 'text-amber-700'
+          : isExecuting ? 'text-orange-600'
           : isComplete ? 'text-emerald-600'
           : phase === 'ready' ? 'text-blue-600'
           : hasPlan ? 'text-indigo-600'
@@ -552,7 +564,7 @@ function PipelineCard({
           {isAgentRunning && (
             <span className="inline-block w-3 h-3 rounded-full border-[1.5px] border-t-transparent animate-spin border-orange-500" />
           )}
-          {hasPlan ? 'Planned' : PHASE_DISPLAY_NAMES[phase]}
+          {isAwaitingInput ? 'Needs input' : hasPlan ? 'Planned' : PHASE_DISPLAY_NAMES[phase]}
         </span>
         {advanceAction && (
           <button

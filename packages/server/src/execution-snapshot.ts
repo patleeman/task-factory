@@ -6,6 +6,7 @@ export interface ActiveSessionLike {
   status: ActiveSessionStatus;
   startTime: string;
   endTime?: string;
+  awaitingUserInput?: boolean;
 }
 
 export interface ExecutionSnapshot {
@@ -15,9 +16,12 @@ export interface ExecutionSnapshot {
   startTime: string;
   endTime?: string;
   isRunning: boolean;
+  awaitingInput: boolean;
 }
 
 function toExecutionSnapshot(session: ActiveSessionLike): ExecutionSnapshot {
+  const awaitingInput = session.status === 'idle' && session.awaitingUserInput === true;
+
   return {
     taskId: session.taskId,
     workspaceId: session.workspaceId,
@@ -25,6 +29,7 @@ function toExecutionSnapshot(session: ActiveSessionLike): ExecutionSnapshot {
     startTime: session.startTime,
     endTime: session.endTime,
     isRunning: session.status === 'running',
+    awaitingInput,
   };
 }
 

@@ -63,7 +63,11 @@ export function useAgentStreaming(
           setState((prev) => ({
             ...prev,
             status: msg.status,
-            isActive: msg.status !== 'idle' && msg.status !== 'completed' && msg.status !== 'error',
+            isActive:
+              msg.status !== 'idle'
+              && msg.status !== 'awaiting_input'
+              && msg.status !== 'completed'
+              && msg.status !== 'error',
           }))
           break
 

@@ -16,6 +16,7 @@ type SendMode = 'message' | 'steer' | 'followUp'
 interface TaskChatProps {
   taskId?: string
   taskPhase?: Phase
+  isAwaitingInput?: boolean
   workspaceId?: string
   entries: ActivityEntry[]
   attachments?: Attachment[]
@@ -34,7 +35,8 @@ interface TaskChatProps {
 }
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; pulse?: boolean }> = {
-  idle: { label: 'Waiting for input', color: 'bg-amber-400' },
+  idle: { label: 'Idle', color: 'bg-slate-400' },
+  awaiting_input: { label: 'Waiting for your response', color: 'bg-amber-500' },
   streaming: { label: 'Generating', color: 'bg-blue-500', pulse: true },
   tool_use: { label: 'Running tool', color: 'bg-amber-500', pulse: true },
   thinking: { label: 'Thinking', color: 'bg-purple-500', pulse: true },
@@ -376,6 +378,7 @@ const CollapsibleAgentMessage = memo(function CollapsibleAgentMessage({
 export function TaskChat({
   taskId,
   taskPhase,
+  isAwaitingInput,
   workspaceId,
   entries,
   attachments,
@@ -416,8 +419,8 @@ export function TaskChat({
   const hasFollowUpHandler = !!onFollowUp
   const showSteerControls = isAgentActive && hasSteerHandler
 
-  const isWaitingForInput = taskPhase
-    ? !agentStream.isActive && taskPhase === 'executing' && agentStream.status === 'idle'
+  const isWaitingForInput = taskPhase === 'executing'
+    ? Boolean(isAwaitingInput) || (!agentStream.isActive && agentStream.status === 'awaiting_input')
     : false
 
   const taskEntries = useMemo(

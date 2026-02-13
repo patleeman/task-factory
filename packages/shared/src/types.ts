@@ -459,7 +459,7 @@ export type ServerEvent =
   // Planning agent events
   | PlanningEvent;
 
-export type AgentExecutionStatus = 'idle' | 'streaming' | 'tool_use' | 'thinking' | 'completed' | 'error' | 'pre-hooks' | 'post-hooks';
+export type AgentExecutionStatus = 'idle' | 'awaiting_input' | 'streaming' | 'tool_use' | 'thinking' | 'completed' | 'error' | 'pre-hooks' | 'post-hooks';
 
 export type ClientEvent =
   | { type: 'subscribe'; workspaceId: string }

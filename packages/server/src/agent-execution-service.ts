@@ -263,6 +263,8 @@ interface TaskSession {
   onComplete?: (success: boolean) => void;
   /** Reference to the task being executed */
   task?: Task;
+  /** True when an executing turn has ended and the agent is waiting for user input */
+  awaitingUserInput?: boolean;
 }
 
 const activeSessions = new Map<string, TaskSession>();
@@ -595,6 +597,7 @@ export async function executeTask(options: ExecuteTaskOptions): Promise<TaskSess
     completionSummary: '',
     onComplete,
     task,
+    awaitingUserInput: false,
   };
 
   activeSessions.set(task.id, session);
@@ -740,6 +743,7 @@ async function runAgentExecution(
     // Run pre-execution skills before the main prompt
     const preSkillIds = task.frontmatter.preExecutionSkills;
     if (preSkillIds && preSkillIds.length > 0 && session.piSession) {
+      session.awaitingUserInput = false;
       session.broadcastToWorkspace?.({
         type: 'agent:execution_status',
         taskId: task.id,
@@ -785,6 +789,7 @@ async function runAgentExecution(
       }
 
       // Broadcast that pre-execution is done, main execution starting
+      session.awaitingUserInput = false;
       session.broadcastToWorkspace?.({
         type: 'agent:execution_status',
         taskId: task.id,
@@ -814,18 +819,24 @@ async function handleAgentTurnEnd(
   task: Task,
 ): Promise<void> {
   if (!session.agentSignaledComplete) {
-    // Agent finished without calling task_complete — it likely asked a
-    // question or flagged a blocker. Keep the task in "executing" and
-    // wait for the user to respond (the session stays alive for follow-ups).
-    console.log(`[AgentExecution] Agent finished without signaling completion for task ${task.id} — waiting for user input`);
+    const latestTask = refreshSessionTaskSnapshot(session) ?? task;
+    const isExecutingTask = latestTask.frontmatter.phase === 'executing';
+
+    // Agent finished without calling task_complete. For executing tasks this
+    // means we are waiting for user input; for non-executing chat turns we
+    // preserve the existing idle behavior.
+    console.log(
+      `[AgentExecution] Agent finished without signaling completion for task ${task.id} — ${isExecutingTask ? 'awaiting user input' : 'idle chat turn'}`,
+    );
 
     session.status = 'idle';
+    session.awaitingUserInput = isExecutingTask;
 
     // Keep this as status-only (no timeline spam event).
     session.broadcastToWorkspace?.({
       type: 'agent:execution_status',
       taskId: task.id,
-      status: 'idle',
+      status: isExecutingTask ? 'awaiting_input' : 'idle',
     });
 
     // Do NOT call onComplete — the task stays in executing, no auto-advance
@@ -833,6 +844,7 @@ async function handleAgentTurnEnd(
   }
 
   // Agent explicitly signaled done — run post-execution skills then complete.
+  session.awaitingUserInput = false;
   const summary = session.completionSummary;
   cleanupCompletionCallback(task.id);
 
@@ -965,6 +977,7 @@ function handleAgentError(
 ): void {
   cleanupCompletionCallback(task.id);
   cleanupAttachFileCallback(task.id);
+  session.awaitingUserInput = false;
   session.status = 'error';
   session.endTime = new Date().toISOString();
 
@@ -1052,6 +1065,7 @@ function handlePiEvent(
     case 'agent_start': {
       session.currentStreamText = '';
       session.currentThinkingText = '';
+      session.awaitingUserInput = false;
       broadcast?.({
         type: 'agent:execution_status',
         taskId,
@@ -1160,6 +1174,7 @@ function handlePiEvent(
         args: (event as any).args || {},
       });
       session.toolCallOutput.set(event.toolCallId, '');
+      session.awaitingUserInput = false;
       broadcast?.({
         type: 'agent:execution_status',
         taskId,
@@ -1229,6 +1244,7 @@ function handlePiEvent(
         isError: event.isError,
         result: finalResultText,
       });
+      session.awaitingUserInput = false;
       broadcast?.({
         type: 'agent:execution_status',
         taskId,
@@ -1332,6 +1348,7 @@ export async function followUpTask(taskId: string, content: string, images?: Ima
 
     // Agent is idle: start a new turn with prompt().
     session.status = 'running';
+    session.awaitingUserInput = false;
     session.broadcastToWorkspace?.({
       type: 'agent:execution_status',
       taskId,
@@ -1358,6 +1375,7 @@ export async function followUpTask(taskId: string, content: string, images?: Ima
       await handleAgentTurnEnd(session, session.workspaceId, session.task);
     } else {
       session.status = 'idle';
+      session.awaitingUserInput = false;
       session.broadcastToWorkspace?.({
         type: 'agent:execution_status',
         taskId,
@@ -1414,10 +1432,12 @@ export async function resumeChat(
     agentSignaledComplete: false,
     completionSummary: '',
     task,
+    awaitingUserInput: false,
   };
 
   activeSessions.set(task.id, session);
 
+  session.awaitingUserInput = false;
   broadcastToWorkspace?.({
     type: 'agent:execution_status',
     taskId: task.id,
@@ -1463,6 +1483,7 @@ export async function resumeChat(
 
     // Prompt resolved — go idle (no auto-advance for non-executing tasks)
     session.status = 'idle';
+    session.awaitingUserInput = false;
 
     broadcastToWorkspace?.({
       type: 'agent:execution_status',
@@ -1518,10 +1539,12 @@ export async function startChat(
     agentSignaledComplete: false,
     completionSummary: '',
     task,
+    awaitingUserInput: false,
   };
 
   activeSessions.set(task.id, session);
 
+  session.awaitingUserInput = false;
   broadcastToWorkspace?.({
     type: 'agent:execution_status',
     taskId: task.id,
@@ -1571,6 +1594,7 @@ export async function startChat(
 
     // Chat resolved — go idle (no auto-advance for non-executing tasks)
     session.status = 'idle';
+    session.awaitingUserInput = false;
 
     broadcastToWorkspace?.({
       type: 'agent:execution_status',
@@ -1623,6 +1647,7 @@ export async function stopTaskExecution(taskId: string): Promise<boolean> {
   cleanupAttachFileCallback(taskId);
 
   session.status = 'paused';
+  session.awaitingUserInput = false;
   session.endTime = new Date().toISOString();
 
   // Broadcast idle status so the UI stops showing streaming indicators
