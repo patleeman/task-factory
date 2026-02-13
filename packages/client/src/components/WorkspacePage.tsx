@@ -649,14 +649,7 @@ export function WorkspacePage() {
             className="text-xs text-slate-400 hover:text-white transition-colors font-medium"
             title="Workspace Configuration"
           >
-            Config
-          </button>
-          <button
-            onClick={() => navigate('/settings')}
-            className="text-xs text-slate-400 hover:text-white transition-colors font-medium"
-            title="Pi Settings"
-          >
-            Settings
+            Workspace Config
           </button>
         </div>
       </header>

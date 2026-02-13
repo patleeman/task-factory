@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react'
+import { Settings } from 'lucide-react'
 import { useParams, useNavigate } from 'react-router-dom'
 import type { Workspace } from '@pi-factory/shared'
 import { api } from '../api'
+import { AppIcon } from './AppIcon'
 
 /**
  * Deterministic HSL hue from a string name.
@@ -98,17 +100,30 @@ export function WorkspaceRail() {
       {/* Divider */}
       <div className="w-8 h-px bg-slate-700 my-2 shrink-0" />
 
-      {/* Add workspace button */}
-      <button
-        onClick={() => navigate('/')}
-        className="w-10 h-10 rounded-xl flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-700 transition-all duration-200 shrink-0 cursor-pointer"
-        title="Open folder browser"
-      >
-        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2">
-          <line x1="10" y1="4" x2="10" y2="16" />
-          <line x1="4" y1="10" x2="16" y2="10" />
-        </svg>
-      </button>
+      <div className="flex flex-col items-center gap-2 shrink-0">
+        {/* Global settings button */}
+        <button
+          onClick={() => navigate('/settings')}
+          className="w-10 h-10 rounded-xl flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-700 transition-all duration-200 cursor-pointer"
+          title="Open global settings"
+          aria-label="Open global settings"
+        >
+          <AppIcon icon={Settings} size="md" />
+        </button>
+
+        {/* Add workspace button */}
+        <button
+          onClick={() => navigate('/')}
+          className="w-10 h-10 rounded-xl flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-700 transition-all duration-200 cursor-pointer"
+          title="Open folder browser"
+          aria-label="Open folder browser"
+        >
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2">
+            <line x1="10" y1="4" x2="10" y2="16" />
+            <line x1="4" y1="10" x2="16" y2="10" />
+          </svg>
+        </button>
+      </div>
     </div>
   )
 }
