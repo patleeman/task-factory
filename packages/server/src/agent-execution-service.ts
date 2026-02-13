@@ -29,6 +29,7 @@ import { moveTaskToPhase, updateTask, saveTaskFile, parseTaskFile } from './task
 import { runPreExecutionSkills, runPostExecutionSkills } from './post-execution-skills.js';
 import { withTimeout } from './with-timeout.js';
 import { generateAndPersistSummary } from './summary-service.js';
+import { attachTaskFileAndBroadcast, type AttachTaskFileRequest } from './task-attachment-service.js';
 
 // =============================================================================
 // Repo-local Extension Discovery
@@ -578,6 +579,26 @@ export async function executeTask(options: ExecuteTaskOptions): Promise<TaskSess
       }
     });
 
+    const attachFileRegistry = ensureAttachFileCallbackRegistry();
+    attachFileRegistry.set(task.id, async (request: AttachTaskFileRequest) => {
+      const { attachment } = await attachTaskFileAndBroadcast(
+        workspacePath,
+        task.id,
+        request,
+        session.broadcastToWorkspace,
+      );
+
+      return {
+        taskId: task.id,
+        attachmentId: attachment.id,
+        filename: attachment.filename,
+        storedName: attachment.storedName,
+        mimeType: attachment.mimeType,
+        size: attachment.size,
+        createdAt: attachment.createdAt,
+      };
+    });
+
     // Load task attachments (images become ImageContent, others become file paths in prompt)
     const { images: taskImages, promptSection: attachmentSection } = loadAttachments(
       task.frontmatter.attachments,
@@ -834,6 +855,8 @@ async function handleAgentTurnEnd(
 
   const wasSuccess = session.status === 'completed';
 
+  cleanupAttachFileCallback(task.id);
+
   // Clean up: unsubscribe from events and remove from active sessions
   // so future chat messages can trigger resumeChat() instead of
   // falling through all branches in the activity handler.
@@ -853,6 +876,7 @@ function handleAgentError(
   err: unknown,
 ): void {
   cleanupCompletionCallback(task.id);
+  cleanupAttachFileCallback(task.id);
   session.status = 'error';
   session.endTime = new Date().toISOString();
 
@@ -885,6 +909,11 @@ function handleAgentError(
 /** Remove the completion callback for a task (cleanup). */
 function cleanupCompletionCallback(taskId: string): void {
   globalThis.__piFactoryCompleteCallbacks?.delete(taskId);
+}
+
+/** Remove the attach-file callback for a task (cleanup). */
+function cleanupAttachFileCallback(taskId: string): void {
+  globalThis.__piFactoryAttachFileCallbacks?.delete(taskId);
 }
 
 function extractTextFromContentBlocks(content: any): string {
@@ -1479,6 +1508,7 @@ export async function stopTaskExecution(taskId: string): Promise<boolean> {
 
   // Clean up completion callback registry
   cleanupCompletionCallback(taskId);
+  cleanupAttachFileCallback(taskId);
 
   session.status = 'paused';
   session.endTime = new Date().toISOString();
@@ -1571,9 +1601,20 @@ function ensurePlanCallbackRegistry(): Map<string, (data: SavedPlanningData) => 
   return globalThis.__piFactoryPlanCallbacks;
 }
 
+interface AttachTaskFileToolResult {
+  taskId: string;
+  attachmentId: string;
+  filename: string;
+  storedName: string;
+  mimeType: string;
+  size: number;
+  createdAt: string;
+}
+
 declare global {
   var __piFactoryPlanCallbacks: Map<string, (data: SavedPlanningData) => void> | undefined;
   var __piFactoryCompleteCallbacks: Map<string, (summary: string) => void> | undefined;
+  var __piFactoryAttachFileCallbacks: Map<string, (data: AttachTaskFileRequest) => Promise<AttachTaskFileToolResult>> | undefined;
 }
 
 // =============================================================================
@@ -1588,6 +1629,13 @@ function ensureCompleteCallbackRegistry(): Map<string, (summary: string) => void
     globalThis.__piFactoryCompleteCallbacks = new Map();
   }
   return globalThis.__piFactoryCompleteCallbacks;
+}
+
+function ensureAttachFileCallbackRegistry(): Map<string, (data: AttachTaskFileRequest) => Promise<AttachTaskFileToolResult>> {
+  if (!globalThis.__piFactoryAttachFileCallbacks) {
+    globalThis.__piFactoryAttachFileCallbacks = new Map();
+  }
+  return globalThis.__piFactoryAttachFileCallbacks;
 }
 
 export interface PlanTaskOptions {
