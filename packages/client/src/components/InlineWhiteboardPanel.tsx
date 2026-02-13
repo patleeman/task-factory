@@ -1,5 +1,5 @@
-import { lazy, Suspense } from 'react'
-import type { WhiteboardSceneSnapshot } from './whiteboard'
+import { lazy, Suspense, useMemo } from 'react'
+import { buildWhiteboardSceneSignature, type WhiteboardSceneSnapshot } from './whiteboard'
 
 const LazyExcalidrawBoard = lazy(() => import('./ExcalidrawBoard'))
 
@@ -7,17 +7,23 @@ interface InlineWhiteboardPanelProps {
   isActive: boolean
   onActivate?: () => void
   onSceneChange: (scene: WhiteboardSceneSnapshot) => void
+  initialScene?: WhiteboardSceneSnapshot | null
   activateLabel?: string
   inactiveHint?: string
+  heightClassName?: string
 }
 
 export function InlineWhiteboardPanel({
   isActive,
   onActivate,
   onSceneChange,
+  initialScene = null,
   activateLabel = 'Open whiteboard',
   inactiveHint,
+  heightClassName = 'h-96',
 }: InlineWhiteboardPanelProps) {
+  const sceneKey = useMemo(() => buildWhiteboardSceneSignature(initialScene), [initialScene])
+
   if (!isActive) {
     return (
       <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4 text-center">
@@ -39,12 +45,17 @@ export function InlineWhiteboardPanel({
   return (
     <Suspense
       fallback={(
-        <div className="h-72 rounded-lg border border-slate-200 bg-slate-50 flex items-center justify-center text-sm text-slate-500">
+        <div className={`${heightClassName} min-h-[280px] max-h-[80vh] resize-y overflow-auto rounded-lg border border-slate-200 bg-slate-50 flex items-center justify-center text-sm text-slate-500`}>
           Loading whiteboard…
         </div>
       )}
     >
-      <LazyExcalidrawBoard onSceneChange={onSceneChange} />
+      <LazyExcalidrawBoard
+        key={sceneKey || 'blank-scene'}
+        onSceneChange={onSceneChange}
+        initialScene={initialScene}
+        heightClassName={heightClassName}
+      />
     </Suspense>
   )
 }

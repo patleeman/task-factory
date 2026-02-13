@@ -3,7 +3,7 @@ import type { Task, Phase, ModelConfig, PostExecutionSummary as PostExecutionSum
 import { PHASES, PHASE_DISPLAY_NAMES, getPromotePhase, getDemotePhase } from '@pi-factory/shared'
 import { MarkdownEditor } from './MarkdownEditor'
 import { InlineWhiteboardPanel } from './InlineWhiteboardPanel'
-import { buildWhiteboardSceneSignature, createWhiteboardAttachmentFilename, exportWhiteboardPngFile, hasWhiteboardContent, isWhiteboardAttachmentFilename, type WhiteboardSceneSnapshot } from './whiteboard'
+import { buildWhiteboardSceneSignature, createWhiteboardAttachmentFilename, exportWhiteboardPngFile, hasWhiteboardContent, isWhiteboardAttachmentFilename, loadStoredWhiteboardScene, loadWhiteboardSceneFromBlob, persistWhiteboardScene, type WhiteboardSceneSnapshot } from './whiteboard'
 import type { PostExecutionSkill } from '../types/pi'
 import { SkillSelector } from './SkillSelector'
 import { ModelSelector } from './ModelSelector'
@@ -556,27 +556,75 @@ function AttachmentsSection({ task, workspaceId }: { task: Task; workspaceId: st
   const [isDragOver, setIsDragOver] = useState(false)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [isWhiteboardExpanded, setIsWhiteboardExpanded] = useState(false)
-  const [whiteboardScene, setWhiteboardScene] = useState<WhiteboardSceneSnapshot | null>(null)
   const [isSavingWhiteboard, setIsSavingWhiteboard] = useState(false)
   const [whiteboardSaveError, setWhiteboardSaveError] = useState<string | null>(null)
+  const [whiteboardSceneVersion, setWhiteboardSceneVersion] = useState(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const whiteboardSaveTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve())
+  const whiteboardSceneRef = useRef<WhiteboardSceneSnapshot | null>(null)
+  const pendingWhiteboardSignatureRef = useRef('')
   const lastSavedWhiteboardSignatureRef = useRef('')
+  const [initialWhiteboardScene, setInitialWhiteboardScene] = useState<WhiteboardSceneSnapshot | null>(null)
   const attachments = task.frontmatter.attachments || []
+  const whiteboardStorageKey = `pi-factory:task-whiteboard:${workspaceId}:${task.id}`
 
   useEffect(() => {
+    let cancelled = false
+
     setIsWhiteboardExpanded(false)
-    setWhiteboardScene(null)
     setIsSavingWhiteboard(false)
     setWhiteboardSaveError(null)
+    setWhiteboardSceneVersion(0)
     saveQueueRef.current = Promise.resolve()
+    pendingWhiteboardSignatureRef.current = ''
     lastSavedWhiteboardSignatureRef.current = ''
+
+    const storedScene = loadStoredWhiteboardScene(whiteboardStorageKey)
+    const restoredScene = hasWhiteboardContent(storedScene) ? storedScene : null
+
+    if (restoredScene) {
+      whiteboardSceneRef.current = restoredScene
+      setInitialWhiteboardScene(restoredScene)
+    } else {
+      whiteboardSceneRef.current = null
+      setInitialWhiteboardScene(null)
+
+      const latestAttachment = [...attachments]
+        .filter((attachment) => isWhiteboardAttachmentFilename(attachment.filename))
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
+
+      if (latestAttachment) {
+        const url = api.getAttachmentUrl(workspaceId, task.id, latestAttachment.storedName)
+
+        void (async () => {
+          try {
+            const response = await fetch(url)
+            if (!response.ok) return
+
+            const blob = await response.blob()
+            const recoveredScene = await loadWhiteboardSceneFromBlob(blob)
+            if (cancelled || !hasWhiteboardContent(recoveredScene)) return
+
+            whiteboardSceneRef.current = recoveredScene
+            setInitialWhiteboardScene(recoveredScene)
+            persistWhiteboardScene(whiteboardStorageKey, recoveredScene)
+          } catch {
+            // Ignore recovery failures (e.g., older PNGs without embedded scene data).
+          }
+        })()
+      }
+    }
+
     if (whiteboardSaveTimerRef.current) {
       clearTimeout(whiteboardSaveTimerRef.current)
       whiteboardSaveTimerRef.current = undefined
     }
-  }, [task.id])
+
+    return () => {
+      cancelled = true
+    }
+  }, [whiteboardStorageKey])
 
   useEffect(() => {
     return () => {
@@ -599,6 +647,28 @@ function AttachmentsSection({ task, workspaceId }: { task: Task; workspaceId: st
       setIsUploading(false)
     }
   }, [workspaceId, task.id])
+
+  const handleWhiteboardSceneChange = useCallback((scene: WhiteboardSceneSnapshot) => {
+    whiteboardSceneRef.current = scene
+    persistWhiteboardScene(whiteboardStorageKey, scene)
+
+    if (!hasWhiteboardContent(scene)) {
+      pendingWhiteboardSignatureRef.current = ''
+      return
+    }
+
+    const signature = buildWhiteboardSceneSignature(scene)
+    if (!signature) {
+      pendingWhiteboardSignatureRef.current = ''
+      return
+    }
+
+    if (signature === pendingWhiteboardSignatureRef.current) return
+    if (signature === lastSavedWhiteboardSignatureRef.current) return
+
+    pendingWhiteboardSignatureRef.current = signature
+    setWhiteboardSceneVersion((prev) => prev + 1)
+  }, [whiteboardStorageKey])
 
   const saveWhiteboardAttachment = useCallback(async (
     scene: WhiteboardSceneSnapshot,
@@ -627,6 +697,7 @@ function AttachmentsSection({ task, workspaceId }: { task: Task; workspaceId: st
       }
 
       await api.uploadAttachments(workspaceId, task.id, [sketchFile])
+      pendingWhiteboardSignatureRef.current = ''
       lastSavedWhiteboardSignatureRef.current = signature
     } catch (err) {
       console.error('Failed to auto-save whiteboard attachment:', err)
@@ -645,11 +716,9 @@ function AttachmentsSection({ task, workspaceId }: { task: Task; workspaceId: st
   useEffect(() => {
     if (!isWhiteboardExpanded) return
 
-    const sceneToSave = whiteboardScene
-    if (!sceneToSave || !hasWhiteboardContent(sceneToSave)) return
-
-    const signature = buildWhiteboardSceneSignature(sceneToSave)
-    if (!signature || signature === lastSavedWhiteboardSignatureRef.current) return
+    const sceneToSave = whiteboardSceneRef.current
+    const signature = pendingWhiteboardSignatureRef.current
+    if (!sceneToSave || !signature) return
 
     if (whiteboardSaveTimerRef.current) {
       clearTimeout(whiteboardSaveTimerRef.current)
@@ -665,7 +734,7 @@ function AttachmentsSection({ task, workspaceId }: { task: Task; workspaceId: st
         whiteboardSaveTimerRef.current = undefined
       }
     }
-  }, [isWhiteboardExpanded, whiteboardScene, queueWhiteboardSave])
+  }, [isWhiteboardExpanded, whiteboardSceneVersion, queueWhiteboardSave])
 
   const handleDelete = async (attachmentId: string) => {
     if (!confirm('Delete this attachment?')) return
@@ -744,7 +813,8 @@ function AttachmentsSection({ task, workspaceId }: { task: Task; workspaceId: st
         <div className="mb-3">
           <InlineWhiteboardPanel
             isActive
-            onSceneChange={setWhiteboardScene}
+            onSceneChange={handleWhiteboardSceneChange}
+            initialScene={initialWhiteboardScene}
           />
           <div className="mt-1.5 text-xs text-slate-400">
             {isSavingWhiteboard ? 'Saving Excalidraw sketch…' : 'Excalidraw sketch auto-saves as an attachment.'}

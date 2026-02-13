@@ -4,6 +4,8 @@ import type { AgentStreamState, ToolCallState } from '../hooks/useAgentStreaming
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { api } from '../api'
+import { InlineWhiteboardPanel } from './InlineWhiteboardPanel'
+import { createWhiteboardAttachmentFilename, exportWhiteboardPngFile, hasWhiteboardContent, type WhiteboardSceneSnapshot } from './whiteboard'
 
 const REMARK_PLUGINS = [remarkGfm]
 
@@ -392,10 +394,15 @@ export function TaskChat({
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
   const [isUploading, setIsUploading] = useState(false)
   const [isDragOver, setIsDragOver] = useState(false)
+  const [isWhiteboardModalOpen, setIsWhiteboardModalOpen] = useState(false)
+  const [initialWhiteboardScene, setInitialWhiteboardScene] = useState<WhiteboardSceneSnapshot | null>(null)
+  const [whiteboardError, setWhiteboardError] = useState<string | null>(null)
+  const [isAttachingWhiteboard, setIsAttachingWhiteboard] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const whiteboardSceneRef = useRef<WhiteboardSceneSnapshot | null>(null)
 
   // Show agent activity for all phases (including complete), so chat mode
   // still displays running status while the model responds.
@@ -429,6 +436,21 @@ export function TaskChat({
     }
   }, [sendMode, hasFollowUpHandler, showSteerControls])
 
+  useEffect(() => {
+    if (!isWhiteboardModalOpen) return
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsWhiteboardModalOpen(false)
+      }
+    }
+
+    window.addEventListener('keydown', handleEscape)
+    return () => {
+      window.removeEventListener('keydown', handleEscape)
+    }
+  }, [isWhiteboardModalOpen])
+
   const addFiles = useCallback((files: FileList | File[]) => {
     const newFiles = Array.from(files)
     if (newFiles.length === 0) return
@@ -438,6 +460,44 @@ export function TaskChat({
   const removePendingFile = useCallback((index: number) => {
     setPendingFiles(prev => prev.filter((_, i) => i !== index))
   }, [])
+
+  const openWhiteboardModal = useCallback(() => {
+    setInitialWhiteboardScene(whiteboardSceneRef.current)
+    setWhiteboardError(null)
+    setIsWhiteboardModalOpen(true)
+  }, [])
+
+  const closeWhiteboardModal = useCallback(() => {
+    setWhiteboardError(null)
+    setIsWhiteboardModalOpen(false)
+  }, [])
+
+  const handleWhiteboardSceneChange = useCallback((scene: WhiteboardSceneSnapshot) => {
+    whiteboardSceneRef.current = scene
+  }, [])
+
+  const attachWhiteboardToPendingFiles = useCallback(async () => {
+    const scene = whiteboardSceneRef.current
+    if (!scene || !hasWhiteboardContent(scene)) {
+      setWhiteboardError('Draw something before attaching.')
+      return
+    }
+
+    setIsAttachingWhiteboard(true)
+    setWhiteboardError(null)
+    try {
+      const sketchFile = await exportWhiteboardPngFile(scene, createWhiteboardAttachmentFilename())
+      addFiles([sketchFile])
+      whiteboardSceneRef.current = null
+      setInitialWhiteboardScene(null)
+      setIsWhiteboardModalOpen(false)
+    } catch (err) {
+      console.error('Failed to export whiteboard image:', err)
+      setWhiteboardError('Failed to export whiteboard image. Please try again.')
+    } finally {
+      setIsAttachingWhiteboard(false)
+    }
+  }, [addFiles])
 
   // Determine if file upload is supported (either via custom callback or task-specific upload)
   const canUploadFiles = !!(onUploadFiles || (workspaceId && taskId && attachments))
@@ -785,25 +845,33 @@ export function TaskChat({
           {/* Attach file button — shown when file upload is supported */}
           {canUploadFiles && (
             <>
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isUploading}
-              className="text-[10px] font-medium text-slate-400 hover:text-slate-600 transition-colors py-2 px-1.5 shrink-0 disabled:opacity-50"
-              title="Attach files"
-            >
-              📎
-            </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              accept="image/*,.pdf,.txt,.md,.json,.csv,.log"
-              className="hidden"
-              onChange={(e) => {
-                if (e.target.files) addFiles(e.target.files)
-                e.target.value = ''
-              }}
-            />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isUploading}
+                className="text-[10px] font-medium text-slate-400 hover:text-slate-600 transition-colors py-2 px-1.5 shrink-0 disabled:opacity-50"
+                title="Attach files"
+              >
+                📎
+              </button>
+              <button
+                onClick={openWhiteboardModal}
+                disabled={isUploading || isAttachingWhiteboard}
+                className="text-[10px] font-medium text-slate-400 hover:text-slate-600 transition-colors py-2 px-1.5 shrink-0 disabled:opacity-50"
+                title="Add Excalidraw sketch"
+              >
+                ✏️
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept="image/*,.pdf,.txt,.md,.json,.csv,.log"
+                className="hidden"
+                onChange={(e) => {
+                  if (e.target.files) addFiles(e.target.files)
+                  e.target.value = ''
+                }}
+              />
             </>
           )}
           <textarea
@@ -854,6 +922,63 @@ export function TaskChat({
           </button>
         </div>
       </div>
+
+      {isWhiteboardModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onClick={closeWhiteboardModal}
+        >
+          <div
+            className="w-full max-w-6xl max-h-[92vh] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+              <h3 className="text-sm font-semibold text-slate-700">Add Excalidraw sketch</h3>
+              <button
+                type="button"
+                onClick={closeWhiteboardModal}
+                className="h-7 w-7 rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                title="Close"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="p-4">
+              <InlineWhiteboardPanel
+                isActive
+                onSceneChange={handleWhiteboardSceneChange}
+                initialScene={initialWhiteboardScene}
+                heightClassName="h-[70vh]"
+              />
+              <p className="mt-2 text-xs text-slate-400">
+                Click “Attach sketch” to add this drawing as a PNG attachment to your next message.
+              </p>
+              {whiteboardError && (
+                <p className="mt-2 text-xs text-red-600">{whiteboardError}</p>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 border-t border-slate-200 px-4 py-3">
+              <button
+                type="button"
+                onClick={closeWhiteboardModal}
+                className="rounded-md border border-slate-200 px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void attachWhiteboardToPendingFiles()}
+                disabled={isAttachingWhiteboard}
+                className="rounded-md bg-slate-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-600 disabled:opacity-60"
+              >
+                {isAttachingWhiteboard ? 'Attaching…' : 'Attach sketch'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -13,6 +13,12 @@ export interface WhiteboardSceneSnapshot {
 
 const WHITEBOARD_ATTACHMENT_PREFIX = 'excalidraw-sketch'
 
+interface StoredWhiteboardScene {
+  elements: WhiteboardSceneSnapshot['elements']
+  appState: WhiteboardSceneSnapshot['appState']
+  files: WhiteboardSceneSnapshot['files']
+}
+
 export function hasWhiteboardContent(scene: WhiteboardSceneSnapshot | null): boolean {
   if (!scene) return false
   return scene.elements.some((element) => !element.isDeleted)
@@ -47,6 +53,7 @@ export async function exportWhiteboardPngFile(
   const appState = {
     ...(scene.appState as Record<string, unknown>),
     exportBackground: true,
+    exportEmbedScene: true,
   }
 
   const blob = await exportToBlob({
@@ -61,6 +68,66 @@ export async function exportWhiteboardPngFile(
   }
 
   return new File([blob], filename, { type: 'image/png' })
+}
+
+export function loadStoredWhiteboardScene(storageKey: string): WhiteboardSceneSnapshot | null {
+  try {
+    const raw = localStorage.getItem(storageKey)
+    if (!raw) return null
+
+    const parsed = JSON.parse(raw) as Partial<StoredWhiteboardScene>
+    if (!parsed || !Array.isArray(parsed.elements)) return null
+
+    return {
+      elements: parsed.elements,
+      appState: (parsed.appState || {}) as WhiteboardSceneSnapshot['appState'],
+      files: (parsed.files || {}) as WhiteboardSceneSnapshot['files'],
+    }
+  } catch {
+    return null
+  }
+}
+
+export function persistWhiteboardScene(storageKey: string, scene: WhiteboardSceneSnapshot | null): void {
+  try {
+    if (!scene || !hasWhiteboardContent(scene)) {
+      localStorage.removeItem(storageKey)
+      return
+    }
+
+    const data: StoredWhiteboardScene = {
+      elements: scene.elements,
+      appState: scene.appState,
+      files: scene.files,
+    }
+    localStorage.setItem(storageKey, JSON.stringify(data))
+  } catch {
+    // Ignore localStorage quota/unavailability errors.
+  }
+}
+
+export function clearStoredWhiteboardScene(storageKey: string): void {
+  try {
+    localStorage.removeItem(storageKey)
+  } catch {
+    // Ignore localStorage errors.
+  }
+}
+
+export async function loadWhiteboardSceneFromBlob(blob: Blob): Promise<WhiteboardSceneSnapshot | null> {
+  try {
+    const { loadFromBlob } = await import('@excalidraw/excalidraw')
+    const restored = await loadFromBlob(blob, null, null)
+    if (!restored || !Array.isArray(restored.elements)) return null
+
+    return {
+      elements: restored.elements as WhiteboardSceneSnapshot['elements'],
+      appState: restored.appState as WhiteboardSceneSnapshot['appState'],
+      files: restored.files as WhiteboardSceneSnapshot['files'],
+    }
+  } catch {
+    return null
+  }
 }
 
 export function createWhiteboardAttachmentFilename(): string {

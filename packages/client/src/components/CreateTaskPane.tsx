@@ -5,7 +5,7 @@ import { MarkdownEditor } from './MarkdownEditor'
 import { SkillSelector } from './SkillSelector'
 import { ModelSelector } from './ModelSelector'
 import { InlineWhiteboardPanel } from './InlineWhiteboardPanel'
-import { createWhiteboardAttachmentFilename, exportWhiteboardPngFile, hasWhiteboardContent, type WhiteboardSceneSnapshot } from './whiteboard'
+import { clearStoredWhiteboardScene, createWhiteboardAttachmentFilename, exportWhiteboardPngFile, hasWhiteboardContent, loadStoredWhiteboardScene, persistWhiteboardScene, type WhiteboardSceneSnapshot } from './whiteboard'
 import { useLocalStorageDraft } from '../hooks/useLocalStorageDraft'
 import { api } from '../api'
 import type { PostExecutionSkill } from '../types/pi'
@@ -26,6 +26,8 @@ interface CreateTaskPaneProps {
   /** Incoming form updates from the planning agent (via WebSocket) */
   agentFormUpdates?: Partial<NewTaskFormState> | null
 }
+
+const CREATE_TASK_WHITEBOARD_STORAGE_KEY = 'pi-factory:create-task-whiteboard'
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -53,11 +55,16 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
   })
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
   const [isWhiteboardActive, setIsWhiteboardActive] = useState(false)
-  const [whiteboardScene, setWhiteboardScene] = useState<WhiteboardSceneSnapshot | null>(null)
+  const [initialWhiteboardScene, setInitialWhiteboardScene] = useState<WhiteboardSceneSnapshot | null>(() => {
+    const loaded = loadStoredWhiteboardScene(CREATE_TASK_WHITEBOARD_STORAGE_KEY)
+    return hasWhiteboardContent(loaded) ? loaded : null
+  })
   const [isDragOver, setIsDragOver] = useState(false)
   const [isWide, setIsWide] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const whiteboardSceneRef = useRef<WhiteboardSceneSnapshot | null>(initialWhiteboardScene)
+  const whiteboardPersistTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
 
   useEffect(() => {
     fetch('/api/factory/skills')
@@ -136,6 +143,14 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
     return () => observer.disconnect()
   }, [])
 
+  useEffect(() => {
+    return () => {
+      if (whiteboardPersistTimerRef.current) {
+        clearTimeout(whiteboardPersistTimerRef.current)
+      }
+    }
+  }, [])
+
   // Auto-save draft to localStorage when form fields change
   useEffect(() => {
     updateDraft({ content })
@@ -158,7 +173,13 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
     setSelectedWrapperId('')
     setPendingFiles([])
     setIsWhiteboardActive(false)
-    setWhiteboardScene(null)
+    if (whiteboardPersistTimerRef.current) {
+      clearTimeout(whiteboardPersistTimerRef.current)
+      whiteboardPersistTimerRef.current = undefined
+    }
+    whiteboardSceneRef.current = null
+    setInitialWhiteboardScene(null)
+    clearStoredWhiteboardScene(CREATE_TASK_WHITEBOARD_STORAGE_KEY)
     clearDraft()
   }, [clearDraft, taskDefaults])
 
@@ -193,6 +214,18 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
     }
   }
 
+  const handleWhiteboardSceneChange = useCallback((scene: WhiteboardSceneSnapshot) => {
+    whiteboardSceneRef.current = scene
+
+    if (whiteboardPersistTimerRef.current) {
+      clearTimeout(whiteboardPersistTimerRef.current)
+    }
+
+    whiteboardPersistTimerRef.current = setTimeout(() => {
+      persistWhiteboardScene(CREATE_TASK_WHITEBOARD_STORAGE_KEY, scene)
+    }, 200)
+  }, [])
+
   const handleSubmit = async () => {
     if (!content.trim()) return
     setIsSubmitting(true)
@@ -202,7 +235,7 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
       const hasSkillConfigs = Object.keys(skillConfigs).length > 0
       const filesToSubmit = [...pendingFiles]
 
-      const sceneToAttach = whiteboardScene
+      const sceneToAttach = whiteboardSceneRef.current
       if (sceneToAttach && hasWhiteboardContent(sceneToAttach)) {
         try {
           const whiteboardFile = await exportWhiteboardPngFile(
@@ -223,6 +256,14 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
         modelConfig,
         pendingFiles: filesToSubmit.length > 0 ? filesToSubmit : undefined,
       })
+
+      if (whiteboardPersistTimerRef.current) {
+        clearTimeout(whiteboardPersistTimerRef.current)
+        whiteboardPersistTimerRef.current = undefined
+      }
+      whiteboardSceneRef.current = null
+      setInitialWhiteboardScene(null)
+      clearStoredWhiteboardScene(CREATE_TASK_WHITEBOARD_STORAGE_KEY)
       clearDraft()
     } finally {
       setIsSubmitting(false)
@@ -231,17 +272,20 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
 
   // Shared sub-components for DRY between layouts
   const descriptionSection = (
-    <div className="flex flex-col flex-[2] min-h-0">
+    <div className="flex flex-col shrink-0">
       <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2 shrink-0">
         Task Description
       </label>
-      <MarkdownEditor
-        value={content}
-        onChange={setContent}
-        placeholder="Describe what needs to be done..."
-        autoFocus
-        fill
-      />
+      <div className="h-80 min-h-[220px] max-h-[75vh] resize-y overflow-auto">
+        <MarkdownEditor
+          value={content}
+          onChange={setContent}
+          placeholder="Describe what needs to be done..."
+          autoFocus
+          minHeight="100%"
+          fill
+        />
+      </div>
 
       <div className="mt-3 shrink-0">
         <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">
@@ -253,7 +297,8 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
         <InlineWhiteboardPanel
           isActive={isWhiteboardActive}
           onActivate={() => setIsWhiteboardActive(true)}
-          onSceneChange={setWhiteboardScene}
+          onSceneChange={handleWhiteboardSceneChange}
+          initialScene={initialWhiteboardScene}
           activateLabel="Open Excalidraw"
           inactiveHint="No manual save needed — non-empty boards are exported automatically on submit."
         />
