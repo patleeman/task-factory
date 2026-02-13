@@ -445,7 +445,16 @@ export function ExecutionPipelineEditor({
     )
   }
 
-  const canAdd = selection.trim().length > 0
+  const canAdd = useMemo(() => {
+    const parsed = parseSelection(selection)
+    if (!parsed) return false
+
+    if (parsed.type === 'skill') {
+      return skillById.has(parsed.id) && !selectedSkillSet.has(parsed.id)
+    }
+
+    return wrapperById.has(parsed.id)
+  }, [selection, selectedSkillSet, skillById, wrapperById])
 
   const executionCore = (
     <div className={selectedWrapper ? 'ml-3 border-l border-violet-200/80 pl-3 space-y-3' : 'space-y-3'}>
@@ -460,12 +469,12 @@ export function ExecutionPipelineEditor({
   )
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-3">
-      <div className="flex items-center gap-2">
+    <div className="min-w-0 rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
         <select
           value={selection}
           onChange={(e) => setSelection(e.target.value)}
-          className="flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="min-w-0 flex-1 basis-56 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
         >
           <option value="">Select a skill or execution wrapper…</option>
           {addableSkills.length > 0 && (
@@ -492,7 +501,7 @@ export function ExecutionPipelineEditor({
           type="button"
           onClick={handleAddSelection}
           disabled={!canAdd}
-          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="shrink-0 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
           title="Add selected item"
         >
           + Add
