@@ -269,24 +269,80 @@ export async function runPreExecutionSkills(
  * Each skill runs as a fresh prompt turn so tool output/events are emitted
  * and visible in the task chat timeline.
  */
+function buildResolvedSkillConfig(
+  skill: PostExecutionSkill,
+  overrides: Record<string, string> | undefined,
+): Record<string, string> {
+  const resolved: Record<string, string> = {};
+
+  for (const field of skill.configSchema) {
+    resolved[field.key] = field.default;
+  }
+
+  if (overrides) {
+    for (const [key, value] of Object.entries(overrides)) {
+      resolved[key] = String(value);
+    }
+  }
+
+  if (resolved['max-iterations'] === undefined) {
+    resolved['max-iterations'] = String(skill.maxIterations);
+  }
+
+  if (resolved['done-signal'] === undefined && skill.doneSignal) {
+    resolved['done-signal'] = skill.doneSignal;
+  }
+
+  return resolved;
+}
+
+function interpolatePromptTemplate(
+  promptTemplate: string,
+  resolvedConfig: Record<string, string>,
+): string {
+  return promptTemplate.replace(/\{\{\s*([a-zA-Z0-9_-]+)\s*\}\}/g, (match, key: string) => {
+    if (Object.prototype.hasOwnProperty.call(resolvedConfig, key)) {
+      return resolvedConfig[key] ?? '';
+    }
+    return match;
+  });
+}
+
 /**
  * Apply configuration overrides from skillConfigs to a skill instance.
  * Returns a shallow copy with overridden values.
  */
-function applySkillConfigOverrides(
+export function applySkillConfigOverrides(
   skill: PostExecutionSkill,
   overrides: Record<string, string> | undefined,
 ): PostExecutionSkill {
-  if (!overrides || Object.keys(overrides).length === 0) return skill;
-
+  const resolvedConfig = buildResolvedSkillConfig(skill, overrides);
   const applied = { ...skill };
 
-  // Apply known config keys that map to skill properties
-  if (overrides['max-iterations'] !== undefined) {
-    const parsed = parseInt(overrides['max-iterations'], 10);
+  const maxIterationsRaw = resolvedConfig['max-iterations'];
+  if (maxIterationsRaw !== undefined) {
+    const parsed = parseInt(maxIterationsRaw, 10);
     if (!isNaN(parsed) && parsed > 0) {
       applied.maxIterations = parsed;
     }
+  }
+
+  const doneSignalRaw = resolvedConfig['done-signal'];
+  if (doneSignalRaw !== undefined) {
+    const doneSignal = doneSignalRaw.trim();
+    if (doneSignal.length > 0) {
+      applied.doneSignal = doneSignal;
+    }
+  }
+
+  applied.promptTemplate = interpolatePromptTemplate(skill.promptTemplate, resolvedConfig);
+
+  if (
+    applied.maxIterations === skill.maxIterations
+    && applied.doneSignal === skill.doneSignal
+    && applied.promptTemplate === skill.promptTemplate
+  ) {
+    return skill;
   }
 
   return applied;

@@ -329,12 +329,18 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
       {/* Title */}
       <div>
         {isEditing ? (
-          <input
-            type="text"
-            value={editedTitle}
-            onChange={(e: any) => setEditedTitle(e.target.value)}
-            className="text-xl font-bold text-slate-900 w-full bg-transparent border-b-2 border-blue-400 outline-none pb-1"
-          />
+          <div className="flex items-start justify-between gap-4">
+            <input
+              type="text"
+              value={editedTitle}
+              onChange={(e: any) => setEditedTitle(e.target.value)}
+              className="text-xl font-bold text-slate-900 w-full bg-transparent border-b-2 border-blue-400 outline-none pb-1 min-w-0"
+            />
+            <div className="flex items-center gap-2 shrink-0">
+              <button onClick={onSaveEdit} className="btn btn-primary text-xs py-1.5 px-3">Save Changes</button>
+              <button onClick={() => { setIsEditing(false); setEditedTitle(task.frontmatter.title); setEditedContent(task.content); setEditedCriteria(formatAcceptanceCriteriaForEditor(task.frontmatter.acceptanceCriteria)); setSelectedPreSkillIds(task.frontmatter.preExecutionSkills || []); setSelectedSkillIds(task.frontmatter.postExecutionSkills || []); setSelectedWrapperId(''); setEditedSkillConfigs(task.frontmatter.skillConfigs || {}); setEditedPlanningModelConfig(task.frontmatter.planningModelConfig ?? task.frontmatter.executionModelConfig ?? task.frontmatter.modelConfig); setEditedExecutionModelConfig(task.frontmatter.executionModelConfig ?? task.frontmatter.modelConfig) }} className="btn btn-secondary text-xs py-1.5 px-3">Discard</button>
+            </div>
+          </div>
         ) : (
           <div className="flex items-start justify-between gap-4">
             <h1 className="text-xl font-bold text-slate-900 leading-tight">{frontmatter.title}</h1>
@@ -602,14 +608,6 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
           </div>
         </div>
       </section>
-
-      {/* Edit actions */}
-      {isEditing && (
-        <div className="flex items-center gap-2 pt-2 border-t border-slate-200">
-          <button onClick={onSaveEdit} className="btn btn-primary text-sm py-1.5 px-4">Save Changes</button>
-          <button onClick={() => { setIsEditing(false); setEditedTitle(task.frontmatter.title); setEditedContent(task.content); setEditedCriteria(formatAcceptanceCriteriaForEditor(task.frontmatter.acceptanceCriteria)); setSelectedPreSkillIds(task.frontmatter.preExecutionSkills || []); setSelectedSkillIds(task.frontmatter.postExecutionSkills || []); setSelectedWrapperId(''); setEditedSkillConfigs(task.frontmatter.skillConfigs || {}); setEditedPlanningModelConfig(task.frontmatter.planningModelConfig ?? task.frontmatter.executionModelConfig ?? task.frontmatter.modelConfig); setEditedExecutionModelConfig(task.frontmatter.executionModelConfig ?? task.frontmatter.modelConfig) }} className="btn btn-secondary text-sm py-1.5 px-4">Discard</button>
-        </div>
-      )}
 
       {/* Section 3: Summary + diffs + verified criteria */}
       <section className="rounded-xl border border-emerald-200 bg-emerald-50/40 overflow-hidden">

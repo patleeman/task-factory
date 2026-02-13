@@ -24,26 +24,95 @@ import { applyTaskDefaultsToRequest, loadTaskDefaults } from './task-defaults-se
 // Task File Operations
 // =============================================================================
 
-export function generateTaskId(workspacePath: string, tasksDir: string): string {
+const TASK_ID_COUNTER_FILE = '.task-id-counter.json';
+
+type TaskIdCounters = Record<string, number>;
+
+function getTaskIdPrefix(workspacePath: string): string {
   // Prefix: first 4 letters of workspace folder name, uppercase
   const folderName = basename(workspacePath).replace(/[^a-zA-Z]/g, '');
-  const prefix = (folderName.slice(0, 4) || 'TASK').toUpperCase();
+  return (folderName.slice(0, 4) || 'TASK').toUpperCase();
+}
 
-  // Find highest existing number in this workspace's tasks
-  let maxNum = 0;
-  if (existsSync(tasksDir)) {
-    const files = readdirSync(tasksDir);
-    const pattern = new RegExp(`^${prefix.toLowerCase()}-(\\d+)\\.md$`);
-    for (const file of files) {
-      const match = file.match(pattern);
-      if (match) {
-        const num = parseInt(match[1], 10);
-        if (num > maxNum) maxNum = num;
+function getTaskIdCounterPath(tasksDir: string): string {
+  return join(tasksDir, TASK_ID_COUNTER_FILE);
+}
+
+function loadTaskIdCounters(tasksDir: string): TaskIdCounters {
+  const counterPath = getTaskIdCounterPath(tasksDir);
+
+  if (!existsSync(counterPath)) {
+    return {};
+  }
+
+  try {
+    const raw = readFileSync(counterPath, 'utf-8');
+    const parsed = JSON.parse(raw) as unknown;
+
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return {};
+    }
+
+    const counters: TaskIdCounters = {};
+    for (const [prefix, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+        continue;
       }
+
+      counters[prefix.toUpperCase()] = Math.floor(value);
+    }
+
+    return counters;
+  } catch (err) {
+    console.warn(`[TaskService] Failed to parse task ID counter file at ${counterPath}:`, err);
+    return {};
+  }
+}
+
+function saveTaskIdCounters(tasksDir: string, counters: TaskIdCounters): void {
+  const counterPath = getTaskIdCounterPath(tasksDir);
+  writeFileSync(counterPath, JSON.stringify(counters, null, 2), 'utf-8');
+}
+
+function getMaxExistingTaskNumber(tasksDir: string, prefix: string): number {
+  if (!existsSync(tasksDir)) {
+    return 0;
+  }
+
+  let maxNum = 0;
+  const files = readdirSync(tasksDir);
+  const pattern = new RegExp(`^${prefix}-(\\d+)\\.md$`, 'i');
+
+  for (const file of files) {
+    const match = file.match(pattern);
+    if (!match) {
+      continue;
+    }
+
+    const num = parseInt(match[1], 10);
+    if (num > maxNum) {
+      maxNum = num;
     }
   }
 
-  return `${prefix}-${maxNum + 1}`;
+  return maxNum;
+}
+
+export function generateTaskId(workspacePath: string, tasksDir: string): string {
+  if (!existsSync(tasksDir)) {
+    mkdirSync(tasksDir, { recursive: true });
+  }
+
+  const prefix = getTaskIdPrefix(workspacePath);
+  const counters = loadTaskIdCounters(tasksDir);
+  const lastIssuedNumber = counters[prefix] ?? 0;
+  const maxExistingNumber = getMaxExistingTaskNumber(tasksDir, prefix);
+  const nextNumber = Math.max(lastIssuedNumber, maxExistingNumber) + 1;
+
+  counters[prefix] = nextNumber;
+  saveTaskIdCounters(tasksDir, counters);
+
+  return `${prefix}-${nextNumber}`;
 }
 
 export function normalizeAcceptanceCriteria(criteria: unknown): string[] {

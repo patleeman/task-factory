@@ -126,7 +126,17 @@ export function usePlanningStreaming(
       setMessages([])
       setAgentStream(INITIAL_AGENT_STREAM)
     } else {
-      setMessages((prev) => prev.length === 0 ? initialMessages : prev)
+      setMessages((prev) => {
+        // Merge: keep HTTP-loaded messages as the base, then append any
+        // WS-delivered messages that arrived before the HTTP response.
+        const byId = new Map(initialMessages.map((m) => [m.id, m]))
+        for (const m of prev) {
+          if (!byId.has(m.id)) byId.set(m.id, m)
+        }
+        return Array.from(byId.values()).sort((a, b) =>
+          (a.timestamp || '').localeCompare(b.timestamp || '')
+        )
+      })
     }
   }, [initialMessages])
 
@@ -156,7 +166,10 @@ export function usePlanningStreaming(
           break
 
         case 'planning:message':
-          setMessages((prev) => [...prev, msg.message])
+          setMessages((prev) => {
+            if (prev.some((m) => m.id === msg.message.id)) return prev
+            return [...prev, msg.message]
+          })
           // Fallback: also derive activeQARequest from the persisted QA message.
           // This covers cases where the separate qa:request event doesn't arrive.
           if (msg.message.role === 'qa' && msg.message.metadata?.qaRequest && !msg.message.metadata?.qaResponse) {

@@ -8,7 +8,7 @@ import express from 'express';
 import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import cors from 'cors';
-import { join, dirname, resolve, normalize, isAbsolute, relative } from 'path';
+import { join, dirname, resolve, normalize } from 'path';
 import { fileURLToPath } from 'url';
 import { readdir } from 'fs/promises';
 import { homedir } from 'os';
@@ -70,13 +70,6 @@ const __dirname = dirname(__filename);
 // Helpers
 // =============================================================================
 
-function isPathSafe(pathToCheck: string): boolean {
-  const normalized = resolve(pathToCheck);
-  // Allow paths within the user's home directory
-  const allowedRoot = homedir();
-  const rel = relative(allowedRoot, normalized);
-  return !rel.startsWith('..') && !isAbsolute(rel);
-}
 
 // =============================================================================
 // State
@@ -115,11 +108,6 @@ app.get('/api/health', (_req, res) => {
 app.get('/api/browse', async (req, res) => {
   const rawPath = (req.query.path as string) || homedir();
   const dir = resolve(rawPath.replace(/^~/, homedir()));
-
-  if (!isPathSafe(dir)) {
-    res.status(403).json({ error: 'Access denied: Path is outside allowed directory' });
-    return;
-  }
 
   try {
     const entries = await readdir(dir, { withFileTypes: true });
@@ -188,11 +176,6 @@ app.post('/api/workspaces', async (req, res) => {
 
   if (!path) {
     res.status(400).json({ error: 'Path is required' });
-    return;
-  }
-
-  if (!isPathSafe(path)) {
-    res.status(403).json({ error: 'Access denied: Workspace path is outside allowed directory' });
     return;
   }
 
@@ -1802,7 +1785,7 @@ app.post('/api/workspaces/:workspaceId/queue/start', async (req, res) => {
     workspace.id,
     '',
     'phase-change',
-    'Queue processing started'
+    'Auto-execution enabled'
   );
 
   res.json(status);
@@ -1822,7 +1805,7 @@ app.post('/api/workspaces/:workspaceId/queue/stop', async (req, res) => {
     workspace.id,
     '',
     'phase-change',
-    'Queue processing stopped'
+    'Auto-execution paused'
   );
 
   res.json(status);

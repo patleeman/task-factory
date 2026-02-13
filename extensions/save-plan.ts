@@ -1,7 +1,7 @@
 /**
  * Save Plan Extension
  *
- * Registers a `save_plan` tool that the planning agent calls to persist
+ * Registers a `save_plan` tool that task turns can call to persist
  * acceptance criteria and a structured task plan.
  * The tool receives typed arguments (acceptance criteria, goal, steps,
  * validation, cleanup) — no JSON parsing or regex extraction needed.
@@ -26,7 +26,7 @@ interface SavedPlanningData {
 
 // Shared callback registry (set by agent-execution-service.ts)
 declare global {
-  var __piFactoryPlanCallbacks: Map<string, (data: SavedPlanningData) => void> | undefined;
+  var __piFactoryPlanCallbacks: Map<string, (data: SavedPlanningData) => void | Promise<void>> | undefined;
 }
 
 export default function (pi: ExtensionAPI) {
@@ -73,10 +73,13 @@ export default function (pi: ExtensionAPI) {
           content: [
             {
               type: 'text' as const,
-              text: `Note: save_plan is only available before task execution starts. This task appears to be executing (or no active planning callback is registered), so the criteria/plan package was not persisted. Your work is still captured in the conversation. Continue with your current task.`,
+              text:
+                'save_plan is unavailable right now. ' +
+                'It is available in planning/chat/rework turns and unavailable while executing.',
             },
           ],
           details: {} as Record<string, unknown>,
+          isError: true,
         };
       }
 
@@ -93,6 +96,7 @@ export default function (pi: ExtensionAPI) {
             },
           ],
           details: {} as Record<string, unknown>,
+          isError: true,
         };
       }
 
@@ -104,10 +108,24 @@ export default function (pi: ExtensionAPI) {
         generatedAt: new Date().toISOString(),
       };
 
-      cb({
-        acceptanceCriteria: normalizedAcceptanceCriteria,
-        plan,
-      });
+      try {
+        await cb({
+          acceptanceCriteria: normalizedAcceptanceCriteria,
+          plan,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `save_plan failed for task ${taskId}: ${message}`,
+            },
+          ],
+          details: {} as Record<string, unknown>,
+          isError: true,
+        };
+      }
 
       return {
         content: [

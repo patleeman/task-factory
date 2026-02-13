@@ -21,6 +21,7 @@ import {
   type AgentSessionEvent,
 } from '@mariozechner/pi-coding-agent';
 import type {
+  Artifact,
   DraftTask,
   PlanningMessage,
   PlanningAgentStatus,
@@ -33,6 +34,7 @@ import type {
   QAResponse,
 } from '@pi-factory/shared';
 import {
+  addArtifact,
   addDraftTask,
   clearDraftTasks,
   getShelf,
@@ -52,6 +54,11 @@ import {
   stopQueueProcessing,
   getQueueStatus,
 } from './queue-manager.js';
+import {
+  buildContractReference,
+  prependStateToTurn,
+  stripStateContractEcho,
+} from './state-contract.js';
 
 // =============================================================================
 // Shelf callback registry — used by extension tools
@@ -59,6 +66,7 @@ import {
 
 export interface ShelfCallbacks {
   createDraftTask: (args: any) => Promise<void>;
+  createArtifact: (args: { name: string; html: string }) => Promise<void>;
   removeItem: (itemId: string) => Promise<string>;
   updateDraftTask: (draftId: string, updates: any) => Promise<string>;
   getShelf: () => Promise<Shelf>;
@@ -99,6 +107,16 @@ function registerShelfCallbacks(
         createdAt: new Date().toISOString(),
       };
       const shelf = await addDraftTask(workspaceId, draft);
+      broadcast({ type: 'shelf:updated', workspaceId, shelf });
+    },
+    createArtifact: async (args: { name: string; html: string }) => {
+      const artifact: Artifact = {
+        id: `artifact-${crypto.randomUUID().slice(0, 8)}`,
+        name: String(args.name || 'Untitled Artifact'),
+        html: String(args.html || ''),
+        createdAt: new Date().toISOString(),
+      };
+      const shelf = await addArtifact(workspaceId, artifact);
       broadcast({ type: 'shelf:updated', workspaceId, shelf });
     },
     removeItem: async (itemId: string) => {
@@ -606,6 +624,8 @@ export async function buildPlanningSystemPrompt(workspacePath: string, workspace
       `${workspaceSharedContext.trim()}\n`;
   }
 
+  const stateContractSection = buildContractReference();
+
   return `You are the Foreman — the Pi-Factory planning agent. You help the user plan, research, and decompose work into tasks.
 
 ## Your Role
@@ -618,6 +638,8 @@ export async function buildPlanningSystemPrompt(workspacePath: string, workspace
 ## Workspace
 - Path: ${workspacePath}
 ${taskSummary}${shelfSummary}${sharedContextSummary}
+
+${stateContractSection}
 
 ## Tools
 
@@ -715,7 +737,7 @@ function handlePlanningEvent(
       // so it won't include the user message / system prompt that gets sent
       // via prompt(). Extracting from event.message would capture user messages
       // too, leaking the system prompt into the chat.
-      const content = session.currentStreamText;
+      const content = stripStateContractEcho(session.currentStreamText);
 
       if (content) {
         const planningMsg: PlanningMessage = {
@@ -843,6 +865,12 @@ async function sendToAgent(
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
+      const turnContent = prependStateToTurn(content, {
+        mode: 'foreman',
+        phase: 'none',
+        planningStatus: 'none',
+      });
+
       if (!session.firstMessageSent) {
         // First message in this Pi session: include system prompt + conversation history
         const systemPrompt = await buildPlanningSystemPrompt(
@@ -870,13 +898,13 @@ async function sendToAgent(
         } else {
           fullPrompt += '\n\n---\n\n# User Message\n\n';
         }
-        fullPrompt += content;
+        fullPrompt += turnContent;
 
         const promptOpts = images && images.length > 0 ? { images } : undefined;
         await session.piSession.prompt(fullPrompt, promptOpts);
         session.firstMessageSent = true;
       } else {
-        await session.piSession.followUp(content, images && images.length > 0 ? images : undefined);
+        await session.piSession.followUp(turnContent, images && images.length > 0 ? images : undefined);
       }
 
       // Turn complete

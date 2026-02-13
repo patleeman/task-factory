@@ -1,10 +1,11 @@
-import { useRef, useEffect } from 'react'
+import { useRef, useEffect, useMemo } from 'react'
 import { EditorView, keymap, placeholder as cmPlaceholder, highlightActiveLine } from '@codemirror/view'
 import { EditorState } from '@codemirror/state'
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { languages } from '@codemirror/language-data'
 import { defaultKeymap, indentWithTab, history, historyKeymap } from '@codemirror/commands'
 import { syntaxHighlighting, defaultHighlightStyle, bracketMatching } from '@codemirror/language'
+import { useTheme } from '../hooks/useTheme'
 
 interface MarkdownEditorProps {
   value: string
@@ -17,27 +18,49 @@ interface MarkdownEditorProps {
   fill?: boolean
 }
 
-// Minimal, clean theme that blends into the UI
-const editorTheme = EditorView.theme({
+const sharedEditorTheme = {
   '&': {
     fontSize: '14px',
-    border: '1px solid #e2e8f0',
     borderRadius: '8px',
     overflow: 'hidden',
   },
   '&.cm-focused': {
     outline: 'none',
     borderColor: '#3b82f6',
-    boxShadow: '0 0 0 2px rgba(59, 130, 246, 0.15)',
+    boxShadow: '0 0 0 2px rgba(59, 130, 246, 0.2)',
   },
   '.cm-content': {
     padding: '12px 16px',
     fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
     lineHeight: '1.7',
-    caretColor: '#0f172a',
   },
   '.cm-line': {
     padding: '0',
+  },
+  '.cm-cursor': {
+    borderLeftWidth: '2px',
+  },
+  '.cm-placeholder': {
+    fontStyle: 'italic',
+  },
+  '.cm-header-1': { fontSize: '1.5em', fontWeight: '700' },
+  '.cm-header-2': { fontSize: '1.25em', fontWeight: '600' },
+  '.cm-header-3': { fontSize: '1.1em', fontWeight: '600' },
+  '.cm-strong': { fontWeight: '700' },
+  '.cm-em': { fontStyle: 'italic' },
+  '.cm-link': { textDecoration: 'underline' },
+}
+
+const lightEditorTheme = EditorView.theme({
+  ...sharedEditorTheme,
+  '&': {
+    ...(sharedEditorTheme['&'] || {}),
+    border: '1px solid #e2e8f0',
+  },
+  '.cm-content': {
+    ...(sharedEditorTheme['.cm-content'] || {}),
+    color: '#0f172a',
+    caretColor: '#0f172a',
   },
   '.cm-activeLine': {
     background: '#f8fafc',
@@ -46,23 +69,54 @@ const editorTheme = EditorView.theme({
     background: '#bfdbfe !important',
   },
   '.cm-cursor': {
+    ...(sharedEditorTheme['.cm-cursor'] || {}),
     borderLeftColor: '#0f172a',
-    borderLeftWidth: '2px',
   },
   '.cm-placeholder': {
+    ...(sharedEditorTheme['.cm-placeholder'] || {}),
     color: '#94a3b8',
-    fontStyle: 'italic',
   },
-  // Markdown-specific highlighting
-  '.cm-header-1': { fontSize: '1.5em', fontWeight: '700', color: '#0f172a' },
-  '.cm-header-2': { fontSize: '1.25em', fontWeight: '600', color: '#1e293b' },
-  '.cm-header-3': { fontSize: '1.1em', fontWeight: '600', color: '#334155' },
-  '.cm-strong': { fontWeight: '700' },
-  '.cm-em': { fontStyle: 'italic' },
-  '.cm-link': { color: '#3b82f6', textDecoration: 'underline' },
+  '.cm-header-1': { ...(sharedEditorTheme['.cm-header-1'] || {}), color: '#0f172a' },
+  '.cm-header-2': { ...(sharedEditorTheme['.cm-header-2'] || {}), color: '#1e293b' },
+  '.cm-header-3': { ...(sharedEditorTheme['.cm-header-3'] || {}), color: '#334155' },
+  '.cm-link': { ...(sharedEditorTheme['.cm-link'] || {}), color: '#3b82f6' },
   '.cm-url': { color: '#64748b' },
   '.cm-meta': { color: '#64748b' },
 })
+
+const darkEditorTheme = EditorView.theme({
+  ...sharedEditorTheme,
+  '&': {
+    ...(sharedEditorTheme['&'] || {}),
+    border: '1px solid #334155',
+    backgroundColor: '#0b1220',
+  },
+  '.cm-content': {
+    ...(sharedEditorTheme['.cm-content'] || {}),
+    color: '#e2e8f0',
+    caretColor: '#f8fafc',
+  },
+  '.cm-activeLine': {
+    background: '#111b2e',
+  },
+  '.cm-selectionBackground, ::selection': {
+    background: '#1e3a8a !important',
+  },
+  '.cm-cursor': {
+    ...(sharedEditorTheme['.cm-cursor'] || {}),
+    borderLeftColor: '#f8fafc',
+  },
+  '.cm-placeholder': {
+    ...(sharedEditorTheme['.cm-placeholder'] || {}),
+    color: '#64748b',
+  },
+  '.cm-header-1': { ...(sharedEditorTheme['.cm-header-1'] || {}), color: '#f8fafc' },
+  '.cm-header-2': { ...(sharedEditorTheme['.cm-header-2'] || {}), color: '#f1f5f9' },
+  '.cm-header-3': { ...(sharedEditorTheme['.cm-header-3'] || {}), color: '#e2e8f0' },
+  '.cm-link': { ...(sharedEditorTheme['.cm-link'] || {}), color: '#93c5fd' },
+  '.cm-url': { color: '#94a3b8' },
+  '.cm-meta': { color: '#94a3b8' },
+}, { dark: true })
 
 export function MarkdownEditor({
   value,
@@ -73,20 +127,25 @@ export function MarkdownEditor({
   readOnly = false,
   fill = false,
 }: MarkdownEditorProps) {
+  const { theme } = useTheme()
   const containerRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
 
-  // Stable dispatch listener — created once, references mutable ref
-  const updateListener = EditorView.updateListener.of((update) => {
-    if (update.docChanged) {
-      onChangeRef.current(update.state.doc.toString())
-    }
-  })
+  const updateListener = useMemo(
+    () => EditorView.updateListener.of((update) => {
+      if (update.docChanged) {
+        onChangeRef.current(update.state.doc.toString())
+      }
+    }),
+    [],
+  )
 
   useEffect(() => {
     if (!containerRef.current) return
+
+    const editorTheme = theme === 'dark' ? darkEditorTheme : lightEditorTheme
 
     const extensions: import('@codemirror/state').Extension[] = [
       editorTheme,
@@ -123,9 +182,8 @@ export function MarkdownEditor({
       view.destroy()
       viewRef.current = null
     }
-  }, []) // Intentionally empty — we handle value updates below
+  }, [autoFocus, minHeight, placeholder, readOnly, theme, updateListener])
 
-  // Sync external value changes (but don't loop back our own edits)
   useEffect(() => {
     const view = viewRef.current
     if (!view) return

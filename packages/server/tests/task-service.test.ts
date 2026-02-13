@@ -6,6 +6,7 @@ import type { Task } from '@pi-factory/shared';
 import {
   canMoveToPhase,
   createTask as createTaskFile,
+  deleteTask,
   discoverTasks,
   moveTaskToPhase,
   parseTaskContent,
@@ -60,6 +61,10 @@ function createTempWorkspace(): { workspacePath: string; tasksDir: string } {
   mkdirSync(tasksDir, { recursive: true });
 
   return { workspacePath, tasksDir };
+}
+
+function extractTaskNumber(taskId: string): number {
+  return Number.parseInt(taskId.split('-').at(-1) ?? '', 10);
 }
 
 describe('shouldResumeInterruptedPlanning', () => {
@@ -147,6 +152,56 @@ describe('task ordering', () => {
 
     expect(readyTasks.map((task) => task.id)).toEqual([second.id, first.id]);
     expect(readyTasks[0].frontmatter.order).toBeLessThan(readyTasks[1].frontmatter.order);
+  });
+});
+
+describe('task id generation', () => {
+  it('does not reuse task IDs after deleting an existing task', () => {
+    const { workspacePath, tasksDir } = createTempWorkspace();
+
+    const first = createTaskFile(workspacePath, tasksDir, {
+      title: 'First task',
+      content: 'first',
+      acceptanceCriteria: ['done'],
+    });
+
+    const second = createTaskFile(workspacePath, tasksDir, {
+      title: 'Second task',
+      content: 'second',
+      acceptanceCriteria: ['done'],
+    });
+
+    deleteTask(second);
+
+    const third = createTaskFile(workspacePath, tasksDir, {
+      title: 'Third task',
+      content: 'third',
+      acceptanceCriteria: ['done'],
+    });
+
+    expect(third.id).not.toBe(second.id);
+    expect(extractTaskNumber(third.id)).toBe(extractTaskNumber(second.id) + 1);
+    expect(extractTaskNumber(first.id)).toBeLessThan(extractTaskNumber(second.id));
+  });
+
+  it('keeps incrementing even when all prior tasks are deleted', () => {
+    const { workspacePath, tasksDir } = createTempWorkspace();
+
+    const first = createTaskFile(workspacePath, tasksDir, {
+      title: 'Only task',
+      content: 'single',
+      acceptanceCriteria: ['done'],
+    });
+
+    deleteTask(first);
+
+    const second = createTaskFile(workspacePath, tasksDir, {
+      title: 'Replacement task',
+      content: 'replacement',
+      acceptanceCriteria: ['done'],
+    });
+
+    expect(extractTaskNumber(second.id)).toBe(extractTaskNumber(first.id) + 1);
   });
 });
 

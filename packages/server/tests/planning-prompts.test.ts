@@ -19,6 +19,8 @@ describe('planning prompt guidance', () => {
 
     expect(prompt).toContain('high-level task summary for humans');
     expect(prompt).toContain('Avoid line-level implementation details');
+    expect(prompt).toContain('Agent Contract');
+    expect(prompt).toContain('<state_contract version="2">');
     expect(prompt).not.toContain('reference files/functions when possible');
   });
 
@@ -27,6 +29,8 @@ describe('planning prompt guidance', () => {
 
     expect(prompt).toContain('high-level summary plan');
     expect(prompt).toContain('Avoid line-level implementation details');
+    expect(prompt).toContain('Agent Contract');
+    expect(prompt).toContain('foreman');
     expect(prompt).not.toContain('reference specific files, functions, and components');
   });
 });

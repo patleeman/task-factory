@@ -21,6 +21,8 @@ import { discoverTasks, moveTaskToPhase } from './task-service.js';
 import { executeTask, hasRunningSession } from './agent-execution-service.js';
 import { createSystemEvent } from './activity-service.js';
 import { logger } from './logger.js';
+import { buildTaskStateSnapshot } from './state-contract.js';
+import { logTaskStateTransition } from './state-transition.js';
 
 // =============================================================================
 // Constants
@@ -139,7 +141,19 @@ class QueueManager {
 
         if (recentlyStarted) {
           logger.info(`[QueueManager] Orphaned task ${orphan.id} failed recently — moving back to ready`);
+          const fromState = buildTaskStateSnapshot(orphan.frontmatter);
           moveTaskToPhase(orphan, 'ready', 'system', 'Moved back to ready after execution failure');
+
+          await logTaskStateTransition({
+            workspaceId: this.workspaceId,
+            taskId: orphan.id,
+            from: fromState,
+            to: buildTaskStateSnapshot(orphan.frontmatter),
+            source: 'queue:orphan-reset',
+            reason: 'Moved back to ready after execution failure',
+            broadcastToWorkspace: (event) => this.broadcastFn(event),
+          });
+
           this.broadcastFn({
             type: 'task:moved',
             task: orphan,
@@ -193,8 +207,19 @@ class QueueManager {
       logger.info(`[QueueManager] Picking up task: ${nextTask.id} (${nextTask.frontmatter.title})`);
 
       // Move to executing
+      const fromState = buildTaskStateSnapshot(nextTask.frontmatter);
       moveTaskToPhase(nextTask, 'executing', 'system', 'Queue manager auto-assigned', tasks);
       this.currentTaskId = nextTask.id;
+
+      await logTaskStateTransition({
+        workspaceId: this.workspaceId,
+        taskId: nextTask.id,
+        from: fromState,
+        to: buildTaskStateSnapshot(nextTask.frontmatter),
+        source: 'queue:auto-assigned',
+        reason: 'Queue manager started execution',
+        broadcastToWorkspace: (event) => this.broadcastFn(event),
+      });
 
       this.broadcastFn({
         type: 'task:moved',
@@ -252,7 +277,19 @@ class QueueManager {
 
       if (currentTask && currentTask.frontmatter.phase === 'executing') {
         if (success) {
+          const fromState = buildTaskStateSnapshot(currentTask.frontmatter);
           moveTaskToPhase(currentTask, 'complete', 'system', 'Execution completed successfully');
+
+          await logTaskStateTransition({
+            workspaceId: this.workspaceId,
+            taskId: currentTask.id,
+            from: fromState,
+            to: buildTaskStateSnapshot(currentTask.frontmatter),
+            source: 'queue:execution-complete',
+            reason: 'Execution completed successfully',
+            broadcastToWorkspace: (event) => this.broadcastFn(event),
+          });
+
           this.broadcastFn({
             type: 'task:moved',
             task: currentTask,

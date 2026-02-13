@@ -3,6 +3,7 @@ import { Excalidraw } from '@excalidraw/excalidraw'
 import type { ExcalidrawProps } from '@excalidraw/excalidraw/types'
 import '@excalidraw/excalidraw/index.css'
 import type { WhiteboardSceneSnapshot } from './whiteboard'
+import { useTheme } from '../hooks/useTheme'
 
 interface ExcalidrawBoardProps {
   onSceneChange: (scene: WhiteboardSceneSnapshot) => void
@@ -15,6 +16,8 @@ export default function ExcalidrawBoard({
   initialScene = null,
   heightClassName = 'h-96',
 }: ExcalidrawBoardProps) {
+  const { theme } = useTheme()
+
   const handleChange = useCallback<NonNullable<ExcalidrawProps['onChange']>>((elements, appState, files) => {
     onSceneChange({
       elements: elements as WhiteboardSceneSnapshot['elements'],
@@ -39,6 +42,7 @@ export default function ExcalidrawBoard({
         <Excalidraw
           onChange={handleChange}
           initialData={initialData}
+          theme={theme}
           UIOptions={{
             canvasActions: {
               changeViewBackgroundColor: true,
