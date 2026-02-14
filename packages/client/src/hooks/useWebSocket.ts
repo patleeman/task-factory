@@ -1,7 +1,13 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import type { ServerEvent, ClientEvent } from '@pi-factory/shared'
 
-type MessageHandler = (event: ServerEvent) => void
+export type MessageHandler = (event: ServerEvent) => void
+
+export interface WorkspaceWebSocketConnection {
+  subscribe: (handler: MessageHandler) => (() => void)
+  sendMessage: (message: ClientEvent) => void
+  isConnected: boolean
+}
 
 /**
  * WebSocket hook with a subscription model.
@@ -11,7 +17,7 @@ type MessageHandler = (event: ServerEvent) => void
  * Every WebSocket message is delivered to every handler synchronously —
  * no message is ever dropped.
  */
-export function useWebSocket(workspaceId: string | null) {
+export function useWebSocket(workspaceId: string | null): WorkspaceWebSocketConnection {
   const ws = useRef<WebSocket | null>(null)
   const [isConnected, setIsConnected] = useState(false)
   const subscribersRef = useRef(new Set<MessageHandler>())

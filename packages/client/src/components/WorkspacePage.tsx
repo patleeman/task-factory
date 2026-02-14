@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { ArrowLeft } from 'lucide-react'
-import { useParams, useNavigate, useMatch } from 'react-router-dom'
+import { useParams, useNavigate, useMatch, useOutletContext } from 'react-router-dom'
 import type { Task, Workspace, ActivityEntry, Phase, QueueStatus, Shelf, PlanningMessage, QAAnswer, AgentExecutionStatus, WorkspaceAutomationSettings, Artifact } from '@pi-factory/shared'
 import { api } from '../api'
 import { AppIcon } from './AppIcon'
@@ -9,7 +9,7 @@ import { TaskDetailPane } from './TaskDetailPane'
 import { CreateTaskPane } from './CreateTaskPane'
 import { ShelfPane } from './ShelfPane'
 import { ResizeHandle } from './ResizeHandle'
-import { useWebSocket } from '../hooks/useWebSocket'
+import type { WorkspaceWebSocketConnection } from '../hooks/useWebSocket'
 import { useAgentStreaming } from '../hooks/useAgentStreaming'
 import { usePlanningStreaming, PLANNING_TASK_ID } from '../hooks/usePlanningStreaming'
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts'
@@ -73,7 +73,7 @@ export function WorkspacePage() {
   // Mode: foreman (no task route) vs task (task route)
   const mode = isTaskRoute ? 'task' : 'foreman'
 
-  const { subscribe, isConnected } = useWebSocket(workspaceId || null)
+  const { subscribe, isConnected } = useOutletContext<WorkspaceWebSocketConnection>()
   const agentStream = useAgentStreaming(taskId || null, subscribe)
   const planningStream = usePlanningStreaming(workspaceId || null, subscribe, planningMessages)
 

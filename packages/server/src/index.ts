@@ -63,6 +63,12 @@ import { buildWorkspaceAttentionSummary } from './workspace-attention.js';
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
 const HOST = process.env.HOST || '127.0.0.1';
+const parsedHeartbeatInterval = process.env.WS_HEARTBEAT_INTERVAL_MS
+  ? parseInt(process.env.WS_HEARTBEAT_INTERVAL_MS)
+  : NaN;
+const WS_HEARTBEAT_INTERVAL_MS = Number.isFinite(parsedHeartbeatInterval) && parsedHeartbeatInterval > 0
+  ? parsedHeartbeatInterval
+  : 30_000;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -85,7 +91,12 @@ function buildAutomationResponse(
 // State
 // =============================================================================
 
-const clients = new Map<string, WebSocket>();
+interface ConnectedClient {
+  socket: WebSocket;
+  isAlive: boolean;
+}
+
+const clients = new Map<string, ConnectedClient>();
 const workspaceSubscriptions = new Map<string, Set<string>>(); // workspaceId -> clientIds
 
 // =============================================================================
@@ -2584,11 +2595,47 @@ app.get('*', (_req, res) => {
 const server = createServer(app);
 const wss = new WebSocketServer({ server });
 
+// Ping/pong heartbeat keeps connections alive and prunes dead sockets.
+const heartbeatInterval = setInterval(() => {
+  for (const [clientId, client] of clients) {
+    const ws = client.socket;
+
+    if (ws.readyState !== WebSocket.OPEN) {
+      continue;
+    }
+
+    if (!client.isAlive) {
+      logger.info(`Terminating unresponsive client: ${clientId}`);
+      ws.terminate();
+      continue;
+    }
+
+    client.isAlive = false;
+
+    try {
+      ws.ping();
+    } catch (err) {
+      logger.warn(`Failed to ping client ${clientId}:`, err);
+      ws.terminate();
+    }
+  }
+}, WS_HEARTBEAT_INTERVAL_MS);
+heartbeatInterval.unref?.();
+
+server.on('close', () => {
+  clearInterval(heartbeatInterval);
+});
+
 wss.on('connection', (ws) => {
   const clientId = crypto.randomUUID();
-  clients.set(clientId, ws);
+  const client: ConnectedClient = { socket: ws, isAlive: true };
+  clients.set(clientId, client);
 
   logger.info(`Client connected: ${clientId}`);
+
+  ws.on('pong', () => {
+    client.isAlive = true;
+  });
 
   ws.on('message', (data) => {
     try {
@@ -2597,6 +2644,10 @@ wss.on('connection', (ws) => {
     } catch (err) {
       logger.error('Failed to parse WebSocket message:', err);
     }
+  });
+
+  ws.on('error', (err) => {
+    logger.warn(`WebSocket error for client ${clientId}:`, err);
   });
 
   ws.on('close', () => {
@@ -2653,9 +2704,21 @@ function handleClientEvent(clientId: string, event: ClientEvent) {
 }
 
 function sendToClient(clientId: string, event: ServerEvent) {
-  const ws = clients.get(clientId);
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify(event));
+  const client = clients.get(clientId);
+  const ws = client?.socket;
+
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    return;
+  }
+
+  try {
+    ws.send(JSON.stringify(event), (err) => {
+      if (err) {
+        logger.warn(`Failed to send event to client ${clientId}:`, err);
+      }
+    });
+  } catch (err) {
+    logger.warn(`Failed to send event to client ${clientId}:`, err);
   }
 }
 
