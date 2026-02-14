@@ -53,8 +53,8 @@ describe('attachTaskFileToTask', () => {
       workspacePath,
       '.pi',
       'tasks',
+      task.id.toLowerCase(),
       'attachments',
-      task.id,
       result.attachment.storedName,
     );
 

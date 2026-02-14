@@ -24,7 +24,6 @@ async function bundle() {
     outfile: join(rootDir, 'dist/server.js'),
     format: 'esm',
     external: [
-      'better-sqlite3',
       '@mariozechner/pi-coding-agent',
     ],
     banner: {

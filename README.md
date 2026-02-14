@@ -10,23 +10,39 @@ A lean manufacturing-inspired task queue for AI coding agents. Task Factory give
 
 The pipeline bar sits at the bottom of the screen. Click a task to switch from planning to task mode. Press `Esc` to go back.
 
-## Quick start
+## Quick start (npm CLI)
 
 ```bash
-# Clone and install
+# Install globally
+npm install -g pi-factory
+
+# Start server (opens browser automatically)
+pifactory
+```
+
+By default, `pifactory` starts the server and opens your browser to [http://localhost:3000](http://localhost:3000).
+
+```bash
+pifactory --help                      # Show CLI help
+pifactory --version                   # Show version
+pifactory --no-open                   # Start without opening browser
+PORT=8080 HOST=127.0.0.1 pifactory    # Override host/port
+```
+
+`pi-factory` is kept as a compatibility alias.
+
+## Development from source
+
+```bash
 git clone https://github.com/patleeman/pi-factory.git
 cd pi-factory
 npm install
-
-# Build and run
 npm run build
 npm start
 
 # Or run in dev mode (hot reload)
 npm run dev
 ```
-
-Open [http://localhost:3000](http://localhost:3000).
 
 ## Prerequisites
 

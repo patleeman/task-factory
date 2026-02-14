@@ -4,7 +4,7 @@
 // =============================================================================
 
 import { spawn } from 'child_process';
-import { readFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
@@ -12,32 +12,91 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const args = process.argv.slice(2);
-const command = args.find(a => !a.startsWith('-')) || 'start';
-const flags = new Set(args.filter(a => a.startsWith('-')));
+const flags = new Set(args.filter((arg) => arg.startsWith('-')));
+const command = args.find((arg) => !arg.startsWith('-')) || 'start';
 
 const rawPort = process.env.PORT || '3000';
 const port = /^\d+$/.test(rawPort) ? rawPort : '3000';
 const host = process.env.HOST || '0.0.0.0';
+const url = `http://localhost:${port}`;
+
+function shouldOpenBrowser() {
+  if (flags.has('--no-open')) return false;
+  if (flags.has('--open') || flags.has('-o')) return true;
+  return true;
+}
+
+function getOpenCommand(urlToOpen) {
+  if (process.platform === 'darwin') {
+    return { command: 'open', args: [urlToOpen] };
+  }
+
+  if (process.platform === 'linux') {
+    return { command: 'xdg-open', args: [urlToOpen] };
+  }
+
+  if (process.platform === 'win32') {
+    return { command: 'cmd', args: ['/c', 'start', '', urlToOpen] };
+  }
+
+  return null;
+}
+
+function openBrowser(urlToOpen) {
+  let warned = false;
+  const warnManualOpen = () => {
+    if (warned) return;
+    warned = true;
+    console.warn(`Could not auto-open browser. Open manually: ${urlToOpen}`);
+  };
+
+  const openCommand = getOpenCommand(urlToOpen);
+  if (!openCommand) {
+    warnManualOpen();
+    return;
+  }
+
+  try {
+    const openProc = spawn(openCommand.command, openCommand.args, {
+      stdio: 'ignore',
+      detached: true,
+    });
+
+    openProc.on('error', warnManualOpen);
+    openProc.on('exit', (code) => {
+      if (typeof code === 'number' && code !== 0) {
+        warnManualOpen();
+      }
+    });
+    openProc.unref();
+  } catch {
+    warnManualOpen();
+  }
+}
 
 function startServer() {
   const serverPath = join(__dirname, '..', 'dist', 'server.js');
 
-  console.log(`Starting Task Factory server on http://localhost:${port}...`);
+  if (!existsSync(serverPath)) {
+    console.error(`Task Factory server bundle not found at ${serverPath}. Run \"npm run build\" before starting.`);
+    process.exit(1);
+  }
 
-  const proc = spawn('node', [serverPath], {
+  console.log(`Starting Task Factory server on ${url}...`);
+
+  const proc = spawn(process.execPath, [serverPath], {
     stdio: 'inherit',
     env: { ...process.env, PORT: port, HOST: host },
   });
 
-  // Auto-open browser
-  if (flags.has('--open') || flags.has('-o')) {
+  proc.on('error', (error) => {
+    console.error(`Failed to start Task Factory server: ${error.message}`);
+    process.exit(1);
+  });
+
+  if (shouldOpenBrowser()) {
     setTimeout(() => {
-      const url = `http://localhost:${port}`;
-      try {
-        if (process.platform === 'darwin') spawn('open', [url], { stdio: 'ignore' });
-        else if (process.platform === 'linux') spawn('xdg-open', [url], { stdio: 'ignore' });
-        else if (process.platform === 'win32') spawn('cmd', ['/c', 'start', url], { stdio: 'ignore' });
-      } catch { /* ignore */ }
+      openBrowser(url);
     }, 1500);
   }
 
@@ -48,6 +107,10 @@ function startServer() {
   process.on('SIGINT', () => {
     proc.kill('SIGINT');
   });
+
+  process.on('SIGTERM', () => {
+    proc.kill('SIGTERM');
+  });
 }
 
 function showHelp() {
@@ -55,13 +118,14 @@ function showHelp() {
 Task Factory - TPS-inspired Agent Work Queue
 
 Usage:
-  pi-factory [command] [options]
+  pifactory [command] [options]
 
 Commands:
   start           Start the server (default)
 
 Options:
-  --open, -o      Open browser after starting
+  --no-open       Do not open browser after starting
+  --open, -o      Force browser open (default behavior)
   --help, -h      Show this help message
   --version, -v   Show version
 
@@ -75,9 +139,10 @@ Keyboard Shortcuts (in UI):
   ⌘/Ctrl+K       Focus chat input
 
 Examples:
-  pi-factory                    # Start server on default port
-  pi-factory --open             # Start and open browser
-  PORT=8080 pi-factory          # Start on port 8080
+  pifactory                           # Start server and auto-open browser
+  pifactory --no-open                 # Start server without opening browser
+  PORT=8080 HOST=127.0.0.1 pifactory  # Start on port 8080
+  pi-factory                          # Compatibility alias
 `);
 }
 
@@ -86,6 +151,10 @@ if (flags.has('--help') || flags.has('-h')) {
 } else if (flags.has('--version') || flags.has('-v')) {
   const pkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-8'));
   console.log(pkg.version);
-} else {
+} else if (command === 'start') {
   startServer();
+} else {
+  console.error(`Unknown command: ${command}`);
+  showHelp();
+  process.exit(1);
 }

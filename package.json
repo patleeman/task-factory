@@ -4,12 +4,16 @@
   "description": "A lean manufacturing-inspired task queue system for AI agents",
   "type": "module",
   "bin": {
+    "pifactory": "./bin/pi-factory.js",
     "pi-factory": "./bin/pi-factory.js"
   },
   "files": [
     "bin/",
     "dist/",
-    "packages/client/dist/"
+    "packages/client/dist/",
+    "extensions/",
+    "skills/",
+    "wrappers/"
   ],
   "workspaces": [
     "packages/*"
@@ -24,6 +28,9 @@
     "lint": "npm run lint --workspaces",
     "typecheck": "npm run typecheck --workspaces",
     "test": "npm run test --workspaces --if-present"
+  },
+  "dependencies": {
+    "@mariozechner/pi-coding-agent": "^0.52.10"
   },
   "devDependencies": {
     "concurrently": "^9.2.1",
