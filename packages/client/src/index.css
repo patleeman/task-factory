@@ -396,8 +396,9 @@
 :root[data-theme='dark'] .bg-amber-500 { background-color: #b45309; }
 :root[data-theme='dark'] .bg-amber-600 { background-color: #92400e; }
 
-:root[data-theme='dark'] .bg-red-50 { background-color: #2a0d13; }
-:root[data-theme='dark'] .bg-red-100 { background-color: #3d121a; }
+/* Keep low-emphasis error surfaces neutral in dark mode to avoid large red panels. */
+:root[data-theme='dark'] .bg-red-50 { background-color: var(--color-surface-secondary, #0b1220); }
+:root[data-theme='dark'] .bg-red-100 { background-color: var(--slate-200, #111b2e); }
 :root[data-theme='dark'] .bg-red-500 { background-color: #dc2626; }
 :root[data-theme='dark'] .bg-red-600 { background-color: #b91c1c; }
 
@@ -489,8 +490,8 @@
 :root[data-theme='dark'] .hover\:bg-amber-50:hover { background-color: #352108; }
 :root[data-theme='dark'] .hover\:bg-amber-600:hover { background-color: #d97706; }
 :root[data-theme='dark'] .hover\:bg-amber-700:hover { background-color: #b45309; }
-:root[data-theme='dark'] .hover\:bg-red-50:hover { background-color: #3a121a; }
-:root[data-theme='dark'] .hover\:bg-red-100:hover { background-color: #52131d; }
+:root[data-theme='dark'] .hover\:bg-red-50:hover { background-color: var(--color-btn-secondary-bg-hover, #172033); }
+:root[data-theme='dark'] .hover\:bg-red-100:hover { background-color: var(--slate-300, #1e293b); }
 :root[data-theme='dark'] .hover\:bg-red-600:hover { background-color: #dc2626; }
 :root[data-theme='dark'] .hover\:bg-red-700:hover { background-color: #b91c1c; }
 :root[data-theme='dark'] .hover\:bg-green-500\/30:hover { background-color: rgba(34, 197, 94, 0.45); }
