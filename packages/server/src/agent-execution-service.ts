@@ -19,11 +19,14 @@ import {
 } from '@mariozechner/pi-coding-agent';
 import {
   DEFAULT_PLANNING_GUARDRAILS,
+  DEFAULT_WIP_LIMITS,
+  getWorkspaceAutomationSettings,
   type Task,
   type TaskPlan,
   type Attachment,
   type ModelConfig,
   type PlanningGuardrails,
+  type WorkspaceConfig,
 } from '@pi-factory/shared';
 import { createTaskSeparator, createChatMessage, createSystemEvent } from './activity-service.js';
 import {
@@ -33,7 +36,14 @@ import {
   WORKSPACE_SHARED_CONTEXT_REL_PATH,
   type PiSkill,
 } from './pi-integration.js';
-import { moveTaskToPhase, updateTask, saveTaskFile, parseTaskFile } from './task-service.js';
+import {
+  moveTaskToPhase,
+  updateTask,
+  saveTaskFile,
+  parseTaskFile,
+  canMoveToPhase,
+  discoverTasks,
+} from './task-service.js';
 import { runPreExecutionSkills, runPostExecutionSkills } from './post-execution-skills.js';
 import { withTimeout } from './with-timeout.js';
 import { generateAndPersistSummary } from './summary-service.js';
@@ -2378,6 +2388,124 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
 /**
  * Save acceptance criteria + a generated plan to the task and broadcast updates.
  */
+function readWorkspaceConfigForTask(task: Task): WorkspaceConfig | null {
+  const workspacePath = task.frontmatter.workspace?.trim();
+  if (!workspacePath) return null;
+
+  const configPath = join(workspacePath, '.pi', 'factory.json');
+  try {
+    const raw = readFileSync(configPath, 'utf-8');
+    const parsed = JSON.parse(raw) as WorkspaceConfig;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function resolveTasksDirForTask(task: Task, workspaceConfig: WorkspaceConfig | null): string {
+  const workspacePath = task.frontmatter.workspace?.trim();
+  const location = workspaceConfig?.defaultTaskLocation || '.pi/tasks';
+
+  if (location.startsWith('/')) {
+    return location;
+  }
+
+  if (!workspacePath) {
+    return location;
+  }
+
+  return join(workspacePath, location);
+}
+
+function maybeAutoPromoteBacklogTaskAfterPlanning(
+  task: Task,
+  workspaceId: string,
+  normalizedCriteria: string[],
+  broadcastToWorkspace?: (event: any) => void,
+): Task {
+  if (task.frontmatter.phase !== 'backlog') {
+    return task;
+  }
+
+  if (normalizedCriteria.length === 0) {
+    return task;
+  }
+
+  const workspaceConfig = readWorkspaceConfigForTask(task);
+  const automation = workspaceConfig
+    ? getWorkspaceAutomationSettings(workspaceConfig)
+    : { backlogToReady: false, readyToExecuting: false };
+
+  if (!automation.backlogToReady) {
+    return task;
+  }
+
+  const tasksDir = resolveTasksDirForTask(task, workspaceConfig);
+  const tasks = discoverTasks(tasksDir);
+  const latestTask = tasks.find((candidate) => candidate.id === task.id) || task;
+
+  const moveValidation = canMoveToPhase(latestTask, 'ready');
+  if (!moveValidation.allowed) {
+    return latestTask;
+  }
+
+  const wipLimit = workspaceConfig?.wipLimits?.ready ?? DEFAULT_WIP_LIMITS.ready;
+  if (wipLimit !== null && wipLimit !== undefined) {
+    const tasksInReady = tasks.filter((candidate) => candidate.frontmatter.phase === 'ready');
+    if (tasksInReady.length >= wipLimit && latestTask.frontmatter.phase !== 'ready') {
+      return latestTask;
+    }
+  }
+
+  const fromPhase = latestTask.frontmatter.phase;
+  const fromState = buildTaskStateSnapshot(latestTask.frontmatter);
+
+  moveTaskToPhase(latestTask, 'ready', 'system', 'Auto-promoted after planning completion', tasks);
+  syncTaskReference(task, latestTask);
+
+  void logTaskStateTransition({
+    workspaceId,
+    taskId: latestTask.id,
+    from: fromState,
+    to: buildTaskStateSnapshot(latestTask.frontmatter),
+    source: 'planning:auto-promote',
+    reason: 'Auto-promoted from backlog to ready after planning completion',
+    broadcastToWorkspace,
+  }).catch((stateErr) => {
+    console.error(`[finalizePlan] Failed to log auto-promotion state for ${latestTask.id}:`, stateErr);
+  });
+
+  broadcastActivityEntry(
+    broadcastToWorkspace,
+    createSystemEvent(
+      workspaceId,
+      latestTask.id,
+      'phase-change',
+      'Auto-promoted from backlog to ready after planning completion',
+      { fromPhase, toPhase: 'ready' },
+    ),
+    'planning auto-promote event',
+  );
+
+  broadcastToWorkspace?.({
+    type: 'task:moved',
+    task: latestTask,
+    from: fromPhase,
+    to: 'ready',
+  });
+
+  // Avoid a hard runtime import cycle with queue-manager by importing lazily.
+  void import('./queue-manager.js')
+    .then(({ kickQueue }) => {
+      kickQueue(workspaceId);
+    })
+    .catch((err) => {
+      console.error(`[finalizePlan] Failed to kick queue after auto-promotion for ${latestTask.id}:`, err);
+    });
+
+  return latestTask;
+}
+
 function finalizePlan(
   task: Task,
   acceptanceCriteria: string[],
@@ -2413,6 +2541,13 @@ function finalizePlan(
     console.error(`[finalizePlan] Failed to log planning completion state for ${updatedTask.id}:`, stateErr);
   });
 
+  const finalTask = maybeAutoPromoteBacklogTaskAfterPlanning(
+    updatedTask,
+    workspaceId,
+    normalizedCriteria,
+    broadcastToWorkspace,
+  );
+
   broadcastActivityEntry(
     broadcastToWorkspace,
     createSystemEvent(
@@ -2432,7 +2567,7 @@ function finalizePlan(
 
   broadcastToWorkspace?.({
     type: 'task:updated',
-    task: updatedTask,
+    task: finalTask,
     changes: { acceptanceCriteria: normalizedCriteria, plan },
   });
 }

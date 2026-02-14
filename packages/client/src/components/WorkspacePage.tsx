@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { ArrowLeft } from 'lucide-react'
 import { useParams, useNavigate, useMatch } from 'react-router-dom'
-import type { Task, Workspace, ActivityEntry, Phase, QueueStatus, Shelf, PlanningMessage, QAAnswer, AgentExecutionStatus } from '@pi-factory/shared'
+import type { Task, Workspace, ActivityEntry, Phase, QueueStatus, Shelf, PlanningMessage, QAAnswer, AgentExecutionStatus, WorkspaceAutomationSettings } from '@pi-factory/shared'
 import { api } from '../api'
 import { AppIcon } from './AppIcon'
 import { PipelineBar } from './PipelineBar'
@@ -16,6 +16,7 @@ import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts'
 import { TaskChat } from './TaskChat'
 import { QADialog } from './QADialog'
 import { ThemeToggle } from './ThemeToggle'
+import { syncAutomationSettingsWithQueue } from './workflow-automation'
 
 const LEFT_PANE_MIN = 320
 const LEFT_PANE_MAX = 1400
@@ -49,7 +50,12 @@ export function WorkspacePage() {
   const [toast, setToast] = useState<string | null>(null)
   const [moveError, setMoveError] = useState<string | null>(null)
   const [queueStatus, setQueueStatus] = useState<QueueStatus | null>(null)
-  const [queueToggling, setQueueToggling] = useState(false)
+  const [automationSettings, setAutomationSettings] = useState<WorkspaceAutomationSettings>({
+    backlogToReady: false,
+    readyToExecuting: false,
+  })
+  const [backlogAutomationToggling, setBacklogAutomationToggling] = useState(false)
+  const [readyAutomationToggling, setReadyAutomationToggling] = useState(false)
   const toastTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
 
   const [shelf, setShelf] = useState<Shelf>({ items: [] })
@@ -78,6 +84,13 @@ export function WorkspacePage() {
   const runningTaskIds = runningExecutionTaskIds
   const awaitingTaskIds = awaitingInputTaskIds
   const awaitingInputCount = nonArchivedTasks.filter((task) => awaitingTaskIds.has(task.id)).length
+  const readyTasksCount = queueStatus?.tasksInReady
+    ?? nonArchivedTasks.filter((task) => task.frontmatter.phase === 'ready').length
+  const effectiveAutomationSettings: WorkspaceAutomationSettings = syncAutomationSettingsWithQueue(
+    automationSettings,
+    queueStatus,
+  )
+
   const planGeneratingTaskIds = useMemo(() => {
     return new Set(
       tasks
@@ -146,12 +159,15 @@ export function WorkspacePage() {
     setActivity([])
     setRunningExecutionTaskIds(new Set())
     setAwaitingInputTaskIds(new Set())
+    setBacklogAutomationToggling(false)
+    setReadyAutomationToggling(false)
+    setAutomationSettings({ backlogToReady: false, readyToExecuting: false })
 
     Promise.all([
       api.getWorkspace(workspaceId),
       api.getTasks(workspaceId),
       api.getActivity(workspaceId, 100),
-      api.getQueueStatus(workspaceId),
+      api.getWorkflowAutomation(workspaceId),
       api.getShelf(workspaceId),
       api.getPlanningMessages(workspaceId),
       api.getActiveExecutions(workspaceId).catch((err) => {
@@ -159,8 +175,15 @@ export function WorkspacePage() {
         return []
       }),
     ])
-      .then(([ws, tasksData, activityData, qStatus, shelfData, planningMsgs, activeExecutions]) => {
-        setWorkspace(ws)
+      .then(([ws, tasksData, activityData, automationData, shelfData, planningMsgs, activeExecutions]) => {
+        setWorkspace({
+          ...ws,
+          config: {
+            ...ws.config,
+            workflowAutomation: automationData.settings,
+            queueProcessing: { enabled: automationData.settings.readyToExecuting },
+          },
+        })
         setTasks(tasksData)
         setActivity((prev) => {
           const byId = new Map<string, ActivityEntry>()
@@ -181,7 +204,8 @@ export function WorkspacePage() {
           merged.sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''))
           return merged
         })
-        setQueueStatus(qStatus)
+        setAutomationSettings(automationData.settings)
+        setQueueStatus(automationData.queueStatus)
         setShelf(shelfData)
         setPlanningMessages(planningMsgs)
 
@@ -298,6 +322,31 @@ export function WorkspacePage() {
           break
         case 'queue:status':
           setQueueStatus(msg.status)
+          setAutomationSettings((prev) => ({ ...prev, readyToExecuting: msg.status.enabled }))
+          setWorkspace((prev) => {
+            if (!prev) return prev
+            return {
+              ...prev,
+              config: {
+                ...prev.config,
+                queueProcessing: { enabled: msg.status.enabled },
+              },
+            }
+          })
+          break
+        case 'workspace:automation_updated':
+          setAutomationSettings(msg.settings)
+          setWorkspace((prev) => {
+            if (!prev) return prev
+            return {
+              ...prev,
+              config: {
+                ...prev.config,
+                workflowAutomation: msg.settings,
+                queueProcessing: { enabled: msg.settings.readyToExecuting },
+              },
+            }
+          })
           break
         case 'agent:execution_status': {
           const task = tasksByIdRef.current.get(msg.taskId)
@@ -569,19 +618,57 @@ export function WorkspacePage() {
     }
   }
 
-  const handleToggleQueue = async () => {
-    if (!workspaceId || queueToggling) return
-    setQueueToggling(true)
+  const handleToggleBacklogAutomation = async () => {
+    if (!workspaceId || backlogAutomationToggling) return
+    setBacklogAutomationToggling(true)
     try {
-      const status = queueStatus?.enabled
-        ? await api.stopQueue(workspaceId)
-        : await api.startQueue(workspaceId)
-      setQueueStatus(status)
+      const nextValue = !automationSettings.backlogToReady
+      const result = await api.updateWorkflowAutomation(workspaceId, { backlogToReady: nextValue })
+      setAutomationSettings(result.settings)
+      setQueueStatus(result.queueStatus)
+      setWorkspace((prev) => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          config: {
+            ...prev.config,
+            workflowAutomation: result.settings,
+            queueProcessing: { enabled: result.settings.readyToExecuting },
+          },
+        }
+      })
     } catch (err) {
-      console.error('Failed to toggle queue:', err)
-      showToast('Failed to toggle auto-execution')
+      console.error('Failed to toggle backlog auto-promotion:', err)
+      showToast('Failed to toggle backlog auto-promotion')
     } finally {
-      setQueueToggling(false)
+      setBacklogAutomationToggling(false)
+    }
+  }
+
+  const handleToggleReadyAutomation = async () => {
+    if (!workspaceId || readyAutomationToggling) return
+    setReadyAutomationToggling(true)
+    try {
+      const nextValue = !automationSettings.readyToExecuting
+      const result = await api.updateWorkflowAutomation(workspaceId, { readyToExecuting: nextValue })
+      setAutomationSettings(result.settings)
+      setQueueStatus(result.queueStatus)
+      setWorkspace((prev) => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          config: {
+            ...prev.config,
+            workflowAutomation: result.settings,
+            queueProcessing: { enabled: result.settings.readyToExecuting },
+          },
+        }
+      })
+    } catch (err) {
+      console.error('Failed to toggle ready auto-execution:', err)
+      showToast('Failed to toggle ready auto-execution')
+    } finally {
+      setReadyAutomationToggling(false)
     }
   }
 
@@ -662,36 +749,6 @@ export function WorkspacePage() {
               </span>
             )
           })()}
-          <div className="h-6 w-px bg-slate-700" />
-          <button
-            onClick={handleToggleQueue}
-            disabled={queueToggling}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-              queueStatus?.enabled
-                ? 'bg-green-500/20 text-green-400 hover:bg-green-500/30'
-                : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
-            } ${queueToggling ? 'opacity-50 cursor-not-allowed' : ''}`}
-            title={queueStatus?.enabled ? 'Pause auto-execution' : 'Auto-execute ready tasks'}
-          >
-            {queueToggling ? (
-              <span className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
-            ) : queueStatus?.enabled ? (
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
-                <rect x="2" y="2" width="4" height="10" rx="1" />
-                <rect x="8" y="2" width="4" height="10" rx="1" />
-              </svg>
-            ) : (
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
-                <path d="M3 1.5v11l9-5.5z" />
-              </svg>
-            )}
-            {queueStatus?.enabled ? 'Auto' : 'Auto'}
-            {queueStatus?.enabled && queueStatus.tasksInReady > 0 && (
-              <span className="bg-green-500/30 text-green-300 text-xs px-1.5 py-0.5 rounded-full">
-                {queueStatus.tasksInReady} ready
-              </span>
-            )}
-          </button>
         </div>
 
         <div className="flex items-center gap-3">
@@ -818,6 +875,12 @@ export function WorkspacePage() {
               ) : (
                 <ShelfPane
                   shelf={shelf}
+                  automationSettings={effectiveAutomationSettings}
+                  readyTasksCount={readyTasksCount}
+                  backlogAutomationToggling={backlogAutomationToggling}
+                  readyAutomationToggling={readyAutomationToggling}
+                  onToggleBacklogAutomation={handleToggleBacklogAutomation}
+                  onToggleReadyAutomation={handleToggleReadyAutomation}
                   onPushDraft={handlePushDraft}
                   onPushAll={handlePushAllDrafts}
                   onRemoveItem={handleRemoveShelfItem}

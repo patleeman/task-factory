@@ -1,4 +1,4 @@
-import type { Task, Workspace, ActivityEntry, Phase, Attachment, QueueStatus, PlanningMessage, PlanningAgentStatus, Shelf, DraftTask, TaskDefaults, PostExecutionSummary, CriterionStatus, QAAnswer, QARequest, PlanningGuardrails } from '@pi-factory/shared'
+import type { Task, Workspace, ActivityEntry, Phase, Attachment, QueueStatus, PlanningMessage, PlanningAgentStatus, Shelf, DraftTask, TaskDefaults, PostExecutionSummary, CriterionStatus, QAAnswer, QARequest, PlanningGuardrails, WorkspaceAutomationSettings } from '@pi-factory/shared'
 
 export interface AvailableModel {
   provider: string
@@ -74,6 +74,11 @@ export interface PiFactorySettings {
   taskDefaults?: TaskDefaults
   planningGuardrails?: Partial<PlanningGuardrails>
   [key: string]: unknown
+}
+
+export interface WorkflowAutomationResponse {
+  settings: WorkspaceAutomationSettings
+  queueStatus: QueueStatus
 }
 
 export const api = {
@@ -356,6 +361,28 @@ export const api = {
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: 'Failed to save task defaults' }))
       throw new Error(err.error || `Failed to save task defaults (${res.status})`)
+    }
+    return res.json()
+  },
+
+  async getWorkflowAutomation(workspaceId: string): Promise<WorkflowAutomationResponse> {
+    const res = await fetch(`/api/workspaces/${workspaceId}/automation`)
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to load workflow automation settings' }))
+      throw new Error(err.error || `Failed to load workflow automation settings (${res.status})`)
+    }
+    return res.json()
+  },
+
+  async updateWorkflowAutomation(workspaceId: string, updates: Partial<WorkspaceAutomationSettings>): Promise<WorkflowAutomationResponse> {
+    const res = await fetch(`/api/workspaces/${workspaceId}/automation`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to save workflow automation settings' }))
+      throw new Error(err.error || `Failed to save workflow automation settings (${res.status})`)
     }
     return res.json()
   },

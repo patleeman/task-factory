@@ -15,7 +15,7 @@
 // It recovers gracefully from server restarts by detecting orphaned executing tasks.
 
 import type { Task, ServerEvent, QueueStatus, Workspace } from '@pi-factory/shared';
-import { DEFAULT_WIP_LIMITS } from '@pi-factory/shared';
+import { DEFAULT_WIP_LIMITS, getWorkspaceAutomationSettings } from '@pi-factory/shared';
 import { getWorkspaceById, getTasksDir, listWorkspaces, updateWorkspaceConfig } from './workspace-service.js';
 import { discoverTasks, moveTaskToPhase } from './task-service.js';
 import { executeTask, hasRunningSession } from './agent-execution-service.js';
@@ -344,16 +344,12 @@ export async function stopQueueProcessing(workspaceId: string): Promise<QueueSta
   const manager = managers.get(workspaceId);
   if (manager) {
     await manager.stop();
+    await persistQueueEnabled(workspaceId, false);
+    return manager.getStatus();
   }
-  await persistQueueEnabled(workspaceId, false);
 
-  return manager?.getStatus() ?? {
-    workspaceId,
-    enabled: false,
-    currentTaskId: null,
-    tasksInReady: 0,
-    tasksInExecuting: 0,
-  };
+  await persistQueueEnabled(workspaceId, false);
+  return getQueueStatus(workspaceId);
 }
 
 export async function getQueueStatus(workspaceId: string): Promise<QueueStatus> {
@@ -366,16 +362,19 @@ export async function getQueueStatus(workspaceId: string): Promise<QueueStatus> 
   const workspace = await getWorkspaceById(workspaceId);
   let tasksInReady = 0;
   let tasksInExecuting = 0;
+  let enabled = false;
+
   if (workspace) {
     const tasksDir = getTasksDir(workspace);
     const tasks = discoverTasks(tasksDir);
     tasksInReady = tasks.filter(t => t.frontmatter.phase === 'ready').length;
     tasksInExecuting = tasks.filter(t => t.frontmatter.phase === 'executing').length;
+    enabled = getWorkspaceAutomationSettings(workspace.config).readyToExecuting;
   }
 
   return {
     workspaceId,
-    enabled: false,
+    enabled,
     currentTaskId: null,
     tasksInReady,
     tasksInExecuting,
@@ -409,7 +408,8 @@ export async function initializeQueueManagers(
   const workspaces = await listWorkspaces();
 
   for (const workspace of workspaces) {
-    if (workspace.config.queueProcessing?.enabled) {
+    const automation = getWorkspaceAutomationSettings(workspace.config);
+    if (automation.readyToExecuting) {
       logger.info(`[QueueManager] Resuming queue processing for workspace: ${workspace.name}`);
       const manager = getOrCreateManager(
         workspace.id,
@@ -427,5 +427,13 @@ export async function initializeQueueManagers(
 async function persistQueueEnabled(workspaceId: string, enabled: boolean): Promise<void> {
   const workspace = await getWorkspaceById(workspaceId);
   if (!workspace) return;
-  await updateWorkspaceConfig(workspace, { queueProcessing: { enabled } });
+
+  const currentAutomation = getWorkspaceAutomationSettings(workspace.config);
+  await updateWorkspaceConfig(workspace, {
+    queueProcessing: { enabled },
+    workflowAutomation: {
+      backlogToReady: currentAutomation.backlogToReady,
+      readyToExecuting: enabled,
+    },
+  });
 }

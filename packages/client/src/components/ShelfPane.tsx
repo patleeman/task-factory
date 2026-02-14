@@ -1,10 +1,16 @@
-import { ArrowRight } from 'lucide-react'
-import type { Shelf, DraftTask } from '@pi-factory/shared'
+import { ArrowRight, Pause, Play, Loader2 } from 'lucide-react'
+import type { Shelf, DraftTask, WorkspaceAutomationSettings } from '@pi-factory/shared'
 import { AppIcon } from './AppIcon'
 import { DraftTaskCard } from './DraftTaskCard'
 
 interface ShelfPaneProps {
   shelf: Shelf
+  automationSettings: WorkspaceAutomationSettings
+  readyTasksCount: number
+  backlogAutomationToggling: boolean
+  readyAutomationToggling: boolean
+  onToggleBacklogAutomation: () => void
+  onToggleReadyAutomation: () => void
   onPushDraft: (draftId: string) => void
   onPushAll: () => void
   onRemoveItem: (itemId: string) => void
@@ -12,8 +18,63 @@ interface ShelfPaneProps {
   onClearShelf: () => void
 }
 
+interface AutomationToggleButtonProps {
+  label: string
+  description: string
+  enabled: boolean
+  loading: boolean
+  onClick: () => void
+  readyCountBadge?: number
+}
+
+function AutomationToggleButton({
+  label,
+  description,
+  enabled,
+  loading,
+  onClick,
+  readyCountBadge,
+}: AutomationToggleButtonProps) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={loading}
+      className={`flex items-center justify-between gap-3 px-3 py-2 rounded-lg border text-left transition-colors ${
+        enabled
+          ? 'border-emerald-200 bg-emerald-50 hover:bg-emerald-100'
+          : 'border-slate-200 bg-white hover:border-slate-300'
+      } ${loading ? 'opacity-60 cursor-not-allowed' : ''}`}
+    >
+      <div className="min-w-0">
+        <div className="text-xs font-semibold text-slate-800 leading-4">{label}</div>
+        <div className="text-[11px] text-slate-500 leading-4">{description}</div>
+      </div>
+      <div className="shrink-0 flex items-center gap-1.5">
+        {typeof readyCountBadge === 'number' && enabled && readyCountBadge > 0 && (
+          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium">
+            {readyCountBadge} ready
+          </span>
+        )}
+        {loading ? (
+          <AppIcon icon={Loader2} size="sm" className="text-slate-500 animate-spin" />
+        ) : enabled ? (
+          <AppIcon icon={Pause} size="sm" className="text-emerald-700" />
+        ) : (
+          <AppIcon icon={Play} size="sm" className="text-slate-500" />
+        )}
+      </div>
+    </button>
+  )
+}
+
 export function ShelfPane({
   shelf,
+  automationSettings,
+  readyTasksCount,
+  backlogAutomationToggling,
+  readyAutomationToggling,
+  onToggleBacklogAutomation,
+  onToggleReadyAutomation,
   onPushDraft,
   onPushAll,
   onRemoveItem,
@@ -50,6 +111,30 @@ export function ShelfPane({
               </button>
             </>
           )}
+        </div>
+      </div>
+
+      {/* Workflow automation control bar */}
+      <div className="px-3 py-2 border-b border-slate-200 bg-slate-50/70 shrink-0">
+        <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 px-1 mb-1.5">
+          Workflow Automation
+        </div>
+        <div className="grid grid-cols-1 gap-1.5">
+          <AutomationToggleButton
+            label="Backlog → Ready"
+            description="Auto-promote after planning saves a valid plan"
+            enabled={automationSettings.backlogToReady}
+            loading={backlogAutomationToggling}
+            onClick={onToggleBacklogAutomation}
+          />
+          <AutomationToggleButton
+            label="Ready → Executing"
+            description="Queue manager continuously auto-starts ready tasks"
+            enabled={automationSettings.readyToExecuting}
+            loading={readyAutomationToggling}
+            onClick={onToggleReadyAutomation}
+            readyCountBadge={readyTasksCount}
+          />
         </div>
       </div>
 

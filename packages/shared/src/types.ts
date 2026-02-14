@@ -310,6 +310,18 @@ export interface Workspace {
   updatedAt: string;
 }
 
+export interface WorkspaceAutomationConfig {
+  /** Auto-move backlog tasks to ready when planning completes. */
+  backlogToReady?: boolean;
+  /** Auto-move ready tasks to executing via queue manager. */
+  readyToExecuting?: boolean;
+}
+
+export interface WorkspaceAutomationSettings {
+  backlogToReady: boolean;
+  readyToExecuting: boolean;
+}
+
 export interface WorkspaceConfig {
   // Task file locations
   taskLocations: string[]; // directory paths
@@ -325,9 +337,24 @@ export interface WorkspaceConfig {
     branchPrefix: string;
   };
 
-  // Queue processing (auto-pull from ready queue)
+  // Queue processing (legacy + runtime persistence for ready→executing auto flow)
   queueProcessing?: {
     enabled: boolean;
+  };
+
+  // Workflow automation settings (per-workspace)
+  workflowAutomation?: WorkspaceAutomationConfig;
+}
+
+export function getWorkspaceAutomationSettings(config: WorkspaceConfig): WorkspaceAutomationSettings {
+  const backlogToReady = config.workflowAutomation?.backlogToReady ?? false;
+  const readyToExecuting = config.workflowAutomation?.readyToExecuting
+    ?? config.queueProcessing?.enabled
+    ?? false;
+
+  return {
+    backlogToReady,
+    readyToExecuting,
   };
 }
 
@@ -456,6 +483,7 @@ export type ServerEvent =
   | { type: 'agent:execution_status'; taskId: string; status: AgentExecutionStatus }
   | { type: 'task:plan_generated'; taskId: string; plan: TaskPlan }
   | { type: 'queue:status'; status: QueueStatus }
+  | { type: 'workspace:automation_updated'; workspaceId: string; settings: WorkspaceAutomationSettings }
   // Planning agent events
   | PlanningEvent;
 

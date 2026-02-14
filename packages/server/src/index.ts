@@ -21,7 +21,7 @@ import type {
   ServerEvent,
   ClientEvent,
 } from '@pi-factory/shared';
-import { PHASES, DEFAULT_WIP_LIMITS } from '@pi-factory/shared';
+import { PHASES, DEFAULT_WIP_LIMITS, getWorkspaceAutomationSettings } from '@pi-factory/shared';
 
 
 import {
@@ -43,6 +43,7 @@ import {
   listWorkspaces,
   getTasksDir,
   deleteWorkspace,
+  updateWorkspaceConfig,
 } from './workspace-service.js';
 import {
   createTaskSeparator,
@@ -70,6 +71,15 @@ const __dirname = dirname(__filename);
 // Helpers
 // =============================================================================
 
+function buildAutomationResponse(
+  workspaceConfig: import('@pi-factory/shared').WorkspaceConfig,
+  queueStatus: import('@pi-factory/shared').QueueStatus,
+) {
+  return {
+    settings: getWorkspaceAutomationSettings(workspaceConfig),
+    queueStatus,
+  };
+}
 
 // =============================================================================
 // State
@@ -1756,6 +1766,105 @@ app.get('/api/workspaces/:workspaceId/executions', async (req, res) => {
 // =============================================================================
 // Queue Manager API
 // =============================================================================
+
+// Get workflow automation settings for a workspace
+app.get('/api/workspaces/:workspaceId/automation', async (req, res) => {
+  const workspace = await getWorkspaceById(req.params.workspaceId);
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return;
+  }
+
+  try {
+    const queueStatus = await getQueueStatus(workspace.id);
+    res.json(buildAutomationResponse(workspace.config, queueStatus));
+  } catch (err) {
+    logger.error('Failed to read workflow automation settings', err);
+    res.status(500).json({ error: 'Failed to read workflow automation settings' });
+  }
+});
+
+// Update workflow automation settings for a workspace
+app.patch('/api/workspaces/:workspaceId/automation', async (req, res) => {
+  const workspace = await getWorkspaceById(req.params.workspaceId);
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return;
+  }
+
+  const { backlogToReady, readyToExecuting } = req.body as {
+    backlogToReady?: unknown;
+    readyToExecuting?: unknown;
+  };
+
+  if (backlogToReady !== undefined && typeof backlogToReady !== 'boolean') {
+    res.status(400).json({ error: 'backlogToReady must be a boolean when provided' });
+    return;
+  }
+
+  if (readyToExecuting !== undefined && typeof readyToExecuting !== 'boolean') {
+    res.status(400).json({ error: 'readyToExecuting must be a boolean when provided' });
+    return;
+  }
+
+  if (backlogToReady === undefined && readyToExecuting === undefined) {
+    res.status(400).json({ error: 'At least one automation setting must be provided' });
+    return;
+  }
+
+  try {
+    const current = getWorkspaceAutomationSettings(workspace.config);
+    const next = {
+      backlogToReady: backlogToReady ?? current.backlogToReady,
+      readyToExecuting: readyToExecuting ?? current.readyToExecuting,
+    };
+
+    const updatedWorkspace = await updateWorkspaceConfig(workspace, {
+      workflowAutomation: next,
+      queueProcessing: { enabled: next.readyToExecuting },
+    });
+
+    let queueStatus = await getQueueStatus(updatedWorkspace.id);
+    if (readyToExecuting !== undefined) {
+      queueStatus = readyToExecuting
+        ? await startQueueProcessing(
+          updatedWorkspace.id,
+          (event) => broadcastToWorkspace(updatedWorkspace.id, event),
+        )
+        : await stopQueueProcessing(updatedWorkspace.id);
+
+      await createSystemEvent(
+        updatedWorkspace.id,
+        '',
+        'phase-change',
+        readyToExecuting ? 'Auto-execution enabled' : 'Auto-execution paused',
+      );
+    }
+
+    if (backlogToReady !== undefined) {
+      await createSystemEvent(
+        updatedWorkspace.id,
+        '',
+        'phase-change',
+        backlogToReady
+          ? 'Backlog auto-promotion enabled (planning completion → ready)'
+          : 'Backlog auto-promotion paused',
+      );
+    }
+
+    const settings = getWorkspaceAutomationSettings(updatedWorkspace.config);
+    broadcastToWorkspace(updatedWorkspace.id, {
+      type: 'workspace:automation_updated',
+      workspaceId: updatedWorkspace.id,
+      settings,
+    });
+
+    res.json({ settings, queueStatus });
+  } catch (err) {
+    logger.error('Failed to update workflow automation settings', err);
+    res.status(500).json({ error: 'Failed to update workflow automation settings' });
+  }
+});
 
 // Get queue status
 app.get('/api/workspaces/:workspaceId/queue/status', async (req, res) => {
