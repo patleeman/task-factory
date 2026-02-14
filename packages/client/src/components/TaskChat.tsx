@@ -583,6 +583,7 @@ export function TaskChat({
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const whiteboardSceneRef = useRef<WhiteboardSceneSnapshot | null>(null)
+  const dragDepthRef = useRef(0)
   const dictationStartedForCurrentPressRef = useRef(false)
 
   const {
@@ -735,6 +736,12 @@ export function TaskChat({
   // Determine if file upload is supported (either via custom callback or task-specific upload)
   const canUploadFiles = !!(onUploadFiles || (workspaceId && taskId && attachments))
 
+  useEffect(() => {
+    if (canUploadFiles) return
+    dragDepthRef.current = 0
+    setIsDragOver(false)
+  }, [canUploadFiles])
+
   const handleSend = async (modeOverride?: SendMode) => {
     stopDictation()
     const trimmed = input.trim()
@@ -790,25 +797,48 @@ export function TaskChat({
     })
   }, [onStop, isStopping])
 
-  const handleDragOver = (e: React.DragEvent) => {
+  const isFileDragEvent = (e: React.DragEvent): boolean => {
+    return Array.from(e.dataTransfer.types).includes('Files')
+  }
+
+  const handleDragEnter = (e: React.DragEvent) => {
+    if (!canUploadFiles || !isFileDragEvent(e)) return
     e.preventDefault()
     e.stopPropagation()
+    dragDepthRef.current += 1
     setIsDragOver(true)
   }
 
-  const handleDragLeave = (e: React.DragEvent) => {
+  const handleDragOver = (e: React.DragEvent) => {
+    if (!canUploadFiles || !isFileDragEvent(e)) return
     e.preventDefault()
     e.stopPropagation()
-    setIsDragOver(false)
+    if (!isDragOver) setIsDragOver(true)
+  }
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    if (!canUploadFiles) return
+    e.preventDefault()
+    e.stopPropagation()
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1)
+    if (dragDepthRef.current === 0) {
+      setIsDragOver(false)
+    }
   }
 
   const handleDrop = (e: React.DragEvent) => {
+    if (!canUploadFiles) return
+
+    dragDepthRef.current = 0
+    setIsDragOver(false)
+
+    if (e.dataTransfer.files.length === 0) {
+      return
+    }
+
     e.preventDefault()
     e.stopPropagation()
-    setIsDragOver(false)
-    if (e.dataTransfer.files.length > 0) {
-      addFiles(e.dataTransfer.files)
-    }
+    addFiles(e.dataTransfer.files)
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -871,18 +901,9 @@ export function TaskChat({
       {/* Messages */}
       <div
         ref={scrollRef}
-        className={`flex-1 overflow-y-auto min-h-0 relative ${isDragOver ? 'ring-2 ring-inset ring-blue-400 bg-blue-50/30' : ''}`}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
+        data-chat-message-history
+        className="flex-1 overflow-y-auto min-h-0 relative"
       >
-        {isDragOver && (
-          <div className="absolute inset-0 flex items-center justify-center bg-blue-50/80 z-10 pointer-events-none">
-            <div className="text-center">
-              <p className="text-sm text-blue-600 font-medium">Drop files to attach</p>
-            </div>
-          </div>
-        )}
         <div className="px-4 py-3 space-y-1 text-[14px] leading-relaxed">
           {taskEntries.length === 0 && !isAgentActive && !emptyState && (
             <div className="text-center py-16 text-slate-400">
@@ -1081,7 +1102,18 @@ export function TaskChat({
       {bottomSlot}
 
       {/* Input */}
-      <div className="shrink-0 border-t border-slate-200 bg-white">
+      <div
+        data-chat-composer-dropzone
+        className={`shrink-0 border-t transition-colors ${
+          isDragOver
+            ? 'border-blue-300 bg-blue-50/60'
+            : 'border-slate-200 bg-white'
+        }`}
+        onDragEnter={canUploadFiles ? handleDragEnter : undefined}
+        onDragOver={canUploadFiles ? handleDragOver : undefined}
+        onDragLeave={canUploadFiles ? handleDragLeave : undefined}
+        onDrop={canUploadFiles ? handleDrop : undefined}
+      >
         {(showSteerControls || showStopControl) && (
           <div className="flex items-center gap-1 px-3 pt-2 pb-0">
             {showSteerControls && (
@@ -1140,6 +1172,14 @@ export function TaskChat({
                 {sendMode === 'steer' ? 'interrupts after current tool' : 'queued for when agent finishes'}
               </span>
             )}
+          </div>
+        )}
+
+        {canUploadFiles && isDragOver && (
+          <div className="px-3 pt-2 pb-0">
+            <div className="rounded-md border border-dashed border-blue-400 bg-blue-50 px-3 py-1.5 text-center text-xs font-medium text-blue-700">
+              Drop files to attach
+            </div>
           </div>
         )}
 
