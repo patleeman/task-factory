@@ -459,15 +459,6 @@ interface PlanningSession {
   firstMessageSent: boolean;
   /** UUID for the current planning session (persisted in planning-session-id.txt) */
   sessionId: string;
-  /** Queue of pending sends — ensures only one followUp/prompt runs at a time */
-  sendQueue: Array<{
-    content: string;
-    images?: { type: 'image'; data: string; mimeType: string }[];
-    resolve: () => void;
-    reject: (err: Error) => void;
-  }>;
-  /** Whether a send is currently in-flight */
-  isSending: boolean;
 }
 
 const planningSessions = new Map<string, PlanningSession>();
@@ -504,8 +495,6 @@ async function getOrCreateSession(
     broadcast,
     firstMessageSent: false,
     sessionId: getOrCreateSessionId(workspaceId),
-    sendQueue: [],
-    isSending: false,
   };
 
   planningSessions.set(workspaceId, session);
@@ -995,7 +984,12 @@ async function sendToAgent(
         await session.piSession.prompt(fullPrompt, promptOpts);
         session.firstMessageSent = true;
       } else {
-        await session.piSession.followUp(turnContent, images && images.length > 0 ? images : undefined);
+        // Use prompt() — not followUp(). followUp() only queues a message for
+        // delivery during an active streaming turn. When the agent is idle,
+        // the queued message is never processed and the session hangs.
+        // prompt() starts a new turn, which is what we need here.
+        const promptOpts = images && images.length > 0 ? { images } : undefined;
+        await session.piSession.prompt(turnContent, promptOpts);
       }
 
       // Turn complete
@@ -1085,26 +1079,6 @@ async function sendToAgent(
 }
 
 /**
- * Process the send queue sequentially. Only one send runs at a time per session.
- */
-async function processSendQueue(session: PlanningSession): Promise<void> {
-  if (session.isSending) return; // Another call is already processing
-  session.isSending = true;
-
-  while (session.sendQueue.length > 0) {
-    const next = session.sendQueue.shift()!;
-    try {
-      await sendToAgent(session, next.content, session.workspaceId, session.broadcast, next.images);
-      next.resolve();
-    } catch (err) {
-      next.reject(err instanceof Error ? err : new Error(String(err)));
-    }
-  }
-
-  session.isSending = false;
-}
-
-/**
  * Send a user message to the planning agent and get a streaming response.
  */
 export async function sendPlanningMessage(
@@ -1128,11 +1102,8 @@ export async function sendPlanningMessage(
   persistMessages(workspaceId, session.messages);
   broadcast({ type: 'planning:message', workspaceId, message: userMsg });
 
-  // Enqueue the send and process sequentially
-  return new Promise<void>((resolve, reject) => {
-    session.sendQueue.push({ content, images, resolve, reject });
-    processSendQueue(session);
-  });
+  // Send to the agent with retry on failure
+  await sendToAgent(session, content, workspaceId, broadcast, images);
 }
 
 /**
