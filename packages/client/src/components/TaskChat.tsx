@@ -8,7 +8,15 @@ import remarkGfm from 'remark-gfm'
 import { api } from '../api'
 import { AppIcon } from './AppIcon'
 import { InlineWhiteboardPanel } from './InlineWhiteboardPanel'
-import { createWhiteboardAttachmentFilename, exportWhiteboardPngFile, hasWhiteboardContent, type WhiteboardSceneSnapshot } from './whiteboard'
+import {
+  clearStoredWhiteboardScene,
+  createWhiteboardAttachmentFilename,
+  exportWhiteboardPngFile,
+  hasWhiteboardContent,
+  loadStoredWhiteboardScene,
+  persistWhiteboardScene,
+  type WhiteboardSceneSnapshot,
+} from './whiteboard'
 
 const REMARK_PLUGINS = [remarkGfm]
 
@@ -64,6 +72,12 @@ const STOPPABLE_STATUSES = new Set<AgentExecutionStatus>([
 const TOOL_PREVIEW_LINES = 2
 const MAX_LINES = 100
 const MAX_PREVIEW_CHARS = 500
+const TASK_CHAT_WHITEBOARD_STORAGE_KEY_PREFIX = 'pi-factory:task-chat-whiteboard'
+
+function getTaskChatWhiteboardStorageKey(workspaceId?: string, taskId?: string): string | null {
+  if (!workspaceId || !taskId) return null
+  return `${TASK_CHAT_WHITEBOARD_STORAGE_KEY_PREFIX}:${workspaceId}:${taskId}`
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -585,6 +599,10 @@ export function TaskChat({
   const whiteboardSceneRef = useRef<WhiteboardSceneSnapshot | null>(null)
   const dragDepthRef = useRef(0)
   const dictationStartedForCurrentPressRef = useRef(false)
+  const whiteboardStorageKey = useMemo(
+    () => getTaskChatWhiteboardStorageKey(workspaceId, taskId),
+    [workspaceId, taskId],
+  )
 
   const {
     isSupported: isDictationSupported,
@@ -624,6 +642,23 @@ export function TaskChat({
   useEffect(() => {
     stopDictation()
   }, [taskId, stopDictation])
+
+  useEffect(() => {
+    setIsWhiteboardModalOpen(false)
+    setIsAttachingWhiteboard(false)
+    setWhiteboardError(null)
+
+    if (!whiteboardStorageKey) {
+      whiteboardSceneRef.current = null
+      setInitialWhiteboardScene(null)
+      return
+    }
+
+    const storedScene = loadStoredWhiteboardScene(whiteboardStorageKey)
+    const restoredScene = hasWhiteboardContent(storedScene) ? storedScene : null
+    whiteboardSceneRef.current = restoredScene
+    setInitialWhiteboardScene(restoredScene)
+  }, [whiteboardStorageKey])
 
   useEffect(() => {
     if (!isVoiceHotkeyPressed) {
@@ -708,7 +743,10 @@ export function TaskChat({
 
   const handleWhiteboardSceneChange = useCallback((scene: WhiteboardSceneSnapshot) => {
     whiteboardSceneRef.current = scene
-  }, [])
+    if (whiteboardStorageKey) {
+      persistWhiteboardScene(whiteboardStorageKey, scene)
+    }
+  }, [whiteboardStorageKey])
 
   const attachWhiteboardToPendingFiles = useCallback(async () => {
     const scene = whiteboardSceneRef.current
@@ -724,6 +762,9 @@ export function TaskChat({
       addFiles([sketchFile])
       whiteboardSceneRef.current = null
       setInitialWhiteboardScene(null)
+      if (whiteboardStorageKey) {
+        clearStoredWhiteboardScene(whiteboardStorageKey)
+      }
       setIsWhiteboardModalOpen(false)
     } catch (err) {
       console.error('Failed to export whiteboard image:', err)
@@ -731,7 +772,7 @@ export function TaskChat({
     } finally {
       setIsAttachingWhiteboard(false)
     }
-  }, [addFiles])
+  }, [addFiles, whiteboardStorageKey])
 
   // Determine if file upload is supported (either via custom callback or task-specific upload)
   const canUploadFiles = !!(onUploadFiles || (workspaceId && taskId && attachments))

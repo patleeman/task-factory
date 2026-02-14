@@ -5,7 +5,15 @@ import { PHASES, PHASE_DISPLAY_NAMES, getPromotePhase, getDemotePhase } from '@p
 import { AppIcon } from './AppIcon'
 import { MarkdownEditor } from './MarkdownEditor'
 import { InlineWhiteboardPanel } from './InlineWhiteboardPanel'
-import { createWhiteboardAttachmentFilename, exportWhiteboardPngFile, hasWhiteboardContent, type WhiteboardSceneSnapshot } from './whiteboard'
+import {
+  clearStoredWhiteboardScene,
+  createWhiteboardAttachmentFilename,
+  exportWhiteboardPngFile,
+  hasWhiteboardContent,
+  loadStoredWhiteboardScene,
+  persistWhiteboardScene,
+  type WhiteboardSceneSnapshot,
+} from './whiteboard'
 import type { PostExecutionSkill } from '../types/pi'
 import { ModelSelector } from './ModelSelector'
 import { ExecutionPipelineEditor } from './ExecutionPipelineEditor'
@@ -923,6 +931,13 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+const TASK_DETAIL_WHITEBOARD_STORAGE_KEY_PREFIX = 'pi-factory:task-detail-whiteboard'
+
+function getTaskDetailWhiteboardStorageKey(workspaceId: string, taskId: string): string | null {
+  if (!workspaceId || !taskId) return null
+  return `${TASK_DETAIL_WHITEBOARD_STORAGE_KEY_PREFIX}:${workspaceId}:${taskId}`
+}
+
 export function AttachmentsSection({ task, workspaceId, isEditing }: { task: Task; workspaceId: string; isEditing: boolean }) {
   const [isUploading, setIsUploading] = useState(false)
   const [isDragOver, setIsDragOver] = useState(false)
@@ -930,8 +945,13 @@ export function AttachmentsSection({ task, workspaceId, isEditing }: { task: Tas
   const [isWhiteboardModalOpen, setIsWhiteboardModalOpen] = useState(false)
   const [isAttachingWhiteboard, setIsAttachingWhiteboard] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const whiteboardSceneRef = useRef<WhiteboardSceneSnapshot | null>(null)
-  const [initialWhiteboardScene, setInitialWhiteboardScene] = useState<WhiteboardSceneSnapshot | null>(null)
+  const whiteboardStorageKey = getTaskDetailWhiteboardStorageKey(workspaceId, task.id)
+  const [initialWhiteboardScene, setInitialWhiteboardScene] = useState<WhiteboardSceneSnapshot | null>(() => {
+    if (!whiteboardStorageKey) return null
+    const loaded = loadStoredWhiteboardScene(whiteboardStorageKey)
+    return hasWhiteboardContent(loaded) ? loaded : null
+  })
+  const whiteboardSceneRef = useRef<WhiteboardSceneSnapshot | null>(initialWhiteboardScene)
   const attachments = task.frontmatter.attachments || []
 
   useEffect(() => {
@@ -939,6 +959,36 @@ export function AttachmentsSection({ task, workspaceId, isEditing }: { task: Tas
     setIsDragOver(false)
     setIsWhiteboardModalOpen(false)
   }, [isEditing])
+
+  useEffect(() => {
+    setIsWhiteboardModalOpen(false)
+    setIsAttachingWhiteboard(false)
+
+    if (!whiteboardStorageKey) {
+      whiteboardSceneRef.current = null
+      setInitialWhiteboardScene(null)
+      return
+    }
+
+    const storedScene = loadStoredWhiteboardScene(whiteboardStorageKey)
+    const restoredScene = hasWhiteboardContent(storedScene) ? storedScene : null
+    whiteboardSceneRef.current = restoredScene
+    setInitialWhiteboardScene(restoredScene)
+  }, [whiteboardStorageKey])
+
+  useEffect(() => {
+    if (!isEditing || !isWhiteboardModalOpen) return
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      setIsWhiteboardModalOpen(false)
+    }
+
+    window.addEventListener('keydown', handleEscape)
+    return () => {
+      window.removeEventListener('keydown', handleEscape)
+    }
+  }, [isEditing, isWhiteboardModalOpen])
 
   const handleUpload = useCallback(async (files: FileList | File[]) => {
     if (!isEditing) return
@@ -958,7 +1008,10 @@ export function AttachmentsSection({ task, workspaceId, isEditing }: { task: Tas
 
   const handleWhiteboardSceneChange = useCallback((scene: WhiteboardSceneSnapshot) => {
     whiteboardSceneRef.current = scene
-  }, [])
+    if (whiteboardStorageKey) {
+      persistWhiteboardScene(whiteboardStorageKey, scene)
+    }
+  }, [whiteboardStorageKey])
 
   const attachWhiteboard = useCallback(async () => {
     if (!isEditing) return
@@ -971,13 +1024,16 @@ export function AttachmentsSection({ task, workspaceId, isEditing }: { task: Tas
       await api.uploadAttachments(workspaceId, task.id, [file])
       whiteboardSceneRef.current = null
       setInitialWhiteboardScene(null)
+      if (whiteboardStorageKey) {
+        clearStoredWhiteboardScene(whiteboardStorageKey)
+      }
       setIsWhiteboardModalOpen(false)
     } catch (err) {
       console.error('Failed to attach whiteboard sketch:', err)
     } finally {
       setIsAttachingWhiteboard(false)
     }
-  }, [workspaceId, task.id, isEditing])
+  }, [workspaceId, task.id, isEditing, whiteboardStorageKey])
 
   const handleDelete = async (attachmentId: string) => {
     if (!isEditing) return
