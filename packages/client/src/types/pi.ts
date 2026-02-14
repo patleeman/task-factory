@@ -70,15 +70,22 @@ export interface SkillConfigField {
   };
 }
 
+export type SkillHook = 'pre' | 'post'
+export type SkillSource = 'starter' | 'user'
+
 export interface PostExecutionSkill {
   id: string;
   name: string;
   description: string;
   type: 'follow-up' | 'loop';
+  hooks: SkillHook[];
+  workflowId?: string;
+  pairedSkillId?: string;
   maxIterations: number;
   doneSignal: string;
   promptTemplate: string;
   path: string;
+  source: SkillSource;
   metadata: Record<string, string>;
   configSchema: SkillConfigField[];
 }

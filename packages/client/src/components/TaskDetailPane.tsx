@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { ArrowLeft, ArrowRight, Check, ChevronDown, ChevronRight, ExternalLink, Plus, RotateCcw, Trash2, X } from 'lucide-react'
-import type { Task, Phase, ModelConfig, ExecutionWrapper, PostExecutionSummary as PostExecutionSummaryType } from '@pi-factory/shared'
+import type { Task, Phase, ModelConfig, PostExecutionSummary as PostExecutionSummaryType } from '@pi-factory/shared'
 import { PHASES, PHASE_DISPLAY_NAMES, getPromotePhase, getDemotePhase } from '@pi-factory/shared'
 import { AppIcon } from './AppIcon'
 import { MarkdownEditor } from './MarkdownEditor'
@@ -47,14 +47,12 @@ export function TaskDetailPane({
     formatAcceptanceCriteriaForEditor(task.frontmatter.acceptanceCriteria)
   )
   const [availableSkills, setAvailableSkills] = useState<PostExecutionSkill[]>([])
-  const [availableWrappers, setAvailableWrappers] = useState<ExecutionWrapper[]>([])
   const [selectedPreSkillIds, setSelectedPreSkillIds] = useState<string[]>(
     task.frontmatter.preExecutionSkills || []
   )
   const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>(
     task.frontmatter.postExecutionSkills || []
   )
-  const [selectedWrapperId, setSelectedWrapperId] = useState<string>('')
   const [editedPlanningModelConfig, setEditedPlanningModelConfig] = useState<ModelConfig | undefined>(
     task.frontmatter.planningModelConfig
       ?? task.frontmatter.executionModelConfig
@@ -75,17 +73,12 @@ export function TaskDetailPane({
     moveError?.toLowerCase().includes('acceptance criteria') &&
     frontmatter.acceptanceCriteria.length === 0
 
-  // Fetch available skills and wrappers
+  // Fetch available execution skills
   useEffect(() => {
     fetch('/api/factory/skills')
       .then(r => r.json())
       .then(setAvailableSkills)
-      .catch(err => console.error('Failed to load post-execution skills:', err))
-
-    fetch('/api/wrappers')
-      .then(r => r.json())
-      .then(setAvailableWrappers)
-      .catch(err => console.error('Failed to load execution wrappers:', err))
+      .catch(err => console.error('Failed to load execution skills:', err))
   }, [])
 
   // Reset edit state when task changes
@@ -96,7 +89,6 @@ export function TaskDetailPane({
     setEditedCriteria(formatAcceptanceCriteriaForEditor(task.frontmatter.acceptanceCriteria))
     setSelectedPreSkillIds(task.frontmatter.preExecutionSkills || [])
     setSelectedSkillIds(task.frontmatter.postExecutionSkills || [])
-    setSelectedWrapperId('')
     setEditedPlanningModelConfig(
       task.frontmatter.planningModelConfig
         ?? task.frontmatter.executionModelConfig
@@ -113,6 +105,21 @@ export function TaskDetailPane({
 
   const handleSaveEdit = async () => {
     try {
+      const shouldSanitizeByHooks = availableSkills.length > 0
+      const skillById = new Map(availableSkills.map((skill) => [skill.id, skill]))
+      const sanitizedPreSkillIds = shouldSanitizeByHooks
+        ? selectedPreSkillIds.filter((skillId) => {
+            const skill = skillById.get(skillId)
+            return Boolean(skill && skill.hooks.includes('pre'))
+          })
+        : [...selectedPreSkillIds]
+      const sanitizedPostSkillIds = shouldSanitizeByHooks
+        ? selectedSkillIds.filter((skillId) => {
+            const skill = skillById.get(skillId)
+            return Boolean(skill && skill.hooks.includes('post'))
+          })
+        : [...selectedSkillIds]
+
       await fetch(`/api/workspaces/${workspaceId}/tasks/${task.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -123,8 +130,8 @@ export function TaskDetailPane({
             .split('\n')
             .map((s) => s.trim())
             .filter(Boolean),
-          preExecutionSkills: selectedPreSkillIds,
-          postExecutionSkills: selectedSkillIds,
+          preExecutionSkills: sanitizedPreSkillIds,
+          postExecutionSkills: sanitizedPostSkillIds,
           skillConfigs: Object.keys(editedSkillConfigs).length > 0 ? editedSkillConfigs : undefined,
           planningModelConfig: editedPlanningModelConfig,
           executionModelConfig: editedExecutionModelConfig,
@@ -262,9 +269,6 @@ export function TaskDetailPane({
           editedSkillConfigs={editedSkillConfigs}
           setEditedSkillConfigs={setEditedSkillConfigs}
           availableSkills={availableSkills}
-          availableWrappers={availableWrappers}
-          selectedWrapperId={selectedWrapperId}
-          setSelectedWrapperId={setSelectedWrapperId}
           missingAcceptanceCriteria={missingAcceptanceCriteria}
           isPlanGenerating={isPlanGenerating}
           onSaveEdit={handleSaveEdit}
@@ -279,7 +283,7 @@ export function TaskDetailPane({
 // Details Content — shared between tabbed and side-by-side layouts
 // =============================================================================
 
-function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditing, editedTitle, setEditedTitle, editedContent, setEditedContent, editedCriteria, setEditedCriteria, editedPlanningModelConfig, setEditedPlanningModelConfig, editedExecutionModelConfig, setEditedExecutionModelConfig, selectedPreSkillIds, setSelectedPreSkillIds, selectedSkillIds, setSelectedSkillIds, editedSkillConfigs, setEditedSkillConfigs, availableSkills, availableWrappers, selectedWrapperId, setSelectedWrapperId, missingAcceptanceCriteria, isPlanGenerating, onSaveEdit, onDelete }: any) {
+function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditing, editedTitle, setEditedTitle, editedContent, setEditedContent, editedCriteria, setEditedCriteria, editedPlanningModelConfig, setEditedPlanningModelConfig, editedExecutionModelConfig, setEditedExecutionModelConfig, selectedPreSkillIds, setSelectedPreSkillIds, selectedSkillIds, setSelectedSkillIds, editedSkillConfigs, setEditedSkillConfigs, availableSkills, missingAcceptanceCriteria, isPlanGenerating, onSaveEdit, onDelete }: any) {
   const isCompleted = frontmatter.phase === 'complete' || frontmatter.phase === 'archived'
   const hasSummary = Boolean(task.frontmatter.postExecutionSummary)
   const normalizedFrontmatterCriteria = normalizeAcceptanceCriteria(frontmatter.acceptanceCriteria)
@@ -444,7 +448,7 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
             />
             <div className="flex items-center gap-2 shrink-0">
               <button onClick={onSaveEdit} className="btn btn-primary text-xs py-1.5 px-3">Save Changes</button>
-              <button onClick={() => { setIsEditing(false); setEditedTitle(task.frontmatter.title); setEditedContent(task.content); setEditedCriteria(formatAcceptanceCriteriaForEditor(task.frontmatter.acceptanceCriteria)); setSelectedPreSkillIds(task.frontmatter.preExecutionSkills || []); setSelectedSkillIds(task.frontmatter.postExecutionSkills || []); setSelectedWrapperId(''); setEditedSkillConfigs(task.frontmatter.skillConfigs || {}); setEditedPlanningModelConfig(task.frontmatter.planningModelConfig ?? task.frontmatter.executionModelConfig ?? task.frontmatter.modelConfig); setEditedExecutionModelConfig(task.frontmatter.executionModelConfig ?? task.frontmatter.modelConfig) }} className="btn btn-secondary text-xs py-1.5 px-3">Discard</button>
+              <button onClick={() => { setIsEditing(false); setEditedTitle(task.frontmatter.title); setEditedContent(task.content); setEditedCriteria(formatAcceptanceCriteriaForEditor(task.frontmatter.acceptanceCriteria)); setSelectedPreSkillIds(task.frontmatter.preExecutionSkills || []); setSelectedSkillIds(task.frontmatter.postExecutionSkills || []); setEditedSkillConfigs(task.frontmatter.skillConfigs || {}); setEditedPlanningModelConfig(task.frontmatter.planningModelConfig ?? task.frontmatter.executionModelConfig ?? task.frontmatter.modelConfig); setEditedExecutionModelConfig(task.frontmatter.executionModelConfig ?? task.frontmatter.modelConfig) }} className="btn btn-secondary text-xs py-1.5 px-3">Discard</button>
             </div>
           </div>
         ) : (
@@ -492,16 +496,13 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
       {isEditing && (
         <div>
           <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Execution Pipeline</h3>
-          <p className="text-xs text-slate-400 mb-2">Add skills or wrappers, then drag cards to pre/post lanes to control execution order.</p>
+          <p className="text-xs text-slate-400 mb-2">Add skills, then drag cards to pre/post lanes to control execution order.</p>
           <ExecutionPipelineEditor
             availableSkills={availableSkills}
-            availableWrappers={availableWrappers}
             selectedPreSkillIds={selectedPreSkillIds}
             selectedSkillIds={selectedSkillIds}
-            selectedWrapperId={selectedWrapperId}
             onPreSkillsChange={setSelectedPreSkillIds}
             onPostSkillsChange={setSelectedSkillIds}
-            onWrapperChange={setSelectedWrapperId}
             skillConfigs={editedSkillConfigs}
             onSkillConfigChange={setEditedSkillConfigs}
           />

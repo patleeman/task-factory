@@ -7,6 +7,7 @@ import {
   type CreateTaskRequest,
   type ModelConfig,
   type TaskDefaults,
+  type SkillHook,
 } from '@pi-factory/shared';
 import {
   loadPiFactorySettings,
@@ -18,6 +19,11 @@ export interface AvailableModelForDefaults {
   provider: string;
   id: string;
   reasoning: boolean;
+}
+
+export interface AvailableSkillForDefaults {
+  id: string;
+  hooks: SkillHook[];
 }
 
 export const ALLOWED_THINKING_LEVELS: ReadonlyArray<NonNullable<ModelConfig['thinkingLevel']>> = [
@@ -573,7 +579,7 @@ export function parseTaskDefaultsPayload(raw: unknown): { ok: true; value: TaskD
 export function validateTaskDefaults(
   defaults: TaskDefaults,
   availableModels: AvailableModelForDefaults[],
-  availableSkillIds: string[],
+  availableSkills: AvailableSkillForDefaults[],
 ): { ok: true } | { ok: false; error: string } {
   const planningValidation = validateModelConfig(defaults.planningModelConfig, availableModels, 'Planning');
   if (!planningValidation.ok) {
@@ -586,9 +592,12 @@ export function validateTaskDefaults(
     return executionValidation;
   }
 
-  const validSkillIds = new Set(availableSkillIds);
+  const skillById = new Map<string, AvailableSkillForDefaults>();
+  for (const skill of availableSkills) {
+    skillById.set(skill.id, skill);
+  }
 
-  const unknownPreSkills = defaults.preExecutionSkills.filter((skillId) => !validSkillIds.has(skillId));
+  const unknownPreSkills = defaults.preExecutionSkills.filter((skillId) => !skillById.has(skillId));
   if (unknownPreSkills.length > 0) {
     return {
       ok: false,
@@ -596,11 +605,33 @@ export function validateTaskDefaults(
     };
   }
 
-  const unknownPostSkills = defaults.postExecutionSkills.filter((skillId) => !validSkillIds.has(skillId));
+  const unknownPostSkills = defaults.postExecutionSkills.filter((skillId) => !skillById.has(skillId));
   if (unknownPostSkills.length > 0) {
     return {
       ok: false,
       error: `Unknown post-execution skills: ${unknownPostSkills.join(', ')}`,
+    };
+  }
+
+  const incompatiblePreSkills = defaults.preExecutionSkills.filter((skillId) => {
+    const skill = skillById.get(skillId);
+    return skill ? !skill.hooks.includes('pre') : false;
+  });
+  if (incompatiblePreSkills.length > 0) {
+    return {
+      ok: false,
+      error: `Pre-execution skills do not support pre hook: ${incompatiblePreSkills.join(', ')}`,
+    };
+  }
+
+  const incompatiblePostSkills = defaults.postExecutionSkills.filter((skillId) => {
+    const skill = skillById.get(skillId);
+    return skill ? !skill.hooks.includes('post') : false;
+  });
+  if (incompatiblePostSkills.length > 0) {
+    return {
+      ok: false,
+      error: `Post-execution skills do not support post hook: ${incompatiblePostSkills.join(', ')}`,
     };
   }
 

@@ -1,20 +1,26 @@
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { join } from 'path';
+import { homedir } from 'os';
 import YAML from 'yaml';
-import type { SkillConfigField } from '@pi-factory/shared';
+import type { SkillConfigField, SkillHook } from '@pi-factory/shared';
 
-const RESERVED_METADATA_KEYS = new Set(['type', 'max-iterations', 'done-signal']);
+const RESERVED_METADATA_KEYS = new Set(['type', 'hooks', 'max-iterations', 'done-signal', 'workflow-id', 'pairs-with']);
 const SKILL_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const CONFIG_FIELD_KEY_PATTERN = /^[a-zA-Z0-9_-]+$/;
 const ALLOWED_CONFIG_TYPES = new Set<SkillConfigField['type']>(['string', 'number', 'boolean', 'select']);
 
 const DEFAULT_DONE_SIGNAL = 'HOOK_DONE';
+const DEFAULT_SKILL_HOOKS: SkillHook[] = ['pre', 'post'];
+const SKILL_HOOK_SET = new Set<SkillHook>(DEFAULT_SKILL_HOOKS);
+const DEFAULT_FACTORY_SKILLS_DIR = join(homedir(), '.pi', 'factory', 'skills');
 
 interface NormalizedSkillDefinition {
   id: string;
   description: string;
   type: 'follow-up' | 'loop';
+  hooks: SkillHook[];
+  workflowId?: string;
+  pairedSkillId?: string;
   maxIterations: number;
   doneSignal: string;
   promptTemplate: string;
@@ -26,41 +32,23 @@ interface SkillStorageOptions {
   skillsDir?: string;
 }
 
-function findSkillsDir(): string | null {
-  const __filename = fileURLToPath(import.meta.url);
-  let dir = dirname(__filename);
+export function getFactoryUserSkillsDir(): string {
+  return DEFAULT_FACTORY_SKILLS_DIR;
+}
 
-  for (let i = 0; i < 10; i += 1) {
-    const candidate = join(dir, 'skills');
-    if (existsSync(candidate)) {
-      return candidate;
-    }
-
-    const parent = dirname(dir);
-    if (parent === dir) {
-      break;
-    }
-
-    dir = parent;
+function ensureDirExists(dir: string): string {
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
   }
-
-  return null;
+  return dir;
 }
 
 function resolveSkillsDir(options?: SkillStorageOptions): string {
   if (options?.skillsDir) {
-    if (!existsSync(options.skillsDir)) {
-      mkdirSync(options.skillsDir, { recursive: true });
-    }
-    return options.skillsDir;
+    return ensureDirExists(options.skillsDir);
   }
 
-  const skillsDir = findSkillsDir();
-  if (!skillsDir) {
-    throw new Error('Unable to locate the skills directory');
-  }
-
-  return skillsDir;
+  return ensureDirExists(getFactoryUserSkillsDir());
 }
 
 function normalizeSkillId(raw: unknown): string {
@@ -279,6 +267,43 @@ function parseType(raw: unknown): 'follow-up' | 'loop' {
   throw new Error('type must be either "follow-up" or "loop"');
 }
 
+function parseHooks(raw: unknown, fieldName = 'hooks'): SkillHook[] {
+  if (raw === undefined || raw === null || raw === '') {
+    return [...DEFAULT_SKILL_HOOKS];
+  }
+
+  const rawValues = Array.isArray(raw)
+    ? raw.map((value) => String(value).trim().toLowerCase()).filter(Boolean)
+    : String(raw)
+      .split(/[\s,]+/)
+      .map((value) => value.trim().toLowerCase())
+      .filter(Boolean);
+
+  if (rawValues.length === 0) {
+    throw new Error(`${fieldName} must include at least one of: pre, post`);
+  }
+
+  const invalid = rawValues.filter((value) => !SKILL_HOOK_SET.has(value as SkillHook));
+  if (invalid.length > 0) {
+    throw new Error(`${fieldName} contains unsupported hook(s): ${invalid.join(', ')}`);
+  }
+
+  return Array.from(new Set(rawValues as SkillHook[]));
+}
+
+function parseOptionalText(raw: unknown): string | undefined {
+  if (typeof raw !== 'string') return undefined;
+  const value = raw.trim();
+  return value.length > 0 ? value : undefined;
+}
+
+function parseOptionalPairedSkillId(raw: unknown): string | undefined {
+  const normalized = normalizeSkillId(raw);
+  if (!normalized) return undefined;
+  assertValidSkillId(normalized);
+  return normalized;
+}
+
 function normalizePromptTemplate(raw: unknown): string {
   if (typeof raw !== 'string' || raw.trim().length === 0) {
     throw new Error('promptTemplate is required');
@@ -316,6 +341,11 @@ function normalizeSkillDefinition(raw: unknown): NormalizedSkillDefinition {
     ? doneSignalRaw.trim()
     : DEFAULT_DONE_SIGNAL;
 
+  const metadataRaw = normalizeStringRecord(payload.metadata);
+  const hooks = parseHooks(payload.hooks ?? metadataRaw.hooks, 'hooks');
+  const workflowId = parseOptionalText(payload.workflowId ?? metadataRaw['workflow-id']);
+  const pairedSkillId = parseOptionalPairedSkillId(payload.pairedSkillId ?? metadataRaw['pairs-with']);
+
   const configSchema = normalizeConfigSchema(payload.configSchema);
   const metadata = normalizeMetadata(payload.metadata);
 
@@ -323,6 +353,9 @@ function normalizeSkillDefinition(raw: unknown): NormalizedSkillDefinition {
     id,
     description,
     type,
+    hooks,
+    workflowId,
+    pairedSkillId,
     maxIterations,
     doneSignal,
     promptTemplate,
@@ -359,6 +392,9 @@ export function parseImportedSkillMarkdown(content: string): NormalizedSkillDefi
   const metadataRaw = normalizeStringRecord(parsed.metadata);
 
   const type = metadataRaw.type === 'loop' ? 'loop' : 'follow-up';
+  const hooks = parseHooks(metadataRaw.hooks, 'metadata.hooks');
+  const workflowId = parseOptionalText(metadataRaw['workflow-id']);
+  const pairedSkillId = parseOptionalPairedSkillId(metadataRaw['pairs-with']);
   const maxIterations = parsePositiveInteger(metadataRaw['max-iterations'], 'metadata.max-iterations', 1);
 
   const doneSignal = metadataRaw['done-signal']
@@ -374,6 +410,9 @@ export function parseImportedSkillMarkdown(content: string): NormalizedSkillDefi
     id,
     description,
     type,
+    hooks,
+    workflowId,
+    pairedSkillId,
     maxIterations,
     doneSignal,
     promptTemplate,
@@ -386,7 +425,16 @@ export function buildSkillMarkdown(definition: NormalizedSkillDefinition): strin
   const metadata: Record<string, string> = {
     ...definition.metadata,
     type: definition.type,
+    hooks: definition.hooks.join(','),
   };
+
+  if (definition.workflowId) {
+    metadata['workflow-id'] = definition.workflowId;
+  }
+
+  if (definition.pairedSkillId) {
+    metadata['pairs-with'] = definition.pairedSkillId;
+  }
 
   if (definition.type === 'loop') {
     metadata['max-iterations'] = String(definition.maxIterations);

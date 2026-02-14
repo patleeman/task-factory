@@ -1,6 +1,0 @@
-name: TDD Workflow
-description: Write tests first before execution, then verify all added tests pass after execution
-preExecutionSkills:
-  - tdd-test-first
-postExecutionSkills:
-  - tdd-verify-tests

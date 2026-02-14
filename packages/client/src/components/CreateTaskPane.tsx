@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react'
 import { ArrowLeft, X } from 'lucide-react'
-import type { ModelConfig, NewTaskFormState, TaskDefaults, ExecutionWrapper } from '@pi-factory/shared'
+import type { ModelConfig, NewTaskFormState, TaskDefaults } from '@pi-factory/shared'
 import { DEFAULT_PRE_EXECUTION_SKILLS, DEFAULT_POST_EXECUTION_SKILLS } from '@pi-factory/shared'
 import { AppIcon } from './AppIcon'
 import { MarkdownEditor } from './MarkdownEditor'
@@ -77,8 +77,6 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
       ?? initialDraft.executionModelConfig
       ?? initialDraft.modelConfig) as ModelConfig | undefined
   )
-  const [availableWrappers, setAvailableWrappers] = useState<ExecutionWrapper[]>([])
-  const [selectedWrapperId, setSelectedWrapperId] = useState<string>('')
   const [taskDefaults, setTaskDefaults] = useState<TaskDefaults>({
     planningModelConfig: undefined,
     executionModelConfig: undefined,
@@ -106,10 +104,6 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
       .then(setAvailableSkills)
       .catch(err => console.error('Failed to load skills:', err))
 
-    fetch('/api/wrappers')
-      .then(r => r.json())
-      .then(setAvailableWrappers)
-      .catch(err => console.error('Failed to load execution wrappers:', err))
   }, [])
 
   useEffect(() => {
@@ -172,10 +166,6 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
   useEffect(() => {
     if (!agentFormUpdates) return
 
-    const hasPipelineUpdate =
-      agentFormUpdates.selectedSkillIds !== undefined ||
-      agentFormUpdates.selectedPreSkillIds !== undefined
-
     if (agentFormUpdates.content !== undefined) setContent(agentFormUpdates.content)
     if (agentFormUpdates.selectedSkillIds !== undefined) setSelectedSkillIds(agentFormUpdates.selectedSkillIds)
     if (agentFormUpdates.selectedPreSkillIds !== undefined) setSelectedPreSkillIds(agentFormUpdates.selectedPreSkillIds)
@@ -188,7 +178,6 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
       // Legacy update path from older agent extensions.
       setExecutionModelConfig(agentFormUpdates.modelConfig)
     }
-    if (hasPipelineUpdate) setSelectedWrapperId('')
   }, [agentFormUpdates])
 
   // Apply one-shot prefill payloads (e.g. opening from inline draft-task cards)
@@ -199,9 +188,6 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
     appliedPrefillIdRef.current = prefillRequest.id
 
     const updates = prefillRequest.formState
-    const hasPipelineUpdate =
-      updates.selectedSkillIds !== undefined ||
-      updates.selectedPreSkillIds !== undefined
 
     if (updates.content !== undefined) setContent(updates.content)
     if (updates.selectedSkillIds !== undefined) setSelectedSkillIds(updates.selectedSkillIds)
@@ -212,8 +198,6 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
     } else if (updates.modelConfig !== undefined) {
       setExecutionModelConfig(updates.modelConfig)
     }
-
-    if (hasPipelineUpdate) setSelectedWrapperId('')
   }, [prefillRequest])
 
   // Measure container width to decide side-by-side vs stacked layout
@@ -263,7 +247,6 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
     setSkillConfigs({})
     setPlanningModelConfig(formDefaults.planningModelConfig)
     setExecutionModelConfig(formDefaults.executionModelConfig)
-    setSelectedWrapperId('')
     setPendingFiles([])
     setIsWhiteboardModalOpen(false)
     whiteboardSceneRef.current = null
@@ -343,10 +326,25 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
       // Only include skillConfigs if there are actual overrides
       const hasSkillConfigs = Object.keys(skillConfigs).length > 0
 
+      const shouldSanitizeByHooks = availableSkills.length > 0
+      const skillById = new Map(availableSkills.map((skill) => [skill.id, skill]))
+      const sanitizedPreSkillIds = shouldSanitizeByHooks
+        ? selectedPreSkillIds.filter((skillId) => {
+            const skill = skillById.get(skillId)
+            return Boolean(skill && skill.hooks.includes('pre'))
+          })
+        : [...selectedPreSkillIds]
+      const sanitizedPostSkillIds = shouldSanitizeByHooks
+        ? selectedSkillIds.filter((skillId) => {
+            const skill = skillById.get(skillId)
+            return Boolean(skill && skill.hooks.includes('post'))
+          })
+        : [...selectedSkillIds]
+
       await onSubmit({
         content,
-        preExecutionSkills: selectedPreSkillIds,
-        postExecutionSkills: selectedSkillIds,
+        preExecutionSkills: sanitizedPreSkillIds,
+        postExecutionSkills: sanitizedPostSkillIds,
         skillConfigs: hasSkillConfigs ? skillConfigs : undefined,
         planningModelConfig,
         executionModelConfig,
@@ -500,17 +498,14 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
         Execution Pipeline
       </label>
       <p className="text-xs text-slate-400 mb-2">
-        Add skills or wrappers, then drag cards to pre/post lanes to control execution order.
+        Add skills, then drag cards to pre/post lanes to control execution order.
       </p>
       <ExecutionPipelineEditor
         availableSkills={availableSkills}
-        availableWrappers={availableWrappers}
         selectedPreSkillIds={selectedPreSkillIds}
         selectedSkillIds={selectedSkillIds}
-        selectedWrapperId={selectedWrapperId}
         onPreSkillsChange={setSelectedPreSkillIds}
         onPostSkillsChange={setSelectedSkillIds}
-        onWrapperChange={setSelectedWrapperId}
         skillConfigs={skillConfigs}
         onSkillConfigChange={setSkillConfigs}
       />

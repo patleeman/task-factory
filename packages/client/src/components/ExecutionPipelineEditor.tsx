@@ -1,6 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { GripVertical, Settings2, X } from 'lucide-react'
-import type { ExecutionWrapper } from '@pi-factory/shared'
 import type { PostExecutionSkill } from '../types/pi'
 import { AppIcon } from './AppIcon'
 import {
@@ -17,13 +16,10 @@ type Lane = 'pre' | 'post'
 
 interface ExecutionPipelineEditorProps {
   availableSkills: PostExecutionSkill[]
-  availableWrappers: ExecutionWrapper[]
   selectedPreSkillIds: string[]
   selectedSkillIds: string[]
-  selectedWrapperId: string
   onPreSkillsChange: (skillIds: string[]) => void
   onPostSkillsChange: (skillIds: string[]) => void
-  onWrapperChange: (wrapperId: string) => void
   skillConfigs?: Record<string, Record<string, string>>
   onSkillConfigChange?: (skillConfigs: Record<string, Record<string, string>>) => void
   showSkillConfigControls?: boolean
@@ -40,21 +36,24 @@ interface DropTarget {
 
 const DRAG_MIME = 'application/pi-factory-execution-pipeline-skill'
 
-function dedupeSkillIds(skillIds: string[]): string[] {
-  return Array.from(new Set(skillIds))
+function supportsHook(skill: PostExecutionSkill, lane: Lane): boolean {
+  if (!Array.isArray(skill.hooks) || skill.hooks.length === 0) {
+    return true
+  }
+  return skill.hooks.includes(lane)
 }
 
-function parseSelection(selection: string): { type: 'skill' | 'wrapper'; id: string } | null {
+function parseSelection(selection: string): { lane: Lane; skillId: string } | null {
   const separatorIndex = selection.indexOf(':')
   if (separatorIndex === -1) return null
 
-  const type = selection.slice(0, separatorIndex)
-  const id = selection.slice(separatorIndex + 1)
+  const lane = selection.slice(0, separatorIndex)
+  const skillId = selection.slice(separatorIndex + 1)
 
-  if (!id) return null
-  if (type !== 'skill' && type !== 'wrapper') return null
+  if (!skillId) return null
+  if (lane !== 'pre' && lane !== 'post') return null
 
-  return { type, id }
+  return { lane, skillId }
 }
 
 function parseDragPayload(raw: string): DragPayload | null {
@@ -73,13 +72,10 @@ function parseDragPayload(raw: string): DragPayload | null {
 
 export function ExecutionPipelineEditor({
   availableSkills,
-  availableWrappers,
   selectedPreSkillIds,
   selectedSkillIds,
-  selectedWrapperId,
   onPreSkillsChange,
   onPostSkillsChange,
-  onWrapperChange,
   skillConfigs = {},
   onSkillConfigChange,
   showSkillConfigControls = true,
@@ -88,11 +84,8 @@ export function ExecutionPipelineEditor({
   const [dragSource, setDragSource] = useState<DragPayload | null>(null)
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null)
   const [configSkillId, setConfigSkillId] = useState<string | null>(null)
-  const [preMarkerIndex, setPreMarkerIndex] = useState(0)
-  const [postMarkerIndex, setPostMarkerIndex] = useState(selectedSkillIds.length)
   const dragSourceRef = useRef<DragPayload | null>(null)
   const dragNodeRef = useRef<HTMLDivElement | null>(null)
-  const previousWrapperIdRef = useRef(selectedWrapperId)
 
   const skillById = useMemo(() => {
     const map = new Map<string, PostExecutionSkill>()
@@ -102,53 +95,34 @@ export function ExecutionPipelineEditor({
     return map
   }, [availableSkills])
 
-  const wrapperById = useMemo(() => {
-    const map = new Map<string, ExecutionWrapper>()
-    for (const wrapper of availableWrappers) {
-      map.set(wrapper.id, wrapper)
-    }
-    return map
-  }, [availableWrappers])
+  const selectedPreSkillSet = useMemo(() => {
+    return new Set(selectedPreSkillIds)
+  }, [selectedPreSkillIds])
 
-  const selectedWrapper = selectedWrapperId
-    ? wrapperById.get(selectedWrapperId) ?? null
-    : null
+  const selectedPostSkillSet = useMemo(() => {
+    return new Set(selectedSkillIds)
+  }, [selectedSkillIds])
 
-  const selectedSkillSet = useMemo(() => {
-    return new Set([...selectedPreSkillIds, ...selectedSkillIds])
-  }, [selectedPreSkillIds, selectedSkillIds])
+  const addablePreSkills = useMemo(() => {
+    return availableSkills.filter((skill) => !selectedPreSkillSet.has(skill.id) && supportsHook(skill, 'pre'))
+  }, [availableSkills, selectedPreSkillSet])
 
-  const addableSkills = useMemo(() => {
-    return availableSkills.filter((skill) => !selectedSkillSet.has(skill.id))
-  }, [availableSkills, selectedSkillSet])
+  const addablePostSkills = useMemo(() => {
+    return availableSkills.filter((skill) => !selectedPostSkillSet.has(skill.id) && supportsHook(skill, 'post'))
+  }, [availableSkills, selectedPostSkillSet])
 
   const configSkill = configSkillId
     ? skillById.get(configSkillId) ?? null
     : null
 
-  const hasWrapper = Boolean(selectedWrapper)
-
   useEffect(() => {
-    if (configSkillId && !selectedSkillIds.includes(configSkillId)) {
+    if (!configSkillId) return
+
+    const isStillSelected = selectedPreSkillIds.includes(configSkillId) || selectedSkillIds.includes(configSkillId)
+    if (!isStillSelected) {
       setConfigSkillId(null)
     }
-  }, [configSkillId, selectedSkillIds])
-
-  useEffect(() => {
-    const previousWrapperId = previousWrapperIdRef.current
-    if (selectedWrapperId && selectedWrapperId !== previousWrapperId) {
-      setPreMarkerIndex(0)
-      setPostMarkerIndex(selectedSkillIds.length)
-    }
-    previousWrapperIdRef.current = selectedWrapperId
-  }, [selectedSkillIds.length, selectedWrapperId])
-
-  useEffect(() => {
-    if (!hasWrapper) return
-
-    setPreMarkerIndex((previous) => clampIndex(previous, selectedPreSkillIds.length))
-    setPostMarkerIndex((previous) => clampIndex(previous, selectedSkillIds.length))
-  }, [hasWrapper, selectedPreSkillIds.length, selectedSkillIds.length])
+  }, [configSkillId, selectedPreSkillIds, selectedSkillIds])
 
   const resetDragState = useCallback(() => {
     if (dragNodeRef.current) {
@@ -162,28 +136,27 @@ export function ExecutionPipelineEditor({
 
   const getLaneTokens = useCallback((lane: Lane) => {
     if (lane === 'pre') {
-      return buildLaneTokens(selectedPreSkillIds, preMarkerIndex, hasWrapper)
+      return buildLaneTokens(selectedPreSkillIds)
     }
-    return buildLaneTokens(selectedSkillIds, postMarkerIndex, hasWrapper)
-  }, [hasWrapper, postMarkerIndex, preMarkerIndex, selectedPreSkillIds, selectedSkillIds])
+    return buildLaneTokens(selectedSkillIds)
+  }, [selectedPreSkillIds, selectedSkillIds])
 
   const applyLaneTokens = useCallback((lane: Lane, tokens: string[]) => {
-    const parsed = parseLaneTokens(tokens, hasWrapper)
+    const parsed = parseLaneTokens(tokens)
 
     if (lane === 'pre') {
       onPreSkillsChange(parsed.skillIds)
-      if (hasWrapper) {
-        setPreMarkerIndex(parsed.markerIndex)
-      }
     } else {
       onPostSkillsChange(parsed.skillIds)
-      if (hasWrapper) {
-        setPostMarkerIndex(parsed.markerIndex)
-      }
     }
-  }, [hasWrapper, onPostSkillsChange, onPreSkillsChange])
+  }, [onPostSkillsChange, onPreSkillsChange])
 
   const moveSkill = useCallback((payload: DragPayload, toLane: Lane, toDisplayIndex: number) => {
+    const skill = skillById.get(payload.skillId)
+    if (skill && !supportsHook(skill, toLane)) {
+      return
+    }
+
     if (payload.fromLane === toLane) {
       const laneTokens = getLaneTokens(toLane)
       const sourceDisplayIndex = findDisplayIndexForSkill(laneTokens, payload)
@@ -217,7 +190,7 @@ export function ExecutionPipelineEditor({
 
     applyLaneTokens(payload.fromLane, sourceAfterRemoval)
     applyLaneTokens(toLane, targetAfterInsert)
-  }, [applyLaneTokens, getLaneTokens])
+  }, [applyLaneTokens, getLaneTokens, skillById])
 
   const readDragPayload = useCallback((e: React.DragEvent): DragPayload | null => {
     const raw = e.dataTransfer.getData(DRAG_MIME)
@@ -300,27 +273,37 @@ export function ExecutionPipelineEditor({
     const parsed = parseSelection(selection)
     if (!parsed) return
 
-    if (parsed.type === 'skill') {
-      if (!selectedSkillSet.has(parsed.id)) {
-        onPostSkillsChange([...selectedSkillIds, parsed.id])
-      }
+    const alreadySelected = parsed.lane === 'pre'
+      ? selectedPreSkillSet.has(parsed.skillId)
+      : selectedPostSkillSet.has(parsed.skillId)
+
+    if (alreadySelected) {
       setSelection('')
       return
     }
 
-    const wrapper = wrapperById.get(parsed.id)
-    if (!wrapper) return
+    const skill = skillById.get(parsed.skillId)
+    if (!skill || !supportsHook(skill, parsed.lane)) {
+      return
+    }
 
-    const nextPreSkills = dedupeSkillIds(wrapper.preExecutionSkills)
-    const nextPostSkills = dedupeSkillIds(wrapper.postExecutionSkills)
+    if (parsed.lane === 'pre') {
+      onPreSkillsChange([...selectedPreSkillIds, parsed.skillId])
+    } else {
+      onPostSkillsChange([...selectedSkillIds, parsed.skillId])
+    }
 
-    onWrapperChange(wrapper.id)
-    onPreSkillsChange(nextPreSkills)
-    onPostSkillsChange(nextPostSkills)
-    setPreMarkerIndex(0)
-    setPostMarkerIndex(nextPostSkills.length)
     setSelection('')
-  }, [onPostSkillsChange, onPreSkillsChange, onWrapperChange, selection, selectedSkillIds, selectedSkillSet, wrapperById])
+  }, [
+    onPostSkillsChange,
+    onPreSkillsChange,
+    selectedPreSkillIds,
+    selectedPreSkillSet,
+    selectedSkillIds,
+    selectedPostSkillSet,
+    selection,
+    skillById,
+  ])
 
   const handleConfigSave = useCallback((values: Record<string, string>) => {
     if (!configSkillId || !onSkillConfigChange) return
@@ -354,10 +337,8 @@ export function ExecutionPipelineEditor({
 
   const renderSkillCard = (lane: Lane, skillId: string, skillIndex: number, displayIndex: number) => {
     const skill = skillById.get(skillId)
-    const isPostLane = lane === 'post'
     const hasConfig = Boolean(
       showSkillConfigControls
-      && isPostLane
       && onSkillConfigChange
       && skill
       && skill.configSchema.length > 0,
@@ -371,6 +352,8 @@ export function ExecutionPipelineEditor({
       fromSkillIndex: skillIndex,
       fromDisplayIndex: displayIndex,
     }
+
+    const hookMismatch = Boolean(skill && !supportsHook(skill, lane))
 
     return (
       <div
@@ -408,7 +391,9 @@ export function ExecutionPipelineEditor({
             {skill?.name ?? skillId}
           </div>
           <div className="text-xs text-slate-500 truncate">
-            {skill?.description ?? 'Skill is not available in this workspace'}
+            {hookMismatch
+              ? 'Skill does not support this hook'
+              : (skill?.description ?? 'Skill is not available in this workspace')}
           </div>
         </div>
 
@@ -451,47 +436,9 @@ export function ExecutionPipelineEditor({
     )
   }
 
-  const renderWrapperMarker = (lane: Lane, displayIndex: number) => {
-    if (!selectedWrapper) return null
-
-    const isPreLane = lane === 'pre'
-    return (
-      <div
-        key={`${lane}-wrapper-marker`}
-        onDragOver={(e) => handleCardDragOver(e, lane, displayIndex)}
-        onDrop={(e) => handleCardDrop(e, lane, displayIndex)}
-        className="flex items-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2"
-      >
-        <div className="min-w-0 flex-1">
-          <div className="text-xs font-semibold text-violet-700">
-            {isPreLane ? 'Wrapper Start' : 'Wrapper End'} · {selectedWrapper.name}
-          </div>
-          {isPreLane && (
-            <div className="text-[11px] text-violet-600 truncate">
-              {selectedWrapper.description}
-            </div>
-          )}
-        </div>
-
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation()
-            onWrapperChange('')
-          }}
-          className="text-[11px] text-violet-500 hover:text-violet-700"
-          title="Remove wrapper markers"
-        >
-          Remove
-        </button>
-      </div>
-    )
-  }
-
   const renderLane = (lane: Lane) => {
     const skillIds = lane === 'pre' ? selectedPreSkillIds : selectedSkillIds
-    const markerIndex = lane === 'pre' ? preMarkerIndex : postMarkerIndex
-    const items = buildLaneItems(skillIds, markerIndex, hasWrapper)
+    const items = buildLaneItems(skillIds)
 
     return (
       <div className="rounded-xl border border-slate-200 bg-white p-3">
@@ -518,11 +465,9 @@ export function ExecutionPipelineEditor({
           {items.length > 0 && (
             <div className="space-y-1">
               {items.map((item, displayIndex) => (
-                <Fragment key={`${lane}-${item.type === 'marker' ? `marker-${displayIndex}` : `${item.skillId}-${displayIndex}`}`}>
+                <Fragment key={`${lane}-${item.skillId}-${displayIndex}`}>
                   {renderDropSlot(lane, displayIndex)}
-                  {item.type === 'marker'
-                    ? renderWrapperMarker(lane, displayIndex)
-                    : renderSkillCard(lane, item.skillId, item.skillIndex, displayIndex)}
+                  {renderSkillCard(lane, item.skillId, item.skillIndex, displayIndex)}
                 </Fragment>
               ))}
               {renderDropSlot(lane, items.length)}
@@ -537,24 +482,17 @@ export function ExecutionPipelineEditor({
     const parsed = parseSelection(selection)
     if (!parsed) return false
 
-    if (parsed.type === 'skill') {
-      return skillById.has(parsed.id) && !selectedSkillSet.has(parsed.id)
-    }
+    const alreadySelected = parsed.lane === 'pre'
+      ? selectedPreSkillSet.has(parsed.skillId)
+      : selectedPostSkillSet.has(parsed.skillId)
 
-    return wrapperById.has(parsed.id)
-  }, [selection, selectedSkillSet, skillById, wrapperById])
+    if (alreadySelected) return false
 
-  const executionCore = (
-    <div className="space-y-3">
-      {renderLane('pre')}
+    const skill = skillById.get(parsed.skillId)
+    if (!skill) return false
 
-      <div className="rounded-xl border-2 border-dashed border-slate-300 bg-white px-3 py-6 text-center text-sm font-medium text-slate-500">
-        Task Execution
-      </div>
-
-      {renderLane('post')}
-    </div>
-  )
+    return supportsHook(skill, parsed.lane)
+  }, [selection, selectedPreSkillSet, selectedPostSkillSet, skillById])
 
   return (
     <div className="min-w-0 rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-3">
@@ -564,21 +502,21 @@ export function ExecutionPipelineEditor({
           onChange={(e) => setSelection(e.target.value)}
           className="min-w-0 flex-1 basis-56 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
         >
-          <option value="">Select a skill or execution wrapper…</option>
-          {addableSkills.length > 0 && (
-            <optgroup label="Skills">
-              {addableSkills.map((skill) => (
-                <option key={skill.id} value={`skill:${skill.id}`}>
+          <option value="">Select a skill…</option>
+          {addablePreSkills.length > 0 && (
+            <optgroup label="Add to pre-execution">
+              {addablePreSkills.map((skill) => (
+                <option key={`pre-${skill.id}`} value={`pre:${skill.id}`}>
                   {skill.name}
                 </option>
               ))}
             </optgroup>
           )}
-          {availableWrappers.length > 0 && (
-            <optgroup label="Execution Wrappers">
-              {availableWrappers.map((wrapper) => (
-                <option key={wrapper.id} value={`wrapper:${wrapper.id}`}>
-                  {wrapper.name}
+          {addablePostSkills.length > 0 && (
+            <optgroup label="Add to post-execution">
+              {addablePostSkills.map((skill) => (
+                <option key={`post-${skill.id}`} value={`post:${skill.id}`}>
+                  {skill.name}
                 </option>
               ))}
             </optgroup>
@@ -596,13 +534,21 @@ export function ExecutionPipelineEditor({
         </button>
       </div>
 
-      {(availableSkills.length === 0 && availableWrappers.length === 0) && (
+      {availableSkills.length === 0 && (
         <p className="text-xs text-slate-400">
-          No skills or wrappers are available in this workspace yet.
+          No skills are available in this workspace yet.
         </p>
       )}
 
-      {executionCore}
+      <div className="space-y-3">
+        {renderLane('pre')}
+
+        <div className="rounded-xl border-2 border-dashed border-slate-300 bg-white px-3 py-6 text-center text-sm font-medium text-slate-500">
+          Task Execution
+        </div>
+
+        {renderLane('post')}
+      </div>
 
       {configSkill && showSkillConfigControls && onSkillConfigChange && (
         <SkillConfigModal

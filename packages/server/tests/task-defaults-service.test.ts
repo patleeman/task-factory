@@ -13,7 +13,12 @@ const AVAILABLE_MODELS = [
   { provider: 'openai', id: 'gpt-4o', reasoning: false },
 ];
 
-const AVAILABLE_SKILLS = ['checkpoint', 'code-review', 'security-review'];
+const AVAILABLE_SKILLS: Array<{ id: string; hooks: Array<'pre' | 'post'> }> = [
+  { id: 'checkpoint', hooks: ['post'] },
+  { id: 'code-review', hooks: ['post'] },
+  { id: 'security-review', hooks: ['post'] },
+  { id: 'tdd-test-first', hooks: ['pre'] },
+];
 
 describe('validateTaskDefaults', () => {
   it('accepts valid planning and execution model configs', () => {
@@ -132,6 +137,42 @@ describe('validateTaskDefaults', () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.error).toContain('Unknown pre-execution skills');
+    }
+  });
+
+  it('rejects pre-execution defaults that reference post-only skills', () => {
+    const defaults: TaskDefaults = {
+      planningModelConfig: undefined,
+      executionModelConfig: undefined,
+      modelConfig: undefined,
+      preExecutionSkills: ['checkpoint'],
+      postExecutionSkills: ['code-review'],
+    };
+
+    const result = validateTaskDefaults(defaults, AVAILABLE_MODELS, AVAILABLE_SKILLS);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain('do not support pre hook');
+      expect(result.error).toContain('checkpoint');
+    }
+  });
+
+  it('rejects post-execution defaults that reference pre-only skills', () => {
+    const defaults: TaskDefaults = {
+      planningModelConfig: undefined,
+      executionModelConfig: undefined,
+      modelConfig: undefined,
+      preExecutionSkills: [],
+      postExecutionSkills: ['tdd-test-first'],
+    };
+
+    const result = validateTaskDefaults(defaults, AVAILABLE_MODELS, AVAILABLE_SKILLS);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain('do not support post hook');
+      expect(result.error).toContain('tdd-test-first');
     }
   });
 });

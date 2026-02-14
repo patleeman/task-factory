@@ -5,6 +5,7 @@ metadata:
   author: pi-factory
   version: "1.0"
   type: follow-up
+  hooks: post
 ---
 
 # Security Review

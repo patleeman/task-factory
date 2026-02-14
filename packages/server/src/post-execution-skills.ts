@@ -7,26 +7,29 @@
 
 import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join, dirname } from 'path';
+import { homedir } from 'os';
 import { fileURLToPath } from 'url';
 import YAML from 'yaml';
-import type { PostExecutionSkill, SkillConfigField } from '@pi-factory/shared';
+import type { PostExecutionSkill, SkillConfigField, SkillHook, SkillSource } from '@pi-factory/shared';
 import { createSystemEvent } from './activity-service.js';
 
 // =============================================================================
 // Skill Discovery
 // =============================================================================
 
+const DEFAULT_SKILL_HOOKS: SkillHook[] = ['pre', 'post'];
+const SKILL_HOOK_SET = new Set<SkillHook>(DEFAULT_SKILL_HOOKS);
+const USER_SKILLS_DIR = join(homedir(), '.pi', 'factory', 'skills');
+
 /** Cached skills (discovered once, reloaded on demand) */
 let _cachedSkills: PostExecutionSkill[] | null = null;
 
-/**
- * Find the skills/ directory by walking up from this file to the repo root.
- */
-function findSkillsDir(): string | null {
+/** Resolve the packaged starter skills directory inside the Task Factory repo. */
+function findStarterSkillsDir(): string | null {
   const __filename = fileURLToPath(import.meta.url);
   let dir = dirname(__filename);
 
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < 10; i += 1) {
     const candidate = join(dir, 'skills');
     if (existsSync(candidate)) {
       return candidate;
@@ -39,11 +42,48 @@ function findSkillsDir(): string | null {
   return null;
 }
 
+export function getFactoryUserSkillsDir(): string {
+  return USER_SKILLS_DIR;
+}
+
+function parseSkillHooks(metadata: Record<string, string>, skillId: string): SkillHook[] {
+  const rawHooks = metadata.hooks ?? metadata.hook;
+  if (!rawHooks) {
+    console.warn(`[Skills] ${skillId} missing metadata.hooks; defaulting to pre,post for backward compatibility`);
+    return [...DEFAULT_SKILL_HOOKS];
+  }
+
+  const parsedHooks = rawHooks
+    .split(/[\s,]+/)
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean)
+    .filter((value): value is SkillHook => SKILL_HOOK_SET.has(value as SkillHook));
+
+  const dedupedHooks = Array.from(new Set(parsedHooks));
+
+  if (dedupedHooks.length === 0) {
+    console.warn(`[Skills] ${skillId} has invalid metadata.hooks="${rawHooks}"; defaulting to pre,post`);
+    return [...DEFAULT_SKILL_HOOKS];
+  }
+
+  return dedupedHooks;
+}
+
+function parseWorkflowId(metadata: Record<string, string>): string | undefined {
+  const workflowId = metadata['workflow-id']?.trim();
+  return workflowId ? workflowId : undefined;
+}
+
+function parsePairedSkillId(metadata: Record<string, string>): string | undefined {
+  const pairedSkillId = metadata['pairs-with']?.trim();
+  return pairedSkillId ? pairedSkillId : undefined;
+}
+
 /**
  * Parse a SKILL.md file into a PostExecutionSkill.
  * Follows the Agent Skills spec: YAML frontmatter + markdown body.
  */
-function parseSkillFile(skillDir: string, dirName: string): PostExecutionSkill | null {
+function parseSkillFile(skillDir: string, dirName: string, source: SkillSource): PostExecutionSkill | null {
   const skillMdPath = join(skillDir, 'SKILL.md');
   if (!existsSync(skillMdPath)) return null;
 
@@ -82,6 +122,7 @@ function parseSkillFile(skillDir: string, dirName: string): PostExecutionSkill |
     }
 
     const type = metadata.type === 'loop' ? 'loop' : 'follow-up';
+    const hooks = parseSkillHooks(metadata, dirName);
     const maxIterations = parseInt(metadata['max-iterations'] || '1', 10) || 1;
     const doneSignal = metadata['done-signal'] || 'HOOK_DONE';
 
@@ -114,10 +155,14 @@ function parseSkillFile(skillDir: string, dirName: string): PostExecutionSkill |
       name,
       description,
       type,
+      hooks,
+      workflowId: parseWorkflowId(metadata),
+      pairedSkillId: parsePairedSkillId(metadata),
       maxIterations,
       doneSignal,
       promptTemplate: bodyContent.trim(),
       path: skillDir,
+      source,
       metadata,
       configSchema,
     };
@@ -127,16 +172,9 @@ function parseSkillFile(skillDir: string, dirName: string): PostExecutionSkill |
   }
 }
 
-/**
- * Discover all post-execution skills from the repo-local skills/ directory.
- */
-export function discoverPostExecutionSkills(): PostExecutionSkill[] {
-  if (_cachedSkills !== null) return _cachedSkills;
-
-  const skillsDir = findSkillsDir();
-  if (!skillsDir) {
-    _cachedSkills = [];
-    return _cachedSkills;
+function discoverSkillsFromDir(skillsDir: string, source: SkillSource): PostExecutionSkill[] {
+  if (!existsSync(skillsDir)) {
+    return [];
   }
 
   const skills: PostExecutionSkill[] = [];
@@ -145,19 +183,52 @@ export function discoverPostExecutionSkills(): PostExecutionSkill[] {
   for (const entry of entries) {
     if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
 
-    const skill = parseSkillFile(join(skillsDir, entry.name), entry.name);
+    const skill = parseSkillFile(join(skillsDir, entry.name), entry.name, source);
     if (skill) {
       skills.push(skill);
     }
   }
 
-  if (skills.length > 0) {
-    console.log(`[Skills] Discovered ${skills.length} post-execution skill(s):`,
-      skills.map(s => s.id).join(', '));
+  return skills;
+}
+
+/**
+ * Discover execution skills from starter skills + user-defined skills.
+ * User-defined skills in ~/.pi/factory/skills override starter skills by ID.
+ */
+export function discoverPostExecutionSkills(): PostExecutionSkill[] {
+  if (_cachedSkills !== null) return _cachedSkills;
+
+  const starterSkillsDir = findStarterSkillsDir();
+  const starterSkills = starterSkillsDir
+    ? discoverSkillsFromDir(starterSkillsDir, 'starter')
+    : [];
+
+  const userSkills = discoverSkillsFromDir(getFactoryUserSkillsDir(), 'user');
+
+  const byId = new Map<string, PostExecutionSkill>();
+  for (const skill of starterSkills) {
+    byId.set(skill.id, skill);
+  }
+  for (const skill of userSkills) {
+    byId.set(skill.id, skill);
   }
 
-  _cachedSkills = skills;
-  return skills;
+  const mergedSkills = Array.from(byId.values()).sort((a, b) => a.id.localeCompare(b.id));
+
+  if (mergedSkills.length > 0) {
+    console.log(
+      `[Skills] Discovered ${mergedSkills.length} execution skill(s):`,
+      mergedSkills.map((skill) => skill.id).join(', '),
+    );
+  }
+
+  _cachedSkills = mergedSkills;
+  return mergedSkills;
+}
+
+export function skillSupportsHook(skill: PostExecutionSkill, hook: SkillHook): boolean {
+  return skill.hooks.includes(hook);
 }
 
 /**
@@ -165,10 +236,10 @@ export function discoverPostExecutionSkills(): PostExecutionSkill[] {
  */
 export function getPostExecutionSkill(id: string): PostExecutionSkill | null {
   const skills = discoverPostExecutionSkills();
-  return skills.find(s => s.id === id) || null;
+  return skills.find((skill) => skill.id === id) || null;
 }
 
-/** Force re-discovery (e.g. after adding a new skill). */
+/** Force re-discovery (e.g. after adding/updating a skill). */
 export function reloadPostExecutionSkills(): PostExecutionSkill[] {
   _cachedSkills = null;
   return discoverPostExecutionSkills();
@@ -217,6 +288,20 @@ export async function runPreExecutionSkills(
         { skillId }
       );
       broadcastToWorkspace?.({ type: 'activity:entry', entry: notFoundEntry });
+      throw new Error(errMsg);
+    }
+
+    if (!skillSupportsHook(skill, 'pre')) {
+      const errMsg = `Skill "${skillId}" does not support the pre-execution hook`;
+      console.warn(`[Skills] ${errMsg}`);
+      const invalidHookEntry = await createSystemEvent(
+        workspaceId,
+        taskId,
+        'phase-change',
+        errMsg,
+        { skillId, hooks: skill.hooks }
+      );
+      broadcastToWorkspace?.({ type: 'activity:entry', entry: invalidHookEntry });
       throw new Error(errMsg);
     }
 
@@ -367,6 +452,18 @@ export async function runPostExecutionSkills(
         { skillId }
       );
       broadcastToWorkspace?.({ type: 'activity:entry', entry: notFoundEntry });
+      continue;
+    }
+
+    if (!skillSupportsHook(skill, 'post')) {
+      const invalidHookEntry = await createSystemEvent(
+        workspaceId,
+        taskId,
+        'phase-change',
+        `Post-execution skill "${skillId}" does not support the post hook — skipping`,
+        { skillId, hooks: skill.hooks }
+      );
+      broadcastToWorkspace?.({ type: 'activity:entry', entry: invalidHookEntry });
       continue;
     }
 

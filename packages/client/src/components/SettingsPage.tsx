@@ -5,7 +5,6 @@ import {
   DEFAULT_PLANNING_GUARDRAILS,
   type ModelConfig,
   type TaskDefaults,
-  type ExecutionWrapper,
   type PlanningGuardrails,
 } from '@pi-factory/shared'
 import {
@@ -57,7 +56,7 @@ function normalizeTaskDefaultsForUi(
   models: AvailableModel[],
   skills: PostExecutionSkill[],
 ): TaskDefaults {
-  const availableSkillIds = new Set(skills.map((skill) => skill.id))
+  const skillsById = new Map(skills.map((skill) => [skill.id, skill]))
   const executionModelConfig = normalizeModelConfigForUi(
     models,
     defaults.executionModelConfig ?? defaults.modelConfig,
@@ -68,8 +67,14 @@ function normalizeTaskDefaultsForUi(
     executionModelConfig,
     // Keep legacy alias aligned for backward compatibility.
     modelConfig: executionModelConfig,
-    preExecutionSkills: defaults.preExecutionSkills.filter((skillId) => availableSkillIds.has(skillId)),
-    postExecutionSkills: defaults.postExecutionSkills.filter((skillId) => availableSkillIds.has(skillId)),
+    preExecutionSkills: defaults.preExecutionSkills.filter((skillId) => {
+      const skill = skillsById.get(skillId)
+      return Boolean(skill && skill.hooks.includes('pre'))
+    }),
+    postExecutionSkills: defaults.postExecutionSkills.filter((skillId) => {
+      const skill = skillsById.get(skillId)
+      return Boolean(skill && skill.hooks.includes('post'))
+    }),
   }
 }
 
@@ -142,13 +147,11 @@ export function SettingsPage() {
 
   const [models, setModels] = useState<AvailableModel[]>([])
   const [skills, setSkills] = useState<PostExecutionSkill[]>([])
-  const [wrappers, setWrappers] = useState<ExecutionWrapper[]>([])
   const [form, setForm] = useState<TaskDefaults | null>(null)
   const [planningGuardrailsForm, setPlanningGuardrailsForm] = useState<PlanningGuardrails>({
     ...DEFAULT_PLANNING_GUARDRAILS,
   })
   const [voiceInputHotkey, setVoiceInputHotkey] = useState(DEFAULT_VOICE_INPUT_HOTKEY)
-  const [selectedWrapperId, setSelectedWrapperId] = useState('')
 
   const [isSavingSystemSettings, setIsSavingSystemSettings] = useState(false)
   const [systemSettingsError, setSystemSettingsError] = useState<string | null>(null)
@@ -186,19 +189,16 @@ export function SettingsPage() {
       api.getTaskDefaults(),
       api.getAvailableModels(),
       fetch('/api/factory/skills').then(r => r.json() as Promise<PostExecutionSkill[]>),
-      fetch('/api/wrappers').then(r => r.json() as Promise<ExecutionWrapper[]>),
       api.getPiAuthOverview(),
       api.getPiFactorySettings(),
     ])
-      .then(([defaults, availableModels, availableSkills, availableWrappers, auth, settings]) => {
+      .then(([defaults, availableModels, availableSkills, auth, settings]) => {
         if (isCancelled) return
         setModels(availableModels)
         setSkills(availableSkills)
-        setWrappers(availableWrappers)
         setForm(normalizeTaskDefaultsForUi(defaults, availableModels, availableSkills))
         setPlanningGuardrailsForm(normalizePlanningGuardrailsForUi(settings))
         setVoiceInputHotkey(normalizeVoiceInputHotkey(settings.voiceInputHotkey))
-        setSelectedWrapperId('')
         setAuthOverview(auth)
       })
       .catch((err) => {
@@ -236,15 +236,20 @@ export function SettingsPage() {
 
   const handleSkillsChange = useCallback((nextSkills: PostExecutionSkill[]) => {
     setSkills(nextSkills)
-    setSelectedWrapperId('')
     setForm((current) => {
       if (!current) return current
 
-      const validSkillIds = new Set(nextSkills.map((skill) => skill.id))
+      const skillsById = new Map(nextSkills.map((skill) => [skill.id, skill]))
       return {
         ...current,
-        preExecutionSkills: current.preExecutionSkills.filter((skillId) => validSkillIds.has(skillId)),
-        postExecutionSkills: current.postExecutionSkills.filter((skillId) => validSkillIds.has(skillId)),
+        preExecutionSkills: current.preExecutionSkills.filter((skillId) => {
+          const skill = skillsById.get(skillId)
+          return Boolean(skill && skill.hooks.includes('pre'))
+        }),
+        postExecutionSkills: current.postExecutionSkills.filter((skillId) => {
+          const skill = skillsById.get(skillId)
+          return Boolean(skill && skill.hooks.includes('post'))
+        }),
       }
     })
   }, [])
@@ -873,17 +878,14 @@ export function SettingsPage() {
                 <p className="text-xs text-slate-500 mb-2">Set default pre/post execution order with one visual pipeline.</p>
                 <ExecutionPipelineEditor
                   availableSkills={skills}
-                  availableWrappers={wrappers}
                   selectedPreSkillIds={form.preExecutionSkills}
                   selectedSkillIds={form.postExecutionSkills}
-                  selectedWrapperId={selectedWrapperId}
                   onPreSkillsChange={(skillIds) => {
                     setForm({ ...form, preExecutionSkills: skillIds })
                   }}
                   onPostSkillsChange={(skillIds) => {
                     setForm({ ...form, postExecutionSkills: skillIds })
                   }}
-                  onWrapperChange={setSelectedWrapperId}
                   showSkillConfigControls={false}
                 />
               </div>

@@ -5,6 +5,9 @@ metadata:
   author: pi-factory
   version: "1.0"
   type: follow-up
+  hooks: post
+  workflow-id: tdd
+  pairs-with: tdd-test-first
 ---
 
 # TDD Verify Tests (Post-Execution)

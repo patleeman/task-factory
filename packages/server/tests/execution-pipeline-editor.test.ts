@@ -4,73 +4,39 @@ import {
   buildLaneTokens,
   findDisplayIndexForSkill,
   parseLaneTokens,
-  WRAPPER_MARKER_TOKEN,
 } from '../../client/src/components/execution-pipeline-lane-model';
 
-describe('execution pipeline editor wrapper lane modeling', () => {
-  it('builds lane items with wrapper start/end markers inside lanes', () => {
-    const preItems = buildLaneItems(['tdd-test-first'], 0, true);
-    const postItems = buildLaneItems(['tdd-verify-tests'], 1, true);
+describe('execution pipeline lane modeling', () => {
+  it('builds lane items without wrapper markers', () => {
+    const preItems = buildLaneItems(['tdd-test-first']);
+    const postItems = buildLaneItems(['tdd-verify-tests']);
 
-    expect(preItems.map((item) => item.type)).toEqual(['marker', 'skill']);
-    expect(postItems.map((item) => item.type)).toEqual(['skill', 'marker']);
+    expect(preItems.map((item) => item.type)).toEqual(['skill']);
+    expect(postItems.map((item) => item.type)).toEqual(['skill']);
   });
 
-  it('supports skills before and after wrapper markers in token parsing', () => {
-    const basePreTokens = buildLaneTokens(['tdd-test-first'], 0, true);
+  it('keeps plain skill ordering unchanged in token parsing', () => {
+    expect(buildLaneTokens(['checkpoint', 'code-review'])).toEqual(['checkpoint', 'code-review']);
 
-    const beforeMarker = [...basePreTokens];
-    beforeMarker.splice(0, 0, 'security-review');
-
-    expect(parseLaneTokens(beforeMarker, true)).toEqual({
-      skillIds: ['security-review', 'tdd-test-first'],
-      markerIndex: 1,
-    });
-
-    const afterMarker = [...basePreTokens];
-    afterMarker.splice(2, 0, 'wrapup');
-
-    expect(parseLaneTokens(afterMarker, true)).toEqual({
-      skillIds: ['tdd-test-first', 'wrapup'],
-      markerIndex: 0,
-    });
-  });
-
-  it('keeps plain skill ordering unchanged when no wrapper marker is active', () => {
-    expect(buildLaneItems(['checkpoint', 'code-review'], 0, false).map((item) => item.type)).toEqual([
-      'skill',
-      'skill',
-    ]);
-
-    expect(parseLaneTokens(['checkpoint', 'code-review'], false)).toEqual({
+    expect(parseLaneTokens(['checkpoint', 'code-review'])).toEqual({
       skillIds: ['checkpoint', 'code-review'],
-      markerIndex: 0,
     });
   });
 
-  it('clamps and recovers marker placement for boundary token states', () => {
-    expect(buildLaneTokens(['checkpoint'], 99, true)).toEqual(['checkpoint', WRAPPER_MARKER_TOKEN]);
-
-    expect(parseLaneTokens(['checkpoint', 'wrapup'], true)).toEqual({
-      skillIds: ['checkpoint', 'wrapup'],
-      markerIndex: 2,
-    });
-  });
-
-  it('resolves dragged skill display indexes when marker tokens are present', () => {
-    const tokens = ['tdd-test-first', WRAPPER_MARKER_TOKEN, 'tdd-verify-tests'];
+  it('resolves dragged skill indexes using display and fallback indexes', () => {
+    const tokens = ['tdd-test-first', 'tdd-verify-tests'];
 
     expect(findDisplayIndexForSkill(tokens, {
       skillId: 'tdd-verify-tests',
       fromSkillIndex: 1,
-      fromDisplayIndex: 2,
-    })).toBe(2);
+      fromDisplayIndex: 1,
+    })).toBe(1);
 
     expect(findDisplayIndexForSkill(tokens, {
       skillId: 'tdd-verify-tests',
       fromSkillIndex: 1,
       fromDisplayIndex: 0,
-    })).toBe(2);
+    })).toBe(1);
 
     expect(findDisplayIndexForSkill(tokens, {
       skillId: 'missing-skill',

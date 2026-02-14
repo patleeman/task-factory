@@ -985,10 +985,10 @@ app.get('/api/factory/skills', (_req, res) => {
   res.json(skills);
 });
 
-// Create post-execution skill
+// Create execution skill
 app.post('/api/factory/skills', (req, res) => {
   try {
-    const skillId = createFactorySkill(req.body);
+    const skillId = createFactorySkill(req.body, { skillsDir: getFactoryUserSkillsDir() });
     const skills = reloadPostExecutionSkills();
     const created = skills.find((skill) => skill.id === skillId);
 
@@ -1010,7 +1010,7 @@ app.post('/api/factory/skills/import', (req, res) => {
     const content = typeof payload?.content === 'string' ? payload.content : '';
     const overwrite = payload?.overwrite === true;
 
-    const skillId = importFactorySkill(content, overwrite);
+    const skillId = importFactorySkill(content, overwrite, { skillsDir: getFactoryUserSkillsDir() });
     const skills = reloadPostExecutionSkills();
     const imported = skills.find((skill) => skill.id === skillId);
 
@@ -1066,7 +1066,10 @@ app.put('/api/factory/skills/:id', (req, res) => {
       },
     };
 
-    const skillId = updateFactorySkill(req.params.id, payload);
+    const skillId = existing.source === 'starter'
+      ? createFactorySkill({ ...payload, id: req.params.id }, { skillsDir: getFactoryUserSkillsDir() })
+      : updateFactorySkill(req.params.id, payload, { skillsDir: getFactoryUserSkillsDir() });
+
     const skills = reloadPostExecutionSkills();
     const updated = skills.find((skill) => skill.id === skillId);
 
@@ -1090,67 +1093,16 @@ app.delete('/api/factory/skills/:id', (req, res) => {
   }
 
   try {
-    deleteFactorySkill(req.params.id);
+    if (existing.source === 'starter') {
+      res.status(400).json({ error: 'Starter skills cannot be deleted. Create an override in ~/.pi/factory/skills instead.' });
+      return;
+    }
+
+    deleteFactorySkill(req.params.id, { skillsDir: getFactoryUserSkillsDir() });
     reloadPostExecutionSkills();
     res.json({ deleted: req.params.id });
   } catch (err) {
     res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
-  }
-});
-
-// Get execution wrappers
-app.get('/api/wrappers', (_req, res) => {
-  const wrappers = discoverWrappers();
-  res.json(wrappers);
-});
-
-// Reload execution wrappers
-app.post('/api/wrappers/reload', (_req, res) => {
-  const wrappers = reloadWrappers();
-  res.json({ count: wrappers.length, wrappers: wrappers.map(w => w.id) });
-});
-
-// Get single execution wrapper
-app.get('/api/wrappers/:id', (req, res) => {
-  const wrapper = getWrapper(req.params.id);
-  if (!wrapper) {
-    res.status(404).json({ error: 'Wrapper not found' });
-    return;
-  }
-  res.json(wrapper);
-});
-
-// Apply wrapper to a task
-app.post('/api/workspaces/:workspaceId/tasks/:taskId/apply-wrapper', async (req, res) => {
-  const { wrapperId } = req.body;
-  if (!wrapperId || typeof wrapperId !== 'string') {
-    res.status(400).json({ error: 'wrapperId is required' });
-    return;
-  }
-
-  const workspace = await getWorkspaceById(req.params.workspaceId);
-  if (!workspace) {
-    res.status(404).json({ error: 'Workspace not found' });
-    return;
-  }
-
-  const tasksDir = getTasksDir(workspace);
-  const allTasks = discoverTasks(tasksDir);
-  const task = allTasks.find(t => t.id === req.params.taskId);
-  if (!task) {
-    res.status(404).json({ error: 'Task not found' });
-    return;
-  }
-
-  try {
-    const updated = applyWrapper(task, wrapperId);
-    updated.frontmatter.updated = new Date().toISOString();
-    saveTaskFile(updated);
-
-    broadcastToWorkspace(workspace.id, { type: 'task:updated', task: updated, changes: {} });
-    res.json(updated);
-  } catch (err) {
-    res.status(400).json({ error: String(err) });
   }
 });
 
@@ -1288,7 +1240,7 @@ async function handleSaveTaskDefaults(
     const validation = validateTaskDefaults(
       parsed.value,
       availableModels,
-      availableSkills.map((skill) => skill.id),
+      availableSkills.map((skill) => ({ id: skill.id, hooks: skill.hooks })),
     );
 
     if (!validation.ok) {
@@ -1466,14 +1418,8 @@ import {
   updateFactorySkill,
   deleteFactorySkill,
   importFactorySkill,
+  getFactoryUserSkillsDir,
 } from './skill-management-service.js';
-
-import {
-  discoverWrappers,
-  getWrapper,
-  reloadWrappers,
-  applyWrapper,
-} from './execution-wrapper-service.js';
 
 import {
   startQueueProcessing,

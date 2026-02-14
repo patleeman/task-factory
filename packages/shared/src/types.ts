@@ -350,7 +350,7 @@ export function getWorkspaceAutomationSettings(config: WorkspaceConfig): Workspa
   const backlogToReady = config.workflowAutomation?.backlogToReady ?? false;
   const readyToExecuting = config.workflowAutomation?.readyToExecuting
     ?? config.queueProcessing?.enabled
-    ?? false;
+    ?? true;
 
   return {
     backlogToReady,
@@ -654,8 +654,11 @@ export interface SortOptions {
 }
 
 // =============================================================================
-// Post-Execution Skills (Agent Skills spec compliant)
+// Execution Skills (Agent Skills spec compliant)
 // =============================================================================
+
+export type SkillHook = 'pre' | 'post';
+export type SkillSource = 'starter' | 'user';
 
 export interface SkillConfigField {
   key: string;
@@ -676,10 +679,14 @@ export interface PostExecutionSkill {
   name: string;            // from frontmatter
   description: string;     // from frontmatter
   type: 'follow-up' | 'loop';
+  hooks: SkillHook[];      // supported execution hooks for this skill
+  workflowId?: string;     // optional workflow grouping ID (e.g. "tdd")
+  pairedSkillId?: string;  // optional paired skill ID for multi-hook workflows
   maxIterations: number;
   doneSignal: string;
   promptTemplate: string;  // SKILL.md body (markdown after frontmatter)
   path: string;            // absolute path to skill directory
+  source: SkillSource;     // built-in starter skill vs user-defined skill
   metadata: Record<string, string>;
   configSchema: SkillConfigField[];
 }
@@ -689,15 +696,3 @@ export const DEFAULT_PRE_EXECUTION_SKILLS: string[] = [];
 
 /** Default post-execution skills applied to new tasks when none are specified. */
 export const DEFAULT_POST_EXECUTION_SKILLS: string[] = ['checkpoint', 'code-review'];
-
-// =============================================================================
-// Execution Wrappers
-// =============================================================================
-
-export interface ExecutionWrapper {
-  id: string;              // directory name
-  name: string;            // human-readable name
-  description: string;     // what this wrapper does
-  preExecutionSkills: string[];   // skills to run before main execution
-  postExecutionSkills: string[];  // skills to run after main execution
-}

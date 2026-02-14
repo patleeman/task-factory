@@ -24,6 +24,12 @@ interface SkillFormState {
   id: string
   description: string
   type: SkillType
+  hooks: {
+    pre: boolean
+    post: boolean
+  }
+  workflowId: string
+  pairedSkillId: string
   maxIterations: string
   doneSignal: string
   promptTemplate: string
@@ -51,6 +57,12 @@ function createBlankSkillForm(): SkillFormState {
     id: '',
     description: '',
     type: 'follow-up',
+    hooks: {
+      pre: true,
+      post: true,
+    },
+    workflowId: '',
+    pairedSkillId: '',
     maxIterations: '1',
     doneSignal: 'HOOK_DONE',
     promptTemplate: '',
@@ -63,6 +75,12 @@ function toSkillForm(skill: PostExecutionSkill): SkillFormState {
     id: skill.id,
     description: skill.description,
     type: skill.type,
+    hooks: {
+      pre: skill.hooks.includes('pre'),
+      post: skill.hooks.includes('post'),
+    },
+    workflowId: skill.workflowId || '',
+    pairedSkillId: skill.pairedSkillId || '',
     maxIterations: String(skill.maxIterations || 1),
     doneSignal: skill.doneSignal || 'HOOK_DONE',
     promptTemplate: skill.promptTemplate,
@@ -313,6 +331,15 @@ export function SkillManagementPanel({ skills, onSkillsChange }: SkillManagement
       return
     }
 
+    const hooks: Array<'pre' | 'post'> = []
+    if (form.hooks.pre) hooks.push('pre')
+    if (form.hooks.post) hooks.push('post')
+
+    if (hooks.length === 0) {
+      setSaveError('Select at least one hook (pre and/or post)')
+      return
+    }
+
     const parsedMaxIterations = Number.parseInt(form.maxIterations, 10)
     if (!Number.isInteger(parsedMaxIterations) || parsedMaxIterations <= 0) {
       setSaveError('Max iterations must be a positive integer')
@@ -329,6 +356,9 @@ export function SkillManagementPanel({ skills, onSkillsChange }: SkillManagement
       id: skillId,
       description: form.description.trim(),
       type: form.type,
+      hooks,
+      workflowId: form.workflowId.trim() || undefined,
+      pairedSkillId: form.pairedSkillId.trim() || undefined,
       maxIterations: parsedMaxIterations,
       doneSignal: form.doneSignal.trim() || 'HOOK_DONE',
       promptTemplate: form.promptTemplate.trim(),
@@ -449,7 +479,7 @@ export function SkillManagementPanel({ skills, onSkillsChange }: SkillManagement
       <div>
         <h3 className="text-sm font-semibold text-slate-800">Skill Library</h3>
         <p className="text-xs text-slate-500 mt-1">
-          Create and import reusable post-execution skills. Parameters defined here can be configured per task.
+          Create and import reusable execution skills. Parameters defined here can be configured per task.
         </p>
       </div>
 
@@ -554,6 +584,50 @@ export function SkillManagementPanel({ skills, onSkillsChange }: SkillManagement
                 onChange={(event) => setForm({ ...form, description: event.target.value })}
                 className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                 placeholder="What this skill does"
+              />
+            </label>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <label className="text-xs text-slate-600">
+                Hooks
+                <div className="mt-1 flex items-center gap-4 rounded-lg border border-slate-200 px-3 py-2 bg-slate-50">
+                  <label className="inline-flex items-center gap-1.5 text-xs text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={form.hooks.pre}
+                      onChange={(event) => setForm({ ...form, hooks: { ...form.hooks, pre: event.target.checked } })}
+                    />
+                    pre
+                  </label>
+                  <label className="inline-flex items-center gap-1.5 text-xs text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={form.hooks.post}
+                      onChange={(event) => setForm({ ...form, hooks: { ...form.hooks, post: event.target.checked } })}
+                    />
+                    post
+                  </label>
+                </div>
+              </label>
+
+              <label className="text-xs text-slate-600">
+                Workflow ID (optional)
+                <input
+                  value={form.workflowId}
+                  onChange={(event) => setForm({ ...form, workflowId: event.target.value })}
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                  placeholder="e.g. tdd"
+                />
+              </label>
+            </div>
+
+            <label className="block text-xs text-slate-600">
+              Paired Skill ID (optional)
+              <input
+                value={form.pairedSkillId}
+                onChange={(event) => setForm({ ...form, pairedSkillId: event.target.value })}
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                placeholder="e.g. tdd-verify-tests"
               />
             </label>
 

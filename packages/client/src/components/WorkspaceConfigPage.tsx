@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { ArrowLeft, Check, CheckCircle2 } from 'lucide-react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { DEFAULT_PRE_EXECUTION_SKILLS, DEFAULT_POST_EXECUTION_SKILLS, type TaskDefaults, type ExecutionWrapper } from '@pi-factory/shared'
+import { DEFAULT_PRE_EXECUTION_SKILLS, DEFAULT_POST_EXECUTION_SKILLS, type TaskDefaults } from '@pi-factory/shared'
 import type { PiSkill, PiExtension, PostExecutionSkill } from '../types/pi'
 import { api } from '../api'
 import { AppIcon } from './AppIcon'
@@ -34,9 +34,7 @@ export function WorkspaceConfigPage() {
   const [allSkills, setAllSkills] = useState<PiSkill[]>([])
   const [allExtensions, setAllExtensions] = useState<PiExtension[]>([])
   const [taskSkills, setTaskSkills] = useState<PostExecutionSkill[]>([])
-  const [taskWrappers, setTaskWrappers] = useState<ExecutionWrapper[]>([])
   const [taskDefaults, setTaskDefaults] = useState<TaskDefaults>({ ...EMPTY_TASK_DEFAULTS })
-  const [selectedWrapperId, setSelectedWrapperId] = useState('')
   const [config, setConfig] = useState<WorkspaceConfig>({
     skills: { enabled: [], config: {} },
     extensions: { enabled: [], config: {} },
@@ -67,7 +65,6 @@ export function WorkspaceConfigPage() {
       fetch('/api/pi/skills').then(r => r.json()),
       fetch('/api/pi/extensions').then(r => r.json()),
       fetch('/api/factory/skills').then(r => r.json() as Promise<PostExecutionSkill[]>),
-      fetch('/api/wrappers').then(r => r.json() as Promise<ExecutionWrapper[]>),
       fetch(`/api/workspaces/${workspaceId}/pi-config`).then(r => r.json()),
       fetch(`/api/workspaces/${workspaceId}/shared-context`).then(r => r.json()),
       api.getWorkspace(workspaceId),
@@ -77,7 +74,6 @@ export function WorkspaceConfigPage() {
         skillsData,
         extensionsData,
         taskSkillsData,
-        wrapperData,
         configData,
         sharedContextData,
         workspace,
@@ -88,9 +84,20 @@ export function WorkspaceConfigPage() {
         setAllSkills(skillsData)
         setAllExtensions(extensionsData)
         setTaskSkills(taskSkillsData)
-        setTaskWrappers(wrapperData)
-        setTaskDefaults(workspaceTaskDefaults)
-        setSelectedWrapperId('')
+
+        const skillsById = new Map(taskSkillsData.map((skill) => [skill.id, skill]))
+        setTaskDefaults({
+          ...workspaceTaskDefaults,
+          preExecutionSkills: workspaceTaskDefaults.preExecutionSkills.filter((skillId) => {
+            const skill = skillsById.get(skillId)
+            return Boolean(skill && skill.hooks.includes('pre'))
+          }),
+          postExecutionSkills: workspaceTaskDefaults.postExecutionSkills.filter((skillId) => {
+            const skill = skillsById.get(skillId)
+            return Boolean(skill && skill.hooks.includes('post'))
+          }),
+        })
+
         setConfig({
           skills: configData.skills || { enabled: [], config: {} },
           extensions: configData.extensions || { enabled: [], config: {} },
@@ -515,10 +522,8 @@ export function WorkspaceConfigPage() {
                 <p className="text-xs text-slate-500 mb-2">Set workspace-specific default pre/post execution order.</p>
                 <ExecutionPipelineEditor
                   availableSkills={taskSkills}
-                  availableWrappers={taskWrappers}
                   selectedPreSkillIds={taskDefaults.preExecutionSkills}
                   selectedSkillIds={taskDefaults.postExecutionSkills}
-                  selectedWrapperId={selectedWrapperId}
                   onPreSkillsChange={(skillIds) => {
                     updateTaskDefaults((current) => ({
                       ...current,
@@ -530,11 +535,6 @@ export function WorkspaceConfigPage() {
                       ...current,
                       postExecutionSkills: skillIds,
                     }))
-                  }}
-                  onWrapperChange={(wrapperId) => {
-                    setSelectedWrapperId(wrapperId)
-                    setSaveStatus('idle')
-                    setSaveError('')
                   }}
                   showSkillConfigControls={false}
                 />

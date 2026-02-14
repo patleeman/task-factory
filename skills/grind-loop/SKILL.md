@@ -5,6 +5,7 @@ metadata:
   author: pi-factory
   version: "1.0"
   type: loop
+  hooks: post
   max-iterations: "5"
   done-signal: HOOK_DONE
 config:

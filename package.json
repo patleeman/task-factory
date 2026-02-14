@@ -12,8 +12,7 @@
     "dist/",
     "packages/client/dist/",
     "extensions/",
-    "skills/",
-    "wrappers/"
+    "skills/"
   ],
   "workspaces": [
     "packages/*"
