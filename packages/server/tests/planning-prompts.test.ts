@@ -32,6 +32,8 @@ describe('planning prompt guidance', () => {
     expect(prompt).toContain('Task Factory planning agent');
     expect(prompt).toContain('Agent Contract');
     expect(prompt).toContain('foreman');
+    expect(prompt).toContain('### web_search');
+    expect(prompt).toContain('### web_fetch');
     expect(prompt).not.toContain('reference specific files, functions, and components');
   });
 });

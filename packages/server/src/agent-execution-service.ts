@@ -3,7 +3,7 @@
 // =============================================================================
 // Integrates with Pi SDK to execute tasks with agent capabilities
 
-import { join, dirname } from 'path';
+import { join, dirname, basename } from 'path';
 import { homedir } from 'os';
 import { existsSync, mkdirSync, readdirSync, readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
@@ -113,10 +113,39 @@ function discoverExtensionsInDir(extensionsDir: string): string[] {
   return paths;
 }
 
+/**
+ * Repo extensions can be scoped by audience so we can keep some tools
+ * (for example, web research) available to Foreman only.
+ */
+export type RepoExtensionAudience = 'all' | 'foreman' | 'task';
+
+const FOREMAN_ONLY_EXTENSION_IDS = new Set<string>(['web-tools']);
+
+function getExtensionId(path: string): string {
+  const fileName = basename(path);
+  if (fileName === 'index.ts') {
+    return basename(dirname(path));
+  }
+  return fileName.replace(/\.ts$/, '');
+}
+
+function isForemanOnlyExtension(path: string): boolean {
+  return FOREMAN_ONLY_EXTENSION_IDS.has(getExtensionId(path));
+}
+
+function filterExtensionsForAudience(paths: string[], audience: RepoExtensionAudience): string[] {
+  if (audience === 'task') {
+    return paths.filter((path) => !isForemanOnlyExtension(path));
+  }
+
+  // 'all' and 'foreman' both include every repo extension.
+  return [...paths];
+}
+
 /** Cached repo extension paths (discovered once at startup) */
 let _repoExtensionPaths: string[] | null = null;
 
-export function getRepoExtensionPaths(): string[] {
+export function getRepoExtensionPaths(audience: RepoExtensionAudience = 'all'): string[] {
   if (_repoExtensionPaths === null) {
     _repoExtensionPaths = discoverRepoExtensions();
     if (_repoExtensionPaths.length > 0) {
@@ -124,7 +153,8 @@ export function getRepoExtensionPaths(): string[] {
         _repoExtensionPaths.map(p => p.split('/').slice(-2).join('/')));
     }
   }
-  return _repoExtensionPaths;
+
+  return filterExtensionsForAudience(_repoExtensionPaths, audience);
 }
 
 /** Force re-discovery (e.g., after adding a new extension) */
@@ -346,7 +376,7 @@ export async function createTaskConversationSession(
   const modelRegistry = new ModelRegistry(authStorage);
   const loader = new DefaultResourceLoader({
     cwd: workspacePath,
-    additionalExtensionPaths: getRepoExtensionPaths(),
+    additionalExtensionPaths: getRepoExtensionPaths('task'),
   });
   await loader.reload();
 

@@ -515,7 +515,7 @@ async function getOrCreateSession(
     const modelRegistry = new ModelRegistry(authStorage);
     const loader = new DefaultResourceLoader({
       cwd: workspace.path,
-      additionalExtensionPaths: getRepoExtensionPaths(),
+      additionalExtensionPaths: getRepoExtensionPaths('foreman'),
     });
     await loader.reload();
 
@@ -666,6 +666,21 @@ Parameters:
   - id (string): Unique identifier (e.g. "q1", "q2")
   - text (string): The question to ask
   - options (string[]): 2–6 concrete answer choices
+
+### web_search
+Search the web using DuckDuckGo HTML results (markdown formatted output).
+Use this for fast external research before creating tasks.
+Parameters:
+- query (string): Search query
+- count (number, optional): Number of results (default 5, max 20)
+- page (number, optional): Pagination page (default 1)
+
+### web_fetch
+Fetch a URL and extract readable content as markdown (or raw HTML if requested).
+Use this after \`web_search\` when you need to read the full page.
+Parameters:
+- url (string): URL to fetch
+- raw (boolean, optional): Return raw HTML instead of extracted markdown
 
 ### create_draft_task
 Creates a draft task on the shelf. The user can review and push it to the backlog.
@@ -1010,7 +1025,7 @@ async function sendToAgent(
           const modelRegistry = new ModelRegistry(authStorage);
           const loader = new DefaultResourceLoader({
             cwd: workspace.path,
-            additionalExtensionPaths: getRepoExtensionPaths(),
+            additionalExtensionPaths: getRepoExtensionPaths('foreman'),
           });
           await loader.reload();
           const sessionManager = SessionManager.create(workspace.path);

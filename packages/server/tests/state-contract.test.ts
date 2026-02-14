@@ -65,34 +65,42 @@ describe('state contract', () => {
       expect(isForbidden('foreman', 'task_complete')).toBe(true);
     });
 
-    it('foreman can read, bash, create_draft_task', () => {
+    it('foreman can read, bash, create_draft_task, web_search, and web_fetch', () => {
       expect(isForbidden('foreman', 'read')).toBe(false);
       expect(isForbidden('foreman', 'bash')).toBe(false);
       expect(isForbidden('foreman', 'create_draft_task')).toBe(false);
+      expect(isForbidden('foreman', 'web_search')).toBe(false);
+      expect(isForbidden('foreman', 'web_fetch')).toBe(false);
     });
 
     // task_planning
-    it('task_planning can save_plan but not edit/write/task_complete', () => {
+    it('task_planning can save_plan but not edit/write/task_complete/web tools', () => {
       expect(isForbidden('task_planning', 'save_plan')).toBe(false);
       expect(isForbidden('task_planning', 'edit')).toBe(true);
       expect(isForbidden('task_planning', 'write')).toBe(true);
       expect(isForbidden('task_planning', 'task_complete')).toBe(true);
+      expect(isForbidden('task_planning', 'web_search')).toBe(true);
+      expect(isForbidden('task_planning', 'web_fetch')).toBe(true);
     });
 
     // task_execution
-    it('task_execution can edit/write/task_complete but not save_plan', () => {
+    it('task_execution can edit/write/task_complete but not save_plan or web tools', () => {
       expect(isForbidden('task_execution', 'edit')).toBe(false);
       expect(isForbidden('task_execution', 'write')).toBe(false);
       expect(isForbidden('task_execution', 'task_complete')).toBe(false);
       expect(isForbidden('task_execution', 'save_plan')).toBe(true);
+      expect(isForbidden('task_execution', 'web_search')).toBe(true);
+      expect(isForbidden('task_execution', 'web_fetch')).toBe(true);
     });
 
     // task_complete
-    it('task_complete can edit/write but not save_plan or task_complete', () => {
+    it('task_complete can edit/write but not save_plan/task_complete/web tools', () => {
       expect(isForbidden('task_complete', 'edit')).toBe(false);
       expect(isForbidden('task_complete', 'write')).toBe(false);
       expect(isForbidden('task_complete', 'save_plan')).toBe(true);
       expect(isForbidden('task_complete', 'task_complete')).toBe(true);
+      expect(isForbidden('task_complete', 'web_search')).toBe(true);
+      expect(isForbidden('task_complete', 'web_fetch')).toBe(true);
     });
   });
 
@@ -107,6 +115,8 @@ describe('state contract', () => {
     expect(text).toContain('task_planning');
     expect(text).toContain('task_execution');
     expect(text).toContain('task_complete');
+    expect(text).toContain('web_search');
+    expect(text).toContain('web_fetch');
     // old modes must not appear
     expect(text).not.toContain('task_chat');
     expect(text).not.toContain('task_rework');
@@ -127,7 +137,7 @@ describe('state contract', () => {
     expect(text).toContain('<state_contract version="2">');
     expect(text).toContain('<mode>task_planning</mode>');
     expect(text).toContain('<allowed>read, bash, save_plan</allowed>');
-    expect(text).toContain('<forbidden>edit, write, task_complete</forbidden>');
+    expect(text).toContain('<forbidden>edit, write, task_complete, web_search, web_fetch</forbidden>');
   });
 
   // ---------------------------------------------------------------------------

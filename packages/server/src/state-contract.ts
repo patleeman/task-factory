@@ -36,26 +36,37 @@ interface ModeContract {
 const MODE_CONTRACTS: Record<AgentMode, ModeContract> = {
   foreman: {
     meaning: 'Workspace-level planning agent. Research, create/move/delete tasks, manage shelf. No code changes.',
-    allowed: ['read', 'bash', 'ask_questions', 'create_draft_task', 'create_artifact', 'manage_shelf', 'manage_new_task', 'factory_control'],
+    allowed: [
+      'read',
+      'bash',
+      'web_search',
+      'web_fetch',
+      'ask_questions',
+      'create_draft_task',
+      'create_artifact',
+      'manage_shelf',
+      'manage_new_task',
+      'factory_control',
+    ],
     forbidden: ['edit', 'write', 'save_plan', 'task_complete'],
     completion: 'Provide planning output and stop unless the user asks for more.',
   },
   task_planning: {
     meaning: 'Research the workspace and produce acceptance criteria plus a plan.',
     allowed: ['read', 'bash', 'save_plan'],
-    forbidden: ['edit', 'write', 'task_complete'],
+    forbidden: ['edit', 'write', 'task_complete', 'web_search', 'web_fetch'],
     completion: 'Call save_plan exactly once, then stop.',
   },
   task_execution: {
     meaning: 'Implement the plan. Pre/post execution hooks run around this phase.',
     allowed: ['read', 'bash', 'edit', 'write', 'task_complete', 'attach_task_file'],
-    forbidden: ['save_plan'],
+    forbidden: ['save_plan', 'web_search', 'web_fetch'],
     completion: 'Call task_complete when all acceptance criteria are met.',
   },
   task_complete: {
     meaning: 'Task is done. User may chat or request rework. Plan is locked.',
     allowed: ['read', 'bash', 'edit', 'write', 'attach_task_file'],
-    forbidden: ['save_plan', 'task_complete'],
+    forbidden: ['save_plan', 'task_complete', 'web_search', 'web_fetch'],
     completion: 'Respond to the user. Do not call lifecycle tools.',
   },
 };
