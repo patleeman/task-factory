@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect, memo, useMemo, useCallback } from 'react'
-import { CornerUpLeft, Loader2, Paperclip, PencilLine, SendHorizontal, X, Zap } from 'lucide-react'
+import { CornerUpLeft, Loader2, Mic, Paperclip, PencilLine, SendHorizontal, X, Zap } from 'lucide-react'
 import type { ActivityEntry, Attachment, Phase, AgentExecutionStatus } from '@pi-factory/shared'
 import type { AgentStreamState, ToolCallState } from '../hooks/useAgentStreaming'
+import { useVoiceDictation } from '../hooks/useVoiceDictation'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { api } from '../api'
@@ -479,6 +480,15 @@ export function TaskChat({
   const fileInputRef = useRef<HTMLInputElement>(null)
   const whiteboardSceneRef = useRef<WhiteboardSceneSnapshot | null>(null)
 
+  const {
+    isSupported: isDictationSupported,
+    isListening: isDictating,
+    error: dictationError,
+    toggle: toggleDictation,
+    stop: stopDictation,
+    clearError: clearDictationError,
+  } = useVoiceDictation({ setInput })
+
   // Show agent activity for all phases (including complete), so chat mode
   // still displays running status while the model responds.
   const isAgentActive = agentStream.isActive
@@ -497,6 +507,10 @@ export function TaskChat({
     () => taskId ? entries.filter((e) => e.taskId === taskId).reverse() : entries,
     [entries, taskId]
   )
+
+  useEffect(() => {
+    stopDictation()
+  }, [taskId, stopDictation])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -579,6 +593,7 @@ export function TaskChat({
   const canUploadFiles = !!(onUploadFiles || (workspaceId && taskId && attachments))
 
   const handleSend = async (modeOverride?: SendMode) => {
+    stopDictation()
     const trimmed = input.trim()
     if (!trimmed && pendingFiles.length === 0) return
 
@@ -1004,6 +1019,19 @@ export function TaskChat({
           </div>
         )}
 
+        {(isDictating || dictationError) && (
+          <div className="px-3 pt-2 pb-0">
+            {isDictating && (
+              <p className="text-[11px] font-mono text-red-600">listening… speak now</p>
+            )}
+            {dictationError && (
+              <p className="text-xs text-red-600" role="status">
+                {dictationError}
+              </p>
+            )}
+          </div>
+        )}
+
         <div className="flex gap-2 items-end p-3">
           {/* Attach file button — shown when file upload is supported */}
           {canUploadFiles && (
@@ -1039,26 +1067,51 @@ export function TaskChat({
               />
             </>
           )}
+
+          {isDictationSupported && (
+            <button
+              type="button"
+              onClick={() => {
+                clearDictationError()
+                toggleDictation()
+              }}
+              className={`rounded-md border p-2 shrink-0 transition-colors ${
+                isDictating
+                  ? 'border-red-200 bg-red-50 text-red-700 hover:bg-red-100'
+                  : 'border-slate-200 text-slate-400 hover:text-slate-600 hover:bg-slate-50'
+              }`}
+              title={isDictating ? 'Stop voice dictation' : 'Start voice dictation'}
+              aria-label={isDictating ? 'Stop voice dictation' : 'Start voice dictation'}
+            >
+              <AppIcon icon={Mic} size="sm" className={isDictating ? 'animate-pulse' : ''} />
+            </button>
+          )}
+
           <textarea
             ref={textareaRef}
             data-chat-input
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => {
+              if (dictationError) clearDictationError()
+              setInput(e.target.value)
+            }}
             onKeyDown={handleKeyDown}
             onCompositionStart={() => setIsComposing(true)}
             onCompositionEnd={() => setIsComposing(false)}
             placeholder={
-              showSteerControls
-                ? sendMode === 'steer'
-                  ? 'steer the agent… (enter to send)'
-                  : 'queue follow-up… (enter to send)'
-                : isWaitingForInput
-                  ? 'reply to the agent… (enter to send)'
-                  : isAgentActive
-                    ? 'agent is running… (enter to send)'
-                    : pendingFiles.length > 0
-                      ? 'add a note… (enter to send with files)'
-                      : 'message the agent… (enter to send)'
+              isDictating
+                ? 'listening… speak now'
+                : showSteerControls
+                  ? sendMode === 'steer'
+                    ? 'steer the agent… (enter to send)'
+                    : 'queue follow-up… (enter to send)'
+                  : isWaitingForInput
+                    ? 'reply to the agent… (enter to send)'
+                    : isAgentActive
+                      ? 'agent is running… (enter to send)'
+                      : pendingFiles.length > 0
+                        ? 'add a note… (enter to send with files)'
+                        : 'message the agent… (enter to send)'
             }
             className={`flex-1 resize-none rounded-lg border bg-white text-slate-800 placeholder-slate-400 px-3 py-2 text-sm focus:outline-none focus:ring-1 min-h-[40px] max-h-[120px] transition-colors ${
               showSteerControls && sendMode === 'steer'
