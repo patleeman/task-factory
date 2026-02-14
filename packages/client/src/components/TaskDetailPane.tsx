@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { ArrowLeft, ArrowRight, Check, ChevronDown, ExternalLink, RotateCcw, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Check, ChevronDown, ChevronRight, ExternalLink, RotateCcw, X } from 'lucide-react'
 import type { Task, Phase, ModelConfig, ExecutionWrapper, PostExecutionSummary as PostExecutionSummaryType } from '@pi-factory/shared'
 import { PHASES, PHASE_DISPLAY_NAMES, getPromotePhase, getDemotePhase } from '@pi-factory/shared'
 import { AppIcon } from './AppIcon'
@@ -287,6 +287,21 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
   const [planRegenerationError, setPlanRegenerationError] = useState<string | null>(null)
   const [isRegeneratingCriteria, setIsRegeneratingCriteria] = useState(false)
   const [criteriaRegenerationError, setCriteriaRegenerationError] = useState<string | null>(null)
+  const [isPlanExpanded, setIsPlanExpanded] = useState(() => !hasSummary)
+  const hadSummaryRef = useRef(hasSummary)
+
+  useEffect(() => {
+    const nextHasSummary = Boolean(task.frontmatter.postExecutionSummary)
+    hadSummaryRef.current = nextHasSummary
+    setIsPlanExpanded(!nextHasSummary)
+  }, [task.id])
+
+  useEffect(() => {
+    if (hadSummaryRef.current !== hasSummary) {
+      setIsPlanExpanded(!hasSummary)
+      hadSummaryRef.current = hasSummary
+    }
+  }, [hasSummary])
 
   useEffect(() => {
     setPlanRegenerationError(null)
@@ -323,6 +338,15 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
       setIsRegeneratingCriteria(false)
     }
   }
+
+  const handleSummaryGenerated = () => {
+    hadSummaryRef.current = true
+    setIsPlanExpanded(false)
+  }
+
+  const collapsedGoalPreview = frontmatter.plan
+    ? summarizePlanGoal(frontmatter.plan.goal)
+    : ''
 
   return (
     <div className="p-5 space-y-5">
@@ -514,53 +538,74 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
             </div>
           )}
           {frontmatter.plan && (
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-3">
-              <div className="flex items-center gap-2">
+            <div className="bg-blue-50 border border-blue-200 rounded-lg overflow-hidden">
+              <div className="px-4 py-3 flex items-center gap-2">
                 <h3 className="text-xs font-semibold text-blue-700 uppercase tracking-wide">Plan</h3>
                 <span className="text-[10px] text-blue-400 ml-auto">Generated {new Date(frontmatter.plan.generatedAt).toLocaleString()}</span>
+                <button
+                  type="button"
+                  onClick={() => setIsPlanExpanded((prev) => !prev)}
+                  className="inline-flex items-center gap-1 rounded-md border border-blue-200 bg-white px-2 py-1 text-[11px] font-medium text-blue-700 hover:bg-blue-100"
+                  aria-expanded={isPlanExpanded}
+                >
+                  <AppIcon icon={isPlanExpanded ? ChevronDown : ChevronRight} size="xs" />
+                  {isPlanExpanded ? 'Collapse' : 'Expand'}
+                </button>
               </div>
-              <div>
-                <h4 className="text-xs font-semibold text-slate-600 mb-1">Goal</h4>
-                <div className="prose prose-slate prose-sm max-w-none text-slate-800"><ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{frontmatter.plan.goal}</ReactMarkdown></div>
-              </div>
-              {frontmatter.plan.steps.length > 0 && (
-                <div>
-                  <h4 className="text-xs font-semibold text-slate-600 mb-1">Steps</h4>
-                  <ol className="space-y-2">
-                    {frontmatter.plan.steps.map((step: string, i: number) => (
-                      <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
-                        <span className="text-blue-600 font-semibold shrink-0 min-w-[1.5rem] text-right">{i + 1}.</span>
-                        <div className="prose prose-slate prose-sm max-w-none min-w-0 [&>p]:m-0"><ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{step}</ReactMarkdown></div>
-                      </li>
-                    ))}
-                  </ol>
+
+              {!isPlanExpanded && (
+                <div className="px-4 pb-3 text-sm text-slate-700">
+                  <span className="font-semibold text-slate-600 mr-1">Goal:</span>
+                  <span>{collapsedGoalPreview || 'Plan details hidden to reduce visual noise.'}</span>
                 </div>
               )}
-              {frontmatter.plan.validation.length > 0 && (
-                <div>
-                  <h4 className="text-xs font-semibold text-slate-600 mb-1">Validation</h4>
-                  <ul className="space-y-1.5">
-                    {frontmatter.plan.validation.map((item: string, i: number) => (
-                      <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
-                        <span className="text-green-500 shrink-0 mt-0.5">
-                          <AppIcon icon={Check} size="xs" />
-                        </span>
-                        <div className="prose prose-slate prose-sm max-w-none min-w-0 [&>p]:m-0">
-                          <ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{item}</ReactMarkdown>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              {frontmatter.plan.cleanup.length > 0 && (
-                <div>
-                  <h4 className="text-xs font-semibold text-slate-600 mb-1">Cleanup</h4>
-                  <ul className="space-y-1.5">
-                    {frontmatter.plan.cleanup.map((item: string, i: number) => (
-                      <li key={i} className="flex items-start gap-2 text-sm text-slate-700"><span className="text-slate-400 shrink-0 mt-0.5 text-xs">—</span><div className="prose prose-slate prose-sm max-w-none min-w-0 [&>p]:m-0"><ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{item}</ReactMarkdown></div></li>
-                    ))}
-                  </ul>
+
+              {isPlanExpanded && (
+                <div className="px-4 pb-4 pt-1 border-t border-blue-200/80 space-y-3">
+                  <div>
+                    <h4 className="text-xs font-semibold text-slate-600 mb-1">Goal</h4>
+                    <div className="prose prose-slate prose-sm max-w-none text-slate-800"><ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{frontmatter.plan.goal}</ReactMarkdown></div>
+                  </div>
+                  {frontmatter.plan.steps.length > 0 && (
+                    <div>
+                      <h4 className="text-xs font-semibold text-slate-600 mb-1">Steps</h4>
+                      <ol className="space-y-2">
+                        {frontmatter.plan.steps.map((step: string, i: number) => (
+                          <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
+                            <span className="text-blue-600 font-semibold shrink-0 min-w-[1.5rem] text-right">{i + 1}.</span>
+                            <div className="prose prose-slate prose-sm max-w-none min-w-0 [&>p]:m-0"><ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{step}</ReactMarkdown></div>
+                          </li>
+                        ))}
+                      </ol>
+                    </div>
+                  )}
+                  {frontmatter.plan.validation.length > 0 && (
+                    <div>
+                      <h4 className="text-xs font-semibold text-slate-600 mb-1">Validation</h4>
+                      <ul className="space-y-1.5">
+                        {frontmatter.plan.validation.map((item: string, i: number) => (
+                          <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
+                            <span className="text-green-500 shrink-0 mt-0.5">
+                              <AppIcon icon={Check} size="xs" />
+                            </span>
+                            <div className="prose prose-slate prose-sm max-w-none min-w-0 [&>p]:m-0">
+                              <ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{item}</ReactMarkdown>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {frontmatter.plan.cleanup.length > 0 && (
+                    <div>
+                      <h4 className="text-xs font-semibold text-slate-600 mb-1">Cleanup</h4>
+                      <ul className="space-y-1.5">
+                        {frontmatter.plan.cleanup.map((item: string, i: number) => (
+                          <li key={i} className="flex items-start gap-2 text-sm text-slate-700"><span className="text-slate-400 shrink-0 mt-0.5 text-xs">—</span><div className="prose prose-slate prose-sm max-w-none min-w-0 [&>p]:m-0"><ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{item}</ReactMarkdown></div></li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -616,7 +661,11 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
         </div>
         <div className="p-4">
           {(isCompleted || hasSummary) ? (
-            <PostExecutionSummarySection task={task} workspaceId={workspaceId} />
+            <PostExecutionSummarySection
+              task={task}
+              workspaceId={workspaceId}
+              onSummaryGenerated={handleSummaryGenerated}
+            />
           ) : (
             <p className="text-sm text-slate-500">
               No execution summary yet. Summary, file diffs, and verified acceptance criteria appear here after task completion.
@@ -988,15 +1037,41 @@ function AttachmentsSection({ task, workspaceId }: { task: Task; workspaceId: st
 // Post-Execution Summary Section
 // =============================================================================
 
-function PostExecutionSummarySection({ task, workspaceId }: { task: Task; workspaceId: string }) {
+function PostExecutionSummarySection({
+  task,
+  workspaceId,
+  onSummaryGenerated,
+}: {
+  task: Task
+  workspaceId: string
+  onSummaryGenerated?: () => void
+}) {
   const [summary, setSummary] = useState<PostExecutionSummaryType | undefined>(
     task.frontmatter.postExecutionSummary
   )
+  const activeTaskIdRef = useRef(task.id)
 
   // Sync with task data when task changes
   useEffect(() => {
+    activeTaskIdRef.current = task.id
     setSummary(task.frontmatter.postExecutionSummary)
   }, [task.id, task.frontmatter.postExecutionSummary])
+
+  const applySummaryUpdate = (
+    targetTaskId: string,
+    nextSummary: PostExecutionSummaryType,
+    collapsePlan: boolean,
+  ) => {
+    if (activeTaskIdRef.current !== targetTaskId) {
+      return
+    }
+
+    setSummary(nextSummary)
+
+    if (collapsePlan) {
+      onSummaryGenerated?.()
+    }
+  }
 
   if (summary) {
     return (
@@ -1005,7 +1080,9 @@ function PostExecutionSummarySection({ task, workspaceId }: { task: Task; worksp
         summary={summary}
         workspaceId={workspaceId}
         taskId={task.id}
-        onSummaryUpdated={setSummary}
+        onSummaryUpdated={(updatedSummary) => {
+          applySummaryUpdate(task.id, updatedSummary, false)
+        }}
       />
     )
   }
@@ -1015,7 +1092,9 @@ function PostExecutionSummarySection({ task, workspaceId }: { task: Task; worksp
       key={task.id}
       workspaceId={workspaceId}
       taskId={task.id}
-      onGenerated={setSummary}
+      onGenerated={(generatedSummary) => {
+        applySummaryUpdate(task.id, generatedSummary, true)
+      }}
     />
   )
 }
@@ -1023,6 +1102,13 @@ function PostExecutionSummarySection({ task, workspaceId }: { task: Task; worksp
 // =============================================================================
 // Helpers
 // =============================================================================
+
+function summarizePlanGoal(goal: unknown, maxLength = 180): string {
+  const goalText = typeof goal === 'string' ? goal : ''
+  const normalized = goalText.replace(/\s+/g, ' ').trim()
+  if (normalized.length <= maxLength) return normalized
+  return `${normalized.slice(0, maxLength - 1)}…`
+}
 
 function normalizeAcceptanceCriteria(criteria: unknown): string[] {
   if (!Array.isArray(criteria)) return []
