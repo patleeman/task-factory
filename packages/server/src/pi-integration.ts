@@ -30,6 +30,7 @@ export interface PiFactorySettings {
   // Task Factory specific settings
   defaultWorkspace?: string;
   theme?: string;
+  voiceInputHotkey?: string;
   // Task creation defaults
   taskDefaults?: TaskDefaults;
   // Planning run guardrails

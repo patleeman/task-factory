@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, memo, useMemo, useCallback } from 'react'
-import { CornerUpLeft, Loader2, Mic, Paperclip, PencilLine, SendHorizontal, X, Zap } from 'lucide-react'
+import { CornerUpLeft, Loader2, Paperclip, PencilLine, SendHorizontal, X, Zap } from 'lucide-react'
 import type { ActivityEntry, Attachment, DraftTask, Phase, AgentExecutionStatus } from '@pi-factory/shared'
 import type { AgentStreamState, ToolCallState } from '../hooks/useAgentStreaming'
 import { useVoiceDictation } from '../hooks/useVoiceDictation'
@@ -27,6 +27,7 @@ interface TaskChatProps {
   onFollowUp?: (content: string, attachmentIds?: string[]) => void
   onStop?: () => Promise<void> | void
   isStopping?: boolean
+  isVoiceHotkeyPressed?: boolean
 
   onReset?: () => void
   onUploadFiles?: (files: File[]) => Promise<Attachment[]>
@@ -368,7 +369,7 @@ const ArtifactReopenWidget = memo(function ArtifactReopenWidget({
   const canOpen = !!onOpen && typeof artifactHtml === 'string' && artifactHtml.length > 0
 
   return (
-    <div className="-mx-4 border-l-2 border-indigo-400 bg-indigo-50/70 px-4 py-2.5">
+    <div className="-mx-4 border-l-2 border-indigo-400 bg-indigo-100 px-4 py-2.5">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="text-[10px] font-semibold text-indigo-600 uppercase tracking-wide">Artifact</div>
@@ -556,6 +557,7 @@ export function TaskChat({
   onFollowUp,
   onStop,
   isStopping,
+  isVoiceHotkeyPressed = false,
   onReset,
   onUploadFiles,
   getAttachmentUrl: getAttachmentUrlProp,
@@ -581,12 +583,13 @@ export function TaskChat({
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const whiteboardSceneRef = useRef<WhiteboardSceneSnapshot | null>(null)
+  const dictationStartedForCurrentPressRef = useRef(false)
 
   const {
     isSupported: isDictationSupported,
     isListening: isDictating,
     error: dictationError,
-    toggle: toggleDictation,
+    start: startDictation,
     stop: stopDictation,
     clearError: clearDictationError,
   } = useVoiceDictation({ setInput })
@@ -620,6 +623,33 @@ export function TaskChat({
   useEffect(() => {
     stopDictation()
   }, [taskId, stopDictation])
+
+  useEffect(() => {
+    if (!isVoiceHotkeyPressed) {
+      dictationStartedForCurrentPressRef.current = false
+      stopDictation()
+      return
+    }
+
+    if (dictationStartedForCurrentPressRef.current) {
+      return
+    }
+
+    dictationStartedForCurrentPressRef.current = true
+
+    if (!isDictationSupported) {
+      return
+    }
+
+    clearDictationError()
+    startDictation()
+  }, [
+    clearDictationError,
+    isDictationSupported,
+    isVoiceHotkeyPressed,
+    startDictation,
+    stopDictation,
+  ])
 
   useEffect(() => {
     resizeComposer()
@@ -1194,25 +1224,6 @@ export function TaskChat({
                 }}
               />
             </>
-          )}
-
-          {isDictationSupported && (
-            <button
-              type="button"
-              onClick={() => {
-                clearDictationError()
-                toggleDictation()
-              }}
-              className={`text-[10px] font-medium transition-colors py-2 px-1.5 shrink-0 rounded-md ${
-                isDictating
-                  ? 'bg-red-50 text-red-700 hover:bg-red-100'
-                  : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'
-              }`}
-              title={isDictating ? 'Stop voice dictation' : 'Start voice dictation'}
-              aria-label={isDictating ? 'Stop voice dictation' : 'Start voice dictation'}
-            >
-              <AppIcon icon={Mic} size="sm" className={isDictating ? 'animate-pulse' : ''} />
-            </button>
           )}
 
           <textarea

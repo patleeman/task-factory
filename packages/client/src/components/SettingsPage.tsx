@@ -22,6 +22,11 @@ import { ModelSelector } from './ModelSelector'
 import { SkillManagementPanel } from './SkillManagementPanel'
 import { ThemeToggle } from './ThemeToggle'
 import { useTheme, type ThemePreference } from '../hooks/useTheme'
+import {
+  DEFAULT_VOICE_INPUT_HOTKEY,
+  formatVoiceInputHotkeyFromEvent,
+  normalizeVoiceInputHotkey,
+} from '../voiceHotkey'
 import type { PostExecutionSkill } from '../types/pi'
 
 function findModel(models: AvailableModel[], modelConfig?: ModelConfig): AvailableModel | undefined {
@@ -117,6 +122,18 @@ function isTerminalLoginStatus(status: PiOAuthLoginSession['status']): boolean {
   return status === 'succeeded' || status === 'failed' || status === 'cancelled'
 }
 
+function validateVoiceInputHotkeyForUi(hotkey: string): string | null {
+  if (hotkey === 'Escape') {
+    return 'Escape is reserved for navigation. Choose a different voice hotkey.'
+  }
+
+  if (hotkey === 'Ctrl+K' || hotkey === 'Meta+K') {
+    return 'Cmd/Ctrl+K is reserved for focusing chat. Choose a different voice hotkey.'
+  }
+
+  return null
+}
+
 export function SettingsPage() {
   const navigate = useNavigate()
   const { preference, setPreference } = useTheme()
@@ -130,7 +147,12 @@ export function SettingsPage() {
   const [planningGuardrailsForm, setPlanningGuardrailsForm] = useState<PlanningGuardrails>({
     ...DEFAULT_PLANNING_GUARDRAILS,
   })
+  const [voiceInputHotkey, setVoiceInputHotkey] = useState(DEFAULT_VOICE_INPUT_HOTKEY)
   const [selectedWrapperId, setSelectedWrapperId] = useState('')
+
+  const [isSavingSystemSettings, setIsSavingSystemSettings] = useState(false)
+  const [systemSettingsError, setSystemSettingsError] = useState<string | null>(null)
+  const [systemSettingsMessage, setSystemSettingsMessage] = useState<string | null>(null)
 
   const [authOverview, setAuthOverview] = useState<PiAuthOverview | null>(null)
   const [selectedAuthProviderId, setSelectedAuthProviderId] = useState('')
@@ -175,6 +197,7 @@ export function SettingsPage() {
         setWrappers(availableWrappers)
         setForm(normalizeTaskDefaultsForUi(defaults, availableModels, availableSkills))
         setPlanningGuardrailsForm(normalizePlanningGuardrailsForUi(settings))
+        setVoiceInputHotkey(normalizeVoiceInputHotkey(settings.voiceInputHotkey))
         setSelectedWrapperId('')
         setAuthOverview(auth)
       })
@@ -225,6 +248,37 @@ export function SettingsPage() {
       }
     })
   }, [])
+
+  const handleSaveVoiceInputHotkey = async () => {
+    setIsSavingSystemSettings(true)
+    setSystemSettingsError(null)
+    setSystemSettingsMessage(null)
+
+    try {
+      const currentSettings = await api.getPiFactorySettings()
+      const nextHotkey = normalizeVoiceInputHotkey(voiceInputHotkey)
+      const validationError = validateVoiceInputHotkeyForUi(nextHotkey)
+
+      if (validationError) {
+        setSystemSettingsError(validationError)
+        return
+      }
+
+      const nextSettings: PiFactorySettings = {
+        ...currentSettings,
+        voiceInputHotkey: nextHotkey,
+      }
+
+      await api.savePiFactorySettings(nextSettings)
+      setVoiceInputHotkey(nextHotkey)
+      setSystemSettingsMessage('Voice input hotkey saved')
+    } catch (err) {
+      console.error('Failed to save voice input hotkey:', err)
+      setSystemSettingsError(err instanceof Error ? err.message : 'Failed to save voice input hotkey')
+    } finally {
+      setIsSavingSystemSettings(false)
+    }
+  }
 
   const handleSaveDefaults = async () => {
     if (!form) return
@@ -462,6 +516,69 @@ export function SettingsPage() {
                 <option value="system">System</option>
               </select>
             </div>
+
+            <div className="max-w-sm">
+              <label className="block text-sm font-medium text-slate-700 mb-1">Voice input hotkey</label>
+              <input
+                type="text"
+                value={voiceInputHotkey}
+                readOnly
+                onKeyDown={(event) => {
+                  if (event.key === 'Tab') return
+                  event.preventDefault()
+
+                  const nextHotkey = formatVoiceInputHotkeyFromEvent(event)
+                  if (!nextHotkey) return
+
+                  const validationError = validateVoiceInputHotkeyForUi(nextHotkey)
+                  if (validationError) {
+                    setSystemSettingsError(validationError)
+                    setSystemSettingsMessage(null)
+                    return
+                  }
+
+                  setVoiceInputHotkey(nextHotkey)
+                  setSystemSettingsError(null)
+                  setSystemSettingsMessage(null)
+                }}
+                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent font-mono"
+                aria-label="Voice input hotkey"
+              />
+              <p className="mt-1 text-xs text-slate-500">
+                Focus this field and press the key combo you want. Hold this hotkey to record voice input; release to stop.
+              </p>
+              <div className="mt-2 flex items-center gap-2">
+                <button
+                  onClick={handleSaveVoiceInputHotkey}
+                  disabled={isSavingSystemSettings}
+                  className="btn btn-primary text-xs py-1.5 px-3 disabled:opacity-50"
+                >
+                  {isSavingSystemSettings ? 'Saving...' : 'Save Voice Hotkey'}
+                </button>
+                <button
+                  onClick={() => {
+                    setVoiceInputHotkey(DEFAULT_VOICE_INPUT_HOTKEY)
+                    setSystemSettingsError(null)
+                    setSystemSettingsMessage(null)
+                  }}
+                  className="btn btn-secondary text-xs py-1.5 px-3"
+                >
+                  Reset to Default
+                </button>
+              </div>
+            </div>
+
+            {systemSettingsError && (
+              <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                {systemSettingsError}
+              </div>
+            )}
+
+            {systemSettingsMessage && !systemSettingsError && (
+              <div className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">
+                {systemSettingsMessage}
+              </div>
+            )}
           </section>
 
           {loadError && (

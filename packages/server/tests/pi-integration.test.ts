@@ -179,3 +179,21 @@ describe('buildAgentContext shared context merge behavior', () => {
     expect(second).not.toContain('SHARED CONTEXT V1');
   });
 });
+
+describe('pi factory settings persistence', () => {
+  it('persists voice input hotkey through save/load settings.json', async () => {
+    setTempHome();
+
+    const { savePiFactorySettings, loadPiFactorySettings } = await import('../src/pi-integration.js');
+
+    savePiFactorySettings({
+      theme: 'dark',
+      voiceInputHotkey: 'Alt+Space',
+    });
+
+    expect(loadPiFactorySettings()).toEqual({
+      theme: 'dark',
+      voiceInputHotkey: 'Alt+Space',
+    });
+  });
+});

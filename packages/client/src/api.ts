@@ -71,6 +71,7 @@ export interface PiOAuthLoginSession {
 
 export interface PiFactorySettings {
   theme?: string
+  voiceInputHotkey?: string
   taskDefaults?: TaskDefaults
   planningGuardrails?: Partial<PlanningGuardrails>
   [key: string]: unknown

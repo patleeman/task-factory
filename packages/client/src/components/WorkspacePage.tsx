@@ -13,6 +13,7 @@ import type { WorkspaceWebSocketConnection } from '../hooks/useWebSocket'
 import { useAgentStreaming } from '../hooks/useAgentStreaming'
 import { usePlanningStreaming, PLANNING_TASK_ID } from '../hooks/usePlanningStreaming'
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts'
+import { DEFAULT_VOICE_INPUT_HOTKEY, normalizeVoiceInputHotkey } from '../voiceHotkey'
 import { TaskChat } from './TaskChat'
 import { QADialog } from './QADialog'
 import { ThemeToggle } from './ThemeToggle'
@@ -87,9 +88,11 @@ export function WorkspacePage() {
   const [toast, setToast] = useState<string | null>(null)
   const [moveError, setMoveError] = useState<string | null>(null)
   const [queueStatus, setQueueStatus] = useState<QueueStatus | null>(null)
+  const [voiceInputHotkey, setVoiceInputHotkey] = useState(DEFAULT_VOICE_INPUT_HOTKEY)
+  const [isVoiceHotkeyPressed, setIsVoiceHotkeyPressed] = useState(false)
   const [automationSettings, setAutomationSettings] = useState<WorkspaceAutomationSettings>({
     backlogToReady: false,
-    readyToExecuting: false,
+    readyToExecuting: true,
   })
   const [backlogAutomationToggling, setBacklogAutomationToggling] = useState(false)
   const [readyAutomationToggling, setReadyAutomationToggling] = useState(false)
@@ -118,6 +121,27 @@ export function WorkspacePage() {
   const agentStream = useAgentStreaming(taskId || null, subscribe)
   const planningStream = usePlanningStreaming(workspaceId || null, subscribe, planningMessages)
 
+  useEffect(() => {
+    let cancelled = false
+
+    api.getPiFactorySettings()
+      .then((settings) => {
+        if (cancelled) return
+        setVoiceInputHotkey(normalizeVoiceInputHotkey(settings.voiceInputHotkey))
+      })
+      .catch((err) => {
+        console.warn('Failed to load voice input hotkey settings:', err)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    setIsVoiceHotkeyPressed(false)
+  }, [taskId])
+
   // Derived data
   const archivedTasks = tasks
     .filter(t => t.frontmatter.phase === 'archived')
@@ -128,8 +152,6 @@ export function WorkspacePage() {
   const runningTaskIds = runningExecutionTaskIds
   const awaitingTaskIds = awaitingInputTaskIds
   const awaitingInputCount = nonArchivedTasks.filter((task) => awaitingTaskIds.has(task.id)).length
-  const readyTasksCount = queueStatus?.tasksInReady
-    ?? nonArchivedTasks.filter((task) => task.frontmatter.phase === 'ready').length
   const executingTasks = nonArchivedTasks.filter((task) => task.frontmatter.phase === 'executing')
   const effectiveAutomationSettings: WorkspaceAutomationSettings = syncAutomationSettingsWithQueue(
     automationSettings,
@@ -237,7 +259,7 @@ export function WorkspacePage() {
     setBacklogAutomationToggling(false)
     setReadyAutomationToggling(false)
     setFactoryToggling(false)
-    setAutomationSettings({ backlogToReady: false, readyToExecuting: false })
+    setAutomationSettings({ backlogToReady: false, readyToExecuting: true })
 
     Promise.all([
       api.getWorkspace(workspaceId),
@@ -813,7 +835,7 @@ export function WorkspacePage() {
         }
       } else {
         const automationResult = await api.updateWorkflowAutomation(workspaceId, {
-          backlogToReady: true,
+          backlogToReady: false,
           readyToExecuting: true,
         })
         applyAutomationResult(automationResult)
@@ -842,6 +864,15 @@ export function WorkspacePage() {
     onFocusChat: useCallback(() => {
       const textarea = document.querySelector('[data-chat-input]') as HTMLTextAreaElement | null
       textarea?.focus()
+    }, []),
+    voiceInputHotkey,
+    onVoiceHotkeyDown: useCallback(() => {
+      const textarea = document.querySelector('[data-chat-input]') as HTMLTextAreaElement | null
+      textarea?.focus()
+      setIsVoiceHotkeyPressed(true)
+    }, []),
+    onVoiceHotkeyUp: useCallback(() => {
+      setIsVoiceHotkeyPressed(false)
     }, []),
   })
 
@@ -996,6 +1027,7 @@ export function WorkspacePage() {
                 }
                 onOpenArtifact={handleOpenArtifact}
                 onOpenDraftTask={handleOpenDraftTask}
+                isVoiceHotkeyPressed={isVoiceHotkeyPressed}
               />
             ) : (
               /* Task mode: show task chat in left pane */
@@ -1029,6 +1061,7 @@ export function WorkspacePage() {
                       onFollowUp={(content, attachmentIds) => handleFollowUp(selectedTask.id, content, attachmentIds)}
                       onStop={() => handleStopTaskExecution(selectedTask.id)}
                       isStopping={stoppingTaskIds.has(selectedTask.id)}
+                      isVoiceHotkeyPressed={isVoiceHotkeyPressed}
                     />
                   ) : (
                     <TaskRouteMissingState onBack={() => navigate(workspaceRootPath)} />
@@ -1059,12 +1092,6 @@ export function WorkspacePage() {
               ) : (
                 <ShelfPane
                   activeArtifact={selectedArtifact}
-                  automationSettings={effectiveAutomationSettings}
-                  readyTasksCount={readyTasksCount}
-                  backlogAutomationToggling={backlogAutomationToggling}
-                  readyAutomationToggling={readyAutomationToggling}
-                  onToggleBacklogAutomation={handleToggleBacklogAutomation}
-                  onToggleReadyAutomation={handleToggleReadyAutomation}
                   onCloseArtifact={handleCloseArtifact}
                 />
               )
@@ -1096,6 +1123,11 @@ export function WorkspacePage() {
             runningTaskIds={runningTaskIds}
             awaitingInputTaskIds={awaitingTaskIds}
             selectedTaskId={selectedTask?.id || null}
+            automationSettings={effectiveAutomationSettings}
+            backlogAutomationToggling={backlogAutomationToggling}
+            readyAutomationToggling={readyAutomationToggling}
+            onToggleBacklogAutomation={handleToggleBacklogAutomation}
+            onToggleReadyAutomation={handleToggleReadyAutomation}
             onTaskClick={handleSelectTask}
             onMoveTask={handleMoveTask}
             onReorderTasks={handleReorderTasks}
