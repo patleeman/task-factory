@@ -1,94 +1,104 @@
 # Task Factory
 
-A lean manufacturing-inspired task queue for AI coding agents. Task Factory gives you a two-mode UI: a **planning agent** for research and task decomposition, and a **task pipeline** that feeds work to [Pi](https://github.com/nicholasgasior/pi-coding-agent) agents one task at a time.
+Task Factory is a lean manufacturing-inspired task queue for AI coding agents, built on **Pi**.
 
-## How it works
+It gives you a two-mode interface:
+- a **planning agent** for research and task decomposition
+- a **task pipeline** that executes work in controlled, trackable phases
 
-**Planning mode** — Chat with a planning agent to research, brainstorm, and break work into small tasks. Draft tasks and HTML artifacts land on a **shelf** for review before entering the pipeline.
+> ⚠️ **Important security note:** Task Factory is built on Pi and currently has **no sandboxing**.
+> Agents can run tools and commands with your user permissions. Only run it against trusted code/workspaces.
 
-**Task mode** — Select a task from the pipeline bar to see its details and chat with the task agent. Tasks flow left-to-right: Backlog → Planning → Ready → Executing → Complete.
+## How the application works
 
-The pipeline bar sits at the bottom of the screen. Click a task to switch from planning to task mode. Press `Esc` to go back.
+### 1) Planning mode (Foreman)
+In planning mode, you chat with a planning agent to:
+- explore the codebase
+- break larger goals into smaller tasks
+- draft acceptance criteria and implementation plans
 
-## Quick start (npm CLI)
+Planning output is saved to a **Shelf** as draft tasks and artifacts for review.
+
+### 2) Shelf review
+The Shelf acts as a staging area for planning output:
+- **Draft tasks** can be promoted into the pipeline
+- **Artifacts** (e.g. HTML summaries) can be reviewed before execution
+
+### 3) Task pipeline execution
+Tasks move left-to-right through phases:
+
+| Phase | Description |
+|---|---|
+| **Backlog** | New/unplanned tasks |
+| **Planning** | Plan generation in progress |
+| **Ready** | Planned and queued |
+| **Executing** | Agent actively working |
+| **Complete** | Finished |
+| **Archived** | Removed from active flow |
+
+### 4) Task mode
+Selecting a task switches to task mode, where you can:
+- inspect task details
+- chat with the task agent
+- monitor streaming progress, tool calls, and status updates
+
+## Prerequisites
+
+- Node.js **20+**
+- Pi configured locally (auth + model/provider setup in `~/.pi/agent/`)
+
+## Installation
+
+### Option A: Install from npm (recommended)
 
 ```bash
-# Install globally
 npm install -g pi-factory
-
-# Start server (opens browser automatically)
-pifactory
 ```
 
-By default, `pifactory` starts the server and opens your browser to [http://localhost:3000](http://localhost:3000).
+This installs both CLI commands:
+- `pifactory` (primary)
+- `pi-factory` (compatibility alias)
 
-```bash
-pifactory --help                      # Show CLI help
-pifactory --version                   # Show version
-pifactory --no-open                   # Start without opening browser
-PORT=8080 HOST=127.0.0.1 pifactory    # Override host/port
-```
-
-`pi-factory` is kept as a compatibility alias.
-
-## Development from source
+### Option B: Install from source
 
 ```bash
 git clone https://github.com/patleeman/pi-factory.git
 cd pi-factory
 npm install
+```
+
+## Quickstart
+
+### Start with the CLI
+
+```bash
+pifactory
+```
+
+By default this starts the server and opens the app in your browser.
+
+Useful options:
+
+```bash
+pifactory --help
+pifactory --version
+pifactory --no-open
+PORT=8080 HOST=127.0.0.1 pifactory
+```
+
+### Start from source (production build)
+
+```bash
 npm run build
 npm start
+```
 
-# Or run in dev mode (hot reload)
+Then open `http://localhost:3000`.
+
+### Development mode
+
+```bash
 npm run dev
-```
-
-## Prerequisites
-
-- Node.js 20+
-- A Pi-compatible API key configured in `~/.pi/agent/auth.json` (see [Pi docs](https://github.com/nicholasgasior/pi-coding-agent))
-
-## Concepts
-
-### Pipeline phases
-
-| Phase | Description |
-|-------|-------------|
-| **Backlog** | Unplanned tasks. Agent creates a plan before they're ready. |
-| **Planning** | Agent is generating a plan and acceptance criteria. |
-| **Ready** | Planned and approved. Queued for execution. |
-| **Executing** | Agent is actively working on the task. |
-| **Complete** | Done. Ready for archiving. |
-| **Archived** | Out of the pipeline. |
-
-### Shelf
-
-The planning agent can create **draft tasks** and **HTML artifacts** on the shelf. Draft tasks can be pushed to the backlog with one click. Artifacts are rendered HTML in sandboxed iframes — useful for research summaries, comparison tables, or mockups.
-
-### Extensions
-
-Drop `.ts` files in the `extensions/` directory to add custom tools to the agents. Task Factory includes built-in extensions for `save_plan`, `task_complete`, `create_draft_task`, and `create_artifact`.
-
-## Keyboard shortcuts
-
-| Key | Action |
-|-----|--------|
-| `Esc` | Deselect task (return to planning mode) |
-| `⌘/Ctrl+K` | Focus chat input |
-
-## Project structure
-
-```
-pi-factory/
-├── bin/                    # CLI entry point
-├── extensions/             # Agent tool extensions
-├── packages/
-│   ├── client/             # React + Vite frontend
-│   ├── server/             # Express + WebSocket backend
-│   └── shared/             # Shared types
-├── skills/                 # Post-execution skill definitions
-└── scripts/                # Build scripts
 ```
 
 ## Configuration
@@ -96,24 +106,37 @@ pi-factory/
 ### Environment variables
 
 | Variable | Default | Description |
-|----------|---------|-------------|
-| `PORT` | `3000` | Server port |
-| `HOST` | `0.0.0.0` | Server host |
+|---|---|---|
+| `PORT` | `3000` | HTTP/WebSocket server port |
+| `HOST` | `0.0.0.0` (CLI) | Bind host |
 
-### Workspace config
+## Keyboard shortcuts
 
-Each workspace stores configuration in `{workspace}/.pi/`:
-- `shelf.json` — Draft tasks and artifacts
-- `planning-messages.json` — Planning conversation history
-- Task files live in `{workspace}/.pi/tasks/`
+| Key | Action |
+|---|---|
+| `Esc` | Return to planning mode |
+| `⌘/Ctrl+K` | Focus chat input |
 
-## Development
+## Built on Pi (and no sandboxing yet)
 
-```bash
-npm run dev          # Start all packages with hot reload
-npm run build        # Production build
-npm run typecheck    # Type checking across all packages
-```
+Task Factory is built directly on the Pi coding-agent runtime and extension model.
+
+That means:
+- agent capabilities are powerful and flexible
+- but there is currently **no sandboxing boundary** in Task Factory
+- commands/tool calls execute with your local machine permissions
+
+Use trusted repositories, review task intent, and run in an environment you control.
+
+## Contributing
+
+We are currently **not accepting pull requests**.
+
+If you find a bug or have a feature request, please open a GitHub **Issue** with:
+- what you expected
+- what happened
+- steps to reproduce
+- logs/screenshots (if available)
 
 ## License
 
