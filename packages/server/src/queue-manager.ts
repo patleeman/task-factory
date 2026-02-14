@@ -142,7 +142,7 @@ class QueueManager {
         if (recentlyStarted) {
           logger.info(`[QueueManager] Orphaned task ${orphan.id} failed recently — moving back to ready`);
           const fromState = buildTaskStateSnapshot(orphan.frontmatter);
-          moveTaskToPhase(orphan, 'ready', 'system', 'Moved back to ready after execution failure');
+          moveTaskToPhase(orphan, 'ready', 'system', 'Moved back to ready after execution failure', tasks);
 
           await logTaskStateTransition({
             workspaceId: this.workspaceId,
@@ -189,14 +189,19 @@ class QueueManager {
         return; // At capacity — wait for current to finish
       }
 
-      // Find next ready task — pull from the END of the ready column (rightmost / highest order).
+      // Find the next ready task using FIFO.
+      // Tasks enter ready on the left (lower order), so the oldest ready task is
+      // at the right edge (highest order).
       const readyTasks = tasks
         .filter(t => t.frontmatter.phase === 'ready')
         .filter(t => !(t.frontmatter.planningStatus === 'running' && !t.frontmatter.plan))
         .sort((a, b) => {
           const orderDiff = (a.frontmatter.order ?? 0) - (b.frontmatter.order ?? 0);
           if (orderDiff !== 0) return orderDiff;
-          return new Date(a.frontmatter.created).getTime() - new Date(b.frontmatter.created).getTime();
+
+          // Keep FIFO behavior for equal-order legacy data by placing newer
+          // tasks first, so the oldest task remains at the end/right pick.
+          return new Date(b.frontmatter.created).getTime() - new Date(a.frontmatter.created).getTime();
         });
 
       if (readyTasks.length === 0) {
@@ -278,7 +283,7 @@ class QueueManager {
       if (currentTask && currentTask.frontmatter.phase === 'executing') {
         if (success) {
           const fromState = buildTaskStateSnapshot(currentTask.frontmatter);
-          moveTaskToPhase(currentTask, 'complete', 'system', 'Execution completed successfully');
+          moveTaskToPhase(currentTask, 'complete', 'system', 'Execution completed successfully', tasks);
 
           await logTaskStateTransition({
             workspaceId: this.workspaceId,

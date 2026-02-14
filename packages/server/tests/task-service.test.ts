@@ -126,7 +126,7 @@ describe('task ordering', () => {
     expect(backlogIds).toEqual([first.id, second.id]);
   });
 
-  it('inserts moved tasks at the start of the destination phase', () => {
+  it('inserts moved tasks at the start of ready', () => {
     const { workspacePath, tasksDir } = createTempWorkspace();
 
     const first = createTaskFile(workspacePath, tasksDir, {
@@ -152,6 +152,114 @@ describe('task ordering', () => {
     const readyTasks = discoverTasks(tasksDir).filter((task) => task.frontmatter.phase === 'ready');
 
     expect(readyTasks.map((task) => task.id)).toEqual([second.id, first.id]);
+    expect(readyTasks[0].frontmatter.order).toBeLessThan(readyTasks[1].frontmatter.order);
+  });
+
+  it('inserts moved tasks at the start of executing', () => {
+    const { workspacePath, tasksDir } = createTempWorkspace();
+
+    const first = createTaskFile(workspacePath, tasksDir, {
+      title: 'First task',
+      content: 'first',
+      acceptanceCriteria: ['done'],
+    });
+
+    const second = createTaskFile(workspacePath, tasksDir, {
+      title: 'Second task',
+      content: 'second',
+      acceptanceCriteria: ['done'],
+    });
+
+    let tasks = discoverTasks(tasksDir);
+    moveTaskToPhase(tasks.find((task) => task.id === first.id)!, 'ready', 'user', 'first to ready', tasks);
+
+    tasks = discoverTasks(tasksDir);
+    moveTaskToPhase(tasks.find((task) => task.id === first.id)!, 'executing', 'user', 'first to executing', tasks);
+
+    tasks = discoverTasks(tasksDir);
+    moveTaskToPhase(tasks.find((task) => task.id === second.id)!, 'ready', 'user', 'second to ready', tasks);
+
+    tasks = discoverTasks(tasksDir);
+    moveTaskToPhase(tasks.find((task) => task.id === second.id)!, 'executing', 'user', 'second to executing', tasks);
+
+    const executingTasks = discoverTasks(tasksDir).filter((task) => task.frontmatter.phase === 'executing');
+
+    expect(executingTasks.map((task) => task.id)).toEqual([second.id, first.id]);
+    expect(executingTasks[0].frontmatter.order).toBeLessThan(executingTasks[1].frontmatter.order);
+  });
+
+  it('inserts moved tasks at the start of complete', () => {
+    const { workspacePath, tasksDir } = createTempWorkspace();
+
+    const first = createTaskFile(workspacePath, tasksDir, {
+      title: 'First task',
+      content: 'first',
+      acceptanceCriteria: ['done'],
+    });
+
+    const second = createTaskFile(workspacePath, tasksDir, {
+      title: 'Second task',
+      content: 'second',
+      acceptanceCriteria: ['done'],
+    });
+
+    let tasks = discoverTasks(tasksDir);
+    moveTaskToPhase(tasks.find((task) => task.id === first.id)!, 'ready', 'user', 'first to ready', tasks);
+
+    tasks = discoverTasks(tasksDir);
+    moveTaskToPhase(tasks.find((task) => task.id === first.id)!, 'executing', 'user', 'first to executing', tasks);
+
+    tasks = discoverTasks(tasksDir);
+    moveTaskToPhase(tasks.find((task) => task.id === first.id)!, 'complete', 'user', 'first to complete', tasks);
+
+    tasks = discoverTasks(tasksDir);
+    moveTaskToPhase(tasks.find((task) => task.id === second.id)!, 'ready', 'user', 'second to ready', tasks);
+
+    tasks = discoverTasks(tasksDir);
+    moveTaskToPhase(tasks.find((task) => task.id === second.id)!, 'executing', 'user', 'second to executing', tasks);
+
+    tasks = discoverTasks(tasksDir);
+    moveTaskToPhase(tasks.find((task) => task.id === second.id)!, 'complete', 'user', 'second to complete', tasks);
+
+    const completeTasks = discoverTasks(tasksDir).filter((task) => task.frontmatter.phase === 'complete');
+
+    expect(completeTasks.map((task) => task.id)).toEqual([second.id, first.id]);
+    expect(completeTasks[0].frontmatter.order).toBeLessThan(completeTasks[1].frontmatter.order);
+  });
+
+  it('inserts complete -> ready rework moves at the start of ready', () => {
+    const { workspacePath, tasksDir } = createTempWorkspace();
+
+    const first = createTaskFile(workspacePath, tasksDir, {
+      title: 'First task',
+      content: 'first',
+      acceptanceCriteria: ['done'],
+    });
+
+    const second = createTaskFile(workspacePath, tasksDir, {
+      title: 'Second task',
+      content: 'second',
+      acceptanceCriteria: ['done'],
+    });
+
+    let tasks = discoverTasks(tasksDir);
+    moveTaskToPhase(tasks.find((task) => task.id === first.id)!, 'ready', 'user', 'first to ready', tasks);
+
+    tasks = discoverTasks(tasksDir);
+    moveTaskToPhase(tasks.find((task) => task.id === first.id)!, 'executing', 'user', 'first to executing', tasks);
+
+    tasks = discoverTasks(tasksDir);
+    moveTaskToPhase(tasks.find((task) => task.id === first.id)!, 'complete', 'user', 'first to complete', tasks);
+
+    tasks = discoverTasks(tasksDir);
+    moveTaskToPhase(tasks.find((task) => task.id === second.id)!, 'ready', 'user', 'second to ready', tasks);
+
+    tasks = discoverTasks(tasksDir);
+    moveTaskToPhase(tasks.find((task) => task.id === first.id)!, 'ready', 'user', 'rework first task', tasks);
+
+    const readyTasks = discoverTasks(tasksDir).filter((task) => task.frontmatter.phase === 'ready');
+
+    expect(readyTasks.map((task) => task.id)).toEqual([first.id, second.id]);
     expect(readyTasks[0].frontmatter.order).toBeLessThan(readyTasks[1].frontmatter.order);
   });
 });

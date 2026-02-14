@@ -1544,17 +1544,22 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/execute', async (req, res) 
         // Output callback is for legacy/simulation only
       },
       onComplete: (success) => {
+        let taskForBroadcast = task;
+
         if (success) {
-          const fromState = buildTaskStateSnapshot(task.frontmatter);
+          const latestTasks = discoverTasks(tasksDir);
+          const latestTask = latestTasks.find((candidate) => candidate.id === task.id) || task;
+          const fromState = buildTaskStateSnapshot(latestTask.frontmatter);
 
           // Auto-move to complete
-          moveTaskToPhase(task, 'complete', 'system', 'Execution completed');
+          moveTaskToPhase(latestTask, 'complete', 'system', 'Execution completed', latestTasks);
+          taskForBroadcast = latestTask;
 
           void logTaskStateTransition({
             workspaceId: workspace.id,
-            taskId: task.id,
+            taskId: latestTask.id,
             from: fromState,
-            to: buildTaskStateSnapshot(task.frontmatter),
+            to: buildTaskStateSnapshot(latestTask.frontmatter),
             source: 'task:execute:on-complete',
             reason: 'Execution completed',
             broadcastToWorkspace: (event) => broadcastToWorkspace(workspace.id, event),
@@ -1562,10 +1567,10 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/execute', async (req, res) 
             logger.error('Failed to log execution completion state transition', stateErr);
           });
         }
-        
+
         broadcastToWorkspace(workspace.id, {
           type: 'task:moved',
-          task,
+          task: taskForBroadcast,
           from: 'executing',
           to: success ? 'complete' : 'executing',
         });
