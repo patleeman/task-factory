@@ -450,17 +450,23 @@ export function moveTaskToPhase(
   }
 
   if (newPhase === 'complete') {
-    task.frontmatter.completed = now;
+    // Keep completion metadata when simply unarchiving a previously completed task.
+    const restoringPreviouslyCompletedTask =
+      oldPhase === 'archived' && Boolean(task.frontmatter.completed);
 
-    if (task.frontmatter.started) {
-      const cycleTime =
-        new Date(now).getTime() - new Date(task.frontmatter.started).getTime();
-      task.frontmatter.cycleTime = Math.floor(cycleTime / 1000);
+    if (!restoringPreviouslyCompletedTask) {
+      task.frontmatter.completed = now;
+
+      if (task.frontmatter.started) {
+        const cycleTime =
+          new Date(now).getTime() - new Date(task.frontmatter.started).getTime();
+        task.frontmatter.cycleTime = Math.floor(cycleTime / 1000);
+      }
+
+      const leadTime =
+        new Date(now).getTime() - new Date(task.frontmatter.created).getTime();
+      task.frontmatter.leadTime = Math.floor(leadTime / 1000);
     }
-
-    const leadTime =
-      new Date(now).getTime() - new Date(task.frontmatter.created).getTime();
-    task.frontmatter.leadTime = Math.floor(leadTime / 1000);
   }
 
   task.frontmatter.phase = newPhase;
@@ -604,7 +610,7 @@ export function canMoveToPhase(task: Task, targetPhase: Phase): {
     ready: ['backlog', 'executing', 'archived'],
     executing: ['backlog', 'ready', 'complete', 'archived'],
     complete: ['ready', 'executing', 'archived'],
-    archived: ['backlog'], // Un-archive back to backlog
+    archived: ['backlog', 'complete'], // Restore archived tasks to complete; backlog remains available for manual moves
   };
 
   if (!validTransitions[currentPhase].includes(targetPhase)) {

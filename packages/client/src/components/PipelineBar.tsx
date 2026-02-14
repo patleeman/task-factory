@@ -405,7 +405,7 @@ export function PipelineBar({
                 anchorRef={archiveRef}
                 archivedTasks={archivedTasks}
                 onTaskClick={(task) => { onTaskClick(task); setShowArchived(false) }}
-                onRestore={(task) => { onMoveTask(task, 'backlog'); setShowArchived(false) }}
+                onRestore={(task) => { onMoveTask(task, 'complete'); setShowArchived(false) }}
                 onClose={() => setShowArchived(false)}
               />
             )}

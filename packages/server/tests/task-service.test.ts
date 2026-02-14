@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, rmSync, existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -264,6 +264,91 @@ describe('task ordering', () => {
   });
 });
 
+describe('archived restore moves', () => {
+  it('persists archived -> complete transitions when restoring a task', () => {
+    const { workspacePath, tasksDir } = createTempWorkspace();
+
+    const created = createTaskFile(workspacePath, tasksDir, {
+      title: 'Archived restore target',
+      content: 'restore this task',
+      acceptanceCriteria: ['done'],
+    });
+
+    let tasks = discoverTasks(tasksDir);
+    moveTaskToPhase(tasks.find((task) => task.id === created.id)!, 'ready', 'user', 'to ready', tasks);
+
+    tasks = discoverTasks(tasksDir);
+    moveTaskToPhase(tasks.find((task) => task.id === created.id)!, 'executing', 'user', 'to executing', tasks);
+
+    tasks = discoverTasks(tasksDir);
+    moveTaskToPhase(tasks.find((task) => task.id === created.id)!, 'complete', 'user', 'to complete', tasks);
+
+    tasks = discoverTasks(tasksDir);
+    moveTaskToPhase(tasks.find((task) => task.id === created.id)!, 'archived', 'user', 'archive', tasks);
+
+    tasks = discoverTasks(tasksDir);
+    moveTaskToPhase(tasks.find((task) => task.id === created.id)!, 'complete', 'user', 'restore from archive', tasks);
+
+    const restored = discoverTasks(tasksDir).find((task) => task.id === created.id)!;
+    expect(restored.frontmatter.phase).toBe('complete');
+
+    const lastTransition = restored.history.at(-1);
+    expect(lastTransition).toMatchObject({
+      from: 'archived',
+      to: 'complete',
+      actor: 'user',
+      reason: 'restore from archive',
+    });
+  });
+
+  it('keeps existing completion metrics when restoring a previously completed archived task', () => {
+    vi.useFakeTimers();
+
+    try {
+      vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+      const { workspacePath, tasksDir } = createTempWorkspace();
+
+      const created = createTaskFile(workspacePath, tasksDir, {
+        title: 'Preserve completion metadata',
+        content: 'restore should not re-complete the task',
+        acceptanceCriteria: ['done'],
+      });
+
+      let tasks = discoverTasks(tasksDir);
+      moveTaskToPhase(tasks.find((task) => task.id === created.id)!, 'ready', 'user', 'to ready', tasks);
+
+      vi.setSystemTime(new Date('2026-01-01T00:10:00.000Z'));
+      tasks = discoverTasks(tasksDir);
+      moveTaskToPhase(tasks.find((task) => task.id === created.id)!, 'executing', 'user', 'to executing', tasks);
+
+      vi.setSystemTime(new Date('2026-01-01T00:20:00.000Z'));
+      tasks = discoverTasks(tasksDir);
+      moveTaskToPhase(tasks.find((task) => task.id === created.id)!, 'complete', 'user', 'to complete', tasks);
+
+      const completedTask = discoverTasks(tasksDir).find((task) => task.id === created.id)!;
+      const completedAt = completedTask.frontmatter.completed;
+      const cycleTime = completedTask.frontmatter.cycleTime;
+      const leadTime = completedTask.frontmatter.leadTime;
+
+      vi.setSystemTime(new Date('2026-01-01T00:30:00.000Z'));
+      tasks = discoverTasks(tasksDir);
+      moveTaskToPhase(tasks.find((task) => task.id === created.id)!, 'archived', 'user', 'archive', tasks);
+
+      vi.setSystemTime(new Date('2026-01-01T00:40:00.000Z'));
+      tasks = discoverTasks(tasksDir);
+      moveTaskToPhase(tasks.find((task) => task.id === created.id)!, 'complete', 'user', 'restore from archive', tasks);
+
+      const restoredTask = discoverTasks(tasksDir).find((task) => task.id === created.id)!;
+      expect(restoredTask.frontmatter.phase).toBe('complete');
+      expect(restoredTask.frontmatter.completed).toBe(completedAt);
+      expect(restoredTask.frontmatter.cycleTime).toBe(cycleTime);
+      expect(restoredTask.frontmatter.leadTime).toBe(leadTime);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe('task id generation', () => {
   it('does not reuse task IDs after deleting an existing task', () => {
     const { workspacePath, tasksDir } = createTempWorkspace();
@@ -465,9 +550,10 @@ describe('canMoveToPhase', () => {
     expect(result.reason).toBe('Task planning is still running');
   });
 
-  it('only allows unarchive from archived to backlog', () => {
+  it('allows restoring archived tasks to complete while still rejecting unsupported targets', () => {
     const archivedTask = createTask({ phase: 'archived' });
 
+    expect(canMoveToPhase(archivedTask, 'complete')).toEqual({ allowed: true });
     expect(canMoveToPhase(archivedTask, 'backlog')).toEqual({ allowed: true });
 
     const blocked = canMoveToPhase(archivedTask, 'ready');
