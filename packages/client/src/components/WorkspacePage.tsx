@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { ArrowLeft } from 'lucide-react'
 import { useParams, useNavigate, useMatch } from 'react-router-dom'
-import type { Task, Workspace, ActivityEntry, Phase, QueueStatus, Shelf, PlanningMessage, QAAnswer, AgentExecutionStatus, WorkspaceAutomationSettings } from '@pi-factory/shared'
+import type { Task, Workspace, ActivityEntry, Phase, QueueStatus, Shelf, PlanningMessage, QAAnswer, AgentExecutionStatus, WorkspaceAutomationSettings, Artifact } from '@pi-factory/shared'
 import { api } from '../api'
 import { AppIcon } from './AppIcon'
 import { PipelineBar } from './PipelineBar'
@@ -59,6 +59,7 @@ export function WorkspacePage() {
   const toastTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
 
   const [shelf, setShelf] = useState<Shelf>({ items: [] })
+  const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null)
   const [planningMessages, setPlanningMessages] = useState<PlanningMessage[]>([])
   const [runningExecutionTaskIds, setRunningExecutionTaskIds] = useState<Set<string>>(new Set())
   const [awaitingInputTaskIds, setAwaitingInputTaskIds] = useState<Set<string>>(new Set())
@@ -90,6 +91,15 @@ export function WorkspacePage() {
     automationSettings,
     queueStatus,
   )
+  const shelfArtifacts = useMemo<Artifact[]>(
+    () => shelf.items
+      .filter((item): item is { type: 'artifact'; item: Artifact } => item.type === 'artifact')
+      .map((item) => item.item),
+    [shelf.items],
+  )
+  const isArtifactAvailable = useCallback((artifactId: string) => {
+    return shelfArtifacts.some((artifact) => artifact.id === artifactId)
+  }, [shelfArtifacts])
 
   const planGeneratingTaskIds = useMemo(() => {
     return new Set(
@@ -157,6 +167,7 @@ export function WorkspacePage() {
     setIsLoading(true)
     setError(null)
     setActivity([])
+    setSelectedArtifactId(null)
     setRunningExecutionTaskIds(new Set())
     setAwaitingInputTaskIds(new Set())
     setBacklogAutomationToggling(false)
@@ -548,6 +559,17 @@ export function WorkspacePage() {
     }
   }
 
+  const handleOpenArtifact = useCallback((artifactId: string) => {
+    setSelectedArtifactId(artifactId)
+    if (isCreateRoute) {
+      navigate(workspaceRootPath)
+    }
+  }, [isCreateRoute, navigate, workspaceRootPath])
+
+  const handleCloseArtifact = useCallback(() => {
+    setSelectedArtifactId(null)
+  }, [])
+
   // Q&A disambiguation handlers
   const handleQASubmit = async (answers: QAAnswer[]) => {
     if (!workspaceId || !planningStream.activeQARequest) return
@@ -820,6 +842,8 @@ export function WorkspacePage() {
                     />
                   ) : undefined
                 }
+                onOpenArtifact={handleOpenArtifact}
+                isArtifactAvailable={isArtifactAvailable}
               />
             ) : (
               /* Task mode: show task chat in left pane */
@@ -875,12 +899,15 @@ export function WorkspacePage() {
               ) : (
                 <ShelfPane
                   shelf={shelf}
+                  selectedArtifactId={selectedArtifactId}
                   automationSettings={effectiveAutomationSettings}
                   readyTasksCount={readyTasksCount}
                   backlogAutomationToggling={backlogAutomationToggling}
                   readyAutomationToggling={readyAutomationToggling}
                   onToggleBacklogAutomation={handleToggleBacklogAutomation}
                   onToggleReadyAutomation={handleToggleReadyAutomation}
+                  onSelectArtifact={handleOpenArtifact}
+                  onCloseArtifact={handleCloseArtifact}
                   onPushDraft={handlePushDraft}
                   onPushAll={handlePushAllDrafts}
                   onRemoveItem={handleRemoveShelfItem}

@@ -10,7 +10,7 @@ import { Type } from '@sinclair/typebox';
 declare global {
   var __piFactoryShelfCallbacks: Map<string, {
     createDraftTask: (args: any) => Promise<void>;
-    createArtifact: (args: any) => Promise<void>;
+    createArtifact: (args: any) => Promise<{ id: string; name: string }>;
     removeItem: (itemId: string) => Promise<string>;
     updateDraftTask: (draftId: string, updates: any) => Promise<string>;
     getShelf: () => Promise<any>;

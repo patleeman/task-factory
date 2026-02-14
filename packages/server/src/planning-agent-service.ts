@@ -66,7 +66,7 @@ import {
 
 export interface ShelfCallbacks {
   createDraftTask: (args: any) => Promise<void>;
-  createArtifact: (args: { name: string; html: string }) => Promise<void>;
+  createArtifact: (args: { name: string; html: string }) => Promise<Artifact>;
   removeItem: (itemId: string) => Promise<string>;
   updateDraftTask: (draftId: string, updates: any) => Promise<string>;
   getShelf: () => Promise<Shelf>;
@@ -118,6 +118,7 @@ function registerShelfCallbacks(
       };
       const shelf = await addArtifact(workspaceId, artifact);
       broadcast({ type: 'shelf:updated', workspaceId, shelf });
+      return artifact;
     },
     removeItem: async (itemId: string) => {
       try {
@@ -458,6 +459,15 @@ interface PlanningSession {
   firstMessageSent: boolean;
   /** UUID for the current planning session (persisted in planning-session-id.txt) */
   sessionId: string;
+  /** Queue of pending sends — ensures only one followUp/prompt runs at a time */
+  sendQueue: Array<{
+    content: string;
+    images?: { type: 'image'; data: string; mimeType: string }[];
+    resolve: () => void;
+    reject: (err: Error) => void;
+  }>;
+  /** Whether a send is currently in-flight */
+  isSending: boolean;
 }
 
 const planningSessions = new Map<string, PlanningSession>();
@@ -494,6 +504,8 @@ async function getOrCreateSession(
     broadcast,
     firstMessageSent: false,
     sessionId: getOrCreateSessionId(workspaceId),
+    sendQueue: [],
+    isSending: false,
   };
 
   planningSessions.set(workspaceId, session);
@@ -691,6 +703,67 @@ Parameters:
 - Be conversational and helpful — you're a collaborator, not just a task creator`;
 }
 
+function extractTextFromContentBlocks(content: unknown): string {
+  if (!Array.isArray(content)) return '';
+  return content
+    .filter((block): block is { type: string; text?: string } => typeof block === 'object' && block !== null)
+    .filter((block) => block.type === 'text' && typeof block.text === 'string')
+    .map((block) => block.text as string)
+    .join('');
+}
+
+function extractPlanningToolResultText(result: unknown): string {
+  if (!result) return '';
+  if (typeof result === 'string') return result;
+
+  if (typeof result === 'object' && result !== null) {
+    const maybe = result as { content?: unknown; partialResult?: { content?: unknown } };
+    if (Array.isArray(maybe.content)) {
+      return extractTextFromContentBlocks(maybe.content);
+    }
+
+    if (Array.isArray(maybe.partialResult?.content)) {
+      return extractTextFromContentBlocks(maybe.partialResult.content);
+    }
+  }
+
+  return '';
+}
+
+function extractPlanningToolResultDetails(result: unknown): Record<string, unknown> | undefined {
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return undefined;
+  const details = (result as { details?: unknown }).details;
+  if (!details || typeof details !== 'object' || Array.isArray(details)) return undefined;
+  return details as Record<string, unknown>;
+}
+
+function extractArtifactReferenceFromToolResult(toolName: string, result: unknown): { artifactId: string; artifactName: string } | undefined {
+  if (toolName !== 'create_artifact') return undefined;
+
+  const details = extractPlanningToolResultDetails(result);
+  if (!details) return undefined;
+
+  const nestedArtifact = details.artifact;
+  const artifactObject = (nestedArtifact && typeof nestedArtifact === 'object' && !Array.isArray(nestedArtifact))
+    ? nestedArtifact as Record<string, unknown>
+    : undefined;
+
+  const artifactId = typeof details.artifactId === 'string'
+    ? details.artifactId
+    : typeof artifactObject?.id === 'string'
+      ? artifactObject.id
+      : undefined;
+
+  const artifactName = typeof details.artifactName === 'string'
+    ? details.artifactName
+    : typeof artifactObject?.name === 'string'
+      ? artifactObject.name
+      : undefined;
+
+  if (!artifactId || !artifactName) return undefined;
+  return { artifactId, artifactName };
+}
+
 // =============================================================================
 // Handle Pi SDK events for the planning session
 // =============================================================================
@@ -799,12 +872,12 @@ function handlePlanningEvent(
     }
 
     case 'tool_execution_end': {
-      const resultText = typeof event.result === 'string'
-        ? event.result
-        : (event as any).content?.map((c: any) => c.type === 'text' ? c.text : '').join('') || '';
+      const resultText = extractPlanningToolResultText(event.result)
+        || extractTextFromContentBlocks((event as any).content);
 
       // Get the args we stored at tool_start
       const toolInfo = session.toolCallArgs.get(event.toolCallId);
+      const artifactRef = extractArtifactReferenceFromToolResult(event.toolName, event.result);
 
       broadcast({
         type: 'planning:tool_end',
@@ -826,9 +899,12 @@ function handlePlanningEvent(
           toolName: event.toolName,
           args: toolInfo?.args || {},
           isError: event.isError,
+          artifactId: artifactRef?.artifactId,
+          artifactName: artifactRef?.artifactName,
         },
       };
       session.messages.push(toolMsg);
+      persistMessages(workspaceId, session.messages);
       broadcast({ type: 'planning:message', workspaceId, message: toolMsg });
 
       session.toolCallArgs.delete(event.toolCallId);
@@ -994,6 +1070,26 @@ async function sendToAgent(
 }
 
 /**
+ * Process the send queue sequentially. Only one send runs at a time per session.
+ */
+async function processSendQueue(session: PlanningSession): Promise<void> {
+  if (session.isSending) return; // Another call is already processing
+  session.isSending = true;
+
+  while (session.sendQueue.length > 0) {
+    const next = session.sendQueue.shift()!;
+    try {
+      await sendToAgent(session, next.content, session.workspaceId, session.broadcast, next.images);
+      next.resolve();
+    } catch (err) {
+      next.reject(err instanceof Error ? err : new Error(String(err)));
+    }
+  }
+
+  session.isSending = false;
+}
+
+/**
  * Send a user message to the planning agent and get a streaming response.
  */
 export async function sendPlanningMessage(
@@ -1017,8 +1113,11 @@ export async function sendPlanningMessage(
   persistMessages(workspaceId, session.messages);
   broadcast({ type: 'planning:message', workspaceId, message: userMsg });
 
-  // Send to the agent with retry on failure
-  await sendToAgent(session, content, workspaceId, broadcast, images);
+  // Enqueue the send and process sequentially
+  return new Promise<void>((resolve, reject) => {
+    session.sendQueue.push({ content, images, resolve, reject });
+    processSendQueue(session);
+  });
 }
 
 /**

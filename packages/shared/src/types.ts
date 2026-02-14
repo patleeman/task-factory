@@ -561,6 +561,9 @@ export interface PlanningMessage {
     toolName?: string;
     args?: Record<string, unknown>;
     isError?: boolean;
+    /** Stable reference for create_artifact tool messages. */
+    artifactId?: string;
+    artifactName?: string;
     qaRequest?: QARequest;
     qaResponse?: QAResponse;
   };

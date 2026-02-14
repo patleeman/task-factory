@@ -41,6 +41,8 @@ function messagesToEntries(messages: PlanningMessage[]): ActivityEntry[] {
           toolName: msg.metadata?.toolName,
           args: msg.metadata?.args,
           isError: msg.metadata?.isError,
+          artifactId: msg.metadata?.artifactId,
+          artifactName: msg.metadata?.artifactName,
         },
       }
     }

@@ -11,7 +11,7 @@ import { Type } from '@sinclair/typebox';
 declare global {
   var __piFactoryShelfCallbacks: Map<string, {
     createDraftTask: (args: any) => Promise<void>;
-    createArtifact: (args: any) => Promise<void>;
+    createArtifact: (args: any) => Promise<{ id: string; name: string }>;
   }> | undefined;
 }
 
@@ -34,11 +34,16 @@ export default function (pi: ExtensionAPI) {
 
       const callbacks = globalThis.__piFactoryShelfCallbacks;
       let called = false;
+      let createdArtifact: { id: string; name: string } | null = null;
 
       if (callbacks) {
         for (const [, cb] of callbacks) {
-          await cb.createArtifact({ name, html });
+          const created = await cb.createArtifact({ name, html });
           called = true;
+
+          if (created && typeof created.id === 'string' && typeof created.name === 'string') {
+            createdArtifact = { id: created.id, name: created.name };
+          }
           break;
         }
       }
@@ -50,12 +55,25 @@ export default function (pi: ExtensionAPI) {
         };
       }
 
+      if (!createdArtifact) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `Artifact created: "${name}"\n\nThe user can view it on the shelf.`,
+          }],
+          details: {} as Record<string, unknown>,
+        };
+      }
+
       return {
         content: [{
           type: 'text' as const,
-          text: `Artifact created: "${name}"\n\nThe user can view it on the shelf.`,
+          text: `Artifact created: "${createdArtifact.name}"\n\nThe user can view it on the shelf.`,
         }],
-        details: {} as Record<string, unknown>,
+        details: {
+          artifactId: createdArtifact.id,
+          artifactName: createdArtifact.name,
+        },
       };
     },
   });
