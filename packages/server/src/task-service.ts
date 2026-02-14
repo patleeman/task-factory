@@ -3,8 +3,8 @@
 // =============================================================================
 // Manages task files, parsing, and operations
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, unlinkSync } from 'fs';
-import { join, basename } from 'path';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, unlinkSync, rmSync, statSync } from 'fs';
+import { join, basename, dirname } from 'path';
 import YAML from 'yaml';
 import type {
   Task,
@@ -80,11 +80,15 @@ function getMaxExistingTaskNumber(tasksDir: string, prefix: string): number {
   }
 
   let maxNum = 0;
-  const files = readdirSync(tasksDir);
-  const pattern = new RegExp(`^${prefix}-(\\d+)\\.md$`, 'i');
+  const entries = readdirSync(tasksDir);
+  // Match both legacy .md files and new directory-per-task entries
+  const mdPattern = new RegExp(`^${prefix}-(\\d+)\\.md$`, 'i');
+  const dirPattern = new RegExp(`^${prefix}-(\\d+)$`, 'i');
 
-  for (const file of files) {
-    const match = file.match(pattern);
+  for (const entry of entries) {
+    const mdMatch = entry.match(mdPattern);
+    const dirMatch = entry.match(dirPattern);
+    const match = mdMatch || dirMatch;
     if (!match) {
       continue;
     }
@@ -169,7 +173,40 @@ export function parseTaskFile(filePath: string): Task {
 }
 
 export function parseTaskContent(content: string, filePath: string): Task {
-  // Parse YAML frontmatter
+  // Detect format: pure YAML (new) vs YAML frontmatter + markdown body (legacy)
+  const isLegacyFormat = content.startsWith('---\n');
+
+  if (isLegacyFormat) {
+    return parseLegacyTaskContent(content, filePath);
+  }
+
+  return parseYamlTaskContent(content, filePath);
+}
+
+function parseYamlTaskContent(content: string, filePath: string): Task {
+  const parsed = YAML.parse(content) as Partial<TaskFrontmatter> & {
+    history?: any[];
+    description?: string;
+  };
+
+  const history = Array.isArray(parsed.history) ? parsed.history : [];
+  delete parsed.history;
+
+  const description = parsed.description || '';
+  delete parsed.description;
+
+  const frontmatter = buildFrontmatter(parsed);
+
+  return {
+    id: frontmatter.id,
+    frontmatter,
+    content: description,
+    history,
+    filePath,
+  };
+}
+
+function parseLegacyTaskContent(content: string, filePath: string): Task {
   const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
 
   if (!frontmatterMatch) {
@@ -179,11 +216,21 @@ export function parseTaskContent(content: string, filePath: string): Task {
   const [, yamlContent, bodyContent] = frontmatterMatch;
   const parsed = YAML.parse(yamlContent) as Partial<TaskFrontmatter> & { history?: any[] };
 
-  // Pull history out — it's stored in YAML but not part of TaskFrontmatter type
   const history = Array.isArray(parsed.history) ? parsed.history : [];
   delete parsed.history;
 
-  // Ensure required fields with defaults
+  const frontmatter = buildFrontmatter(parsed);
+
+  return {
+    id: frontmatter.id,
+    frontmatter,
+    content: bodyContent.trim(),
+    history,
+    filePath,
+  };
+}
+
+function buildFrontmatter(parsed: Partial<TaskFrontmatter>): TaskFrontmatter {
   const frontmatter: TaskFrontmatter = {
     id: parsed.id || `TASK-${crypto.randomUUID().slice(0, 8).toUpperCase()}`,
     title: parsed.title || 'Untitled Task',
@@ -207,32 +254,54 @@ export function parseTaskContent(content: string, filePath: string): Task {
 
   frontmatter.acceptanceCriteria = normalizeAcceptanceCriteria(frontmatter.acceptanceCriteria);
 
-  return {
-    id: frontmatter.id,
-    frontmatter,
-    content: bodyContent.trim(),
-    history,
-    filePath,
-  };
+  return frontmatter;
 }
 
 export function serializeTask(task: Task): string {
-  // Combine frontmatter + history into a single YAML block
   const yamlObj: Record<string, unknown> = { ...task.frontmatter };
+
+  // Store the task description inline as a YAML field
+  if (task.content) {
+    yamlObj.description = task.content;
+  }
+
   if (task.history.length > 0) {
     yamlObj.history = task.history;
   }
 
-  const yamlContent = YAML.stringify(yamlObj, {
+  return YAML.stringify(yamlObj, {
     indent: 2,
     lineWidth: 0,
   });
+}
 
-  return `---\n${yamlContent}---\n\n${task.content}`;
+/**
+ * Returns the directory path for a task given its ID and the tasks root dir.
+ */
+export function getTaskDir(tasksDir: string, taskId: string): string {
+  return join(tasksDir, taskId.toLowerCase());
+}
+
+/**
+ * Returns the path to the task.yaml file for a given task.
+ */
+export function getTaskFilePath(tasksDir: string, taskId: string): string {
+  return join(getTaskDir(tasksDir, taskId), 'task.yaml');
+}
+
+/**
+ * Returns the attachments directory for a task (inside the task directory).
+ */
+export function getTaskAttachmentsDir(tasksDir: string, taskId: string): string {
+  return join(getTaskDir(tasksDir, taskId), 'attachments');
 }
 
 export function saveTaskFile(task: Task): void {
   const serialized = serializeTask(task);
+  const taskDir = dirname(task.filePath);
+  if (!existsSync(taskDir)) {
+    mkdirSync(taskDir, { recursive: true });
+  }
   writeFileSync(task.filePath, serialized, 'utf-8');
 }
 
@@ -253,8 +322,11 @@ export function createTask(
 
   const id = generateTaskId(workspacePath, tasksDir);
   const now = new Date().toISOString();
-  const fileName = `${id.toLowerCase()}.md`;
-  const filePath = join(tasksDir, fileName);
+  const taskDir = getTaskDir(tasksDir, id);
+  const filePath = getTaskFilePath(tasksDir, id);
+
+  // Create task directory
+  mkdirSync(taskDir, { recursive: true });
 
   // Assign order at the END of backlog (rightmost card in the UI).
   const existingTasks = discoverTasks(tasksDir);
@@ -455,18 +527,29 @@ export function discoverTasks(tasksDir: string): Task[] {
     return [];
   }
 
-  const files = readdirSync(tasksDir);
+  const entries = readdirSync(tasksDir);
   const tasks: Task[] = [];
 
-  for (const file of files) {
-    if (file.endsWith('.md')) {
-      try {
-        const filePath = join(tasksDir, file);
-        const task = parseTaskFile(filePath);
+  for (const entry of entries) {
+    const entryPath = join(tasksDir, entry);
+
+    try {
+      const entryStat = statSync(entryPath);
+
+      if (entryStat.isDirectory()) {
+        // New format: directory-per-task with task.yaml inside
+        const yamlPath = join(entryPath, 'task.yaml');
+        if (existsSync(yamlPath)) {
+          const task = parseTaskFile(yamlPath);
+          tasks.push(task);
+        }
+      } else if (entry.endsWith('.md') && entryStat.isFile()) {
+        // Legacy format: standalone .md files with YAML frontmatter
+        const task = parseTaskFile(entryPath);
         tasks.push(task);
-      } catch (err) {
-        console.error(`Failed to parse task file: ${file}`, err);
       }
+    } catch (err) {
+      console.error(`Failed to parse task entry: ${entry}`, err);
     }
   }
 
@@ -510,7 +593,15 @@ export function shouldResumeInterruptedPlanning(task: Task): boolean {
 // =============================================================================
 
 export function deleteTask(task: Task): void {
-  if (existsSync(task.filePath)) {
+  // New format: task.filePath points to task.yaml inside a task directory.
+  // Delete the entire task directory (includes attachments).
+  const taskDir = dirname(task.filePath);
+  const isTaskDirectory = basename(task.filePath) === 'task.yaml' && existsSync(taskDir);
+
+  if (isTaskDirectory) {
+    rmSync(taskDir, { recursive: true, force: true });
+  } else if (existsSync(task.filePath)) {
+    // Legacy format: standalone .md file
     unlinkSync(task.filePath);
   }
 }
@@ -592,4 +683,103 @@ export function canMoveToPhase(task: Task, targetPhase: Phase): {
   }
 
   return { allowed: true };
+}
+
+// =============================================================================
+// Migration: Convert legacy .md tasks to directory-per-task YAML
+// =============================================================================
+
+/**
+ * Migrate all legacy .md task files in a tasks directory to the new
+ * directory-per-task format. Safe to call multiple times — only migrates
+ * files that haven't been migrated yet.
+ *
+ * Also migrates attachments from the old shared attachments directory
+ * (.pi/tasks/attachments/{taskId}/) into each task's directory.
+ */
+export function migrateLegacyTasks(tasksDir: string): number {
+  if (!existsSync(tasksDir)) {
+    return 0;
+  }
+
+  const entries = readdirSync(tasksDir);
+  let migrated = 0;
+
+  for (const entry of entries) {
+    if (!entry.endsWith('.md')) continue;
+
+    const legacyPath = join(tasksDir, entry);
+    try {
+      const stat = statSync(legacyPath);
+      if (!stat.isFile()) continue;
+    } catch {
+      continue;
+    }
+
+    try {
+      // Parse the legacy file
+      const task = parseTaskFile(legacyPath);
+
+      // Create new task directory
+      const taskDir = getTaskDir(tasksDir, task.id);
+      const newFilePath = join(taskDir, 'task.yaml');
+
+      // Skip if already migrated (directory exists with task.yaml)
+      if (existsSync(newFilePath)) {
+        continue;
+      }
+
+      mkdirSync(taskDir, { recursive: true });
+
+      // Update filePath and save in new format
+      task.filePath = newFilePath;
+      saveTaskFile(task);
+
+      // Migrate attachments from old location
+      const oldAttachmentsDir = join(tasksDir, 'attachments', task.id);
+      const newAttachmentsDir = join(taskDir, 'attachments');
+      if (existsSync(oldAttachmentsDir)) {
+        // Copy attachment files to new location
+        mkdirSync(newAttachmentsDir, { recursive: true });
+        const attachmentFiles = readdirSync(oldAttachmentsDir);
+        for (const attFile of attachmentFiles) {
+          const src = join(oldAttachmentsDir, attFile);
+          const dst = join(newAttachmentsDir, attFile);
+          try {
+            const data = readFileSync(src);
+            writeFileSync(dst, data);
+          } catch (err) {
+            console.error(`[Migration] Failed to copy attachment ${attFile} for task ${task.id}:`, err);
+          }
+        }
+        // Clean up old attachments directory
+        rmSync(oldAttachmentsDir, { recursive: true, force: true });
+      }
+
+      // Remove the legacy .md file
+      unlinkSync(legacyPath);
+
+      migrated++;
+      console.log(`[Migration] Migrated task ${task.id} to directory format`);
+    } catch (err) {
+      console.error(`[Migration] Failed to migrate ${entry}:`, err);
+    }
+  }
+
+  // Clean up the old shared attachments directory if it's now empty
+  const oldAttachmentsRoot = join(tasksDir, 'attachments');
+  if (existsSync(oldAttachmentsRoot)) {
+    try {
+      const remaining = readdirSync(oldAttachmentsRoot);
+      if (remaining.length === 0) {
+        rmSync(oldAttachmentsRoot, { recursive: true, force: true });
+      }
+    } catch { /* best-effort */ }
+  }
+
+  if (migrated > 0) {
+    console.log(`[Migration] Migrated ${migrated} task(s) to directory-per-task format`);
+  }
+
+  return migrated;
 }

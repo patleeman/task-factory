@@ -142,7 +142,7 @@ interface LoadedAttachments {
  * Get the on-disk directory for a task's attachments.
  */
 function getAttachmentsDir(workspacePath: string, taskId: string): string {
-  return join(workspacePath, '.pi', 'tasks', 'attachments', taskId);
+  return join(workspacePath, '.pi', 'tasks', taskId.toLowerCase(), 'attachments');
 }
 
 /**

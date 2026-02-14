@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync } from 'fs';
+import { mkdtempSync, mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import type { Task } from '@pi-factory/shared';
@@ -12,6 +12,8 @@ import {
   parseTaskContent,
   shouldResumeInterruptedPlanning,
   updateTask,
+  migrateLegacyTasks,
+  getTaskDir,
 } from '../src/task-service.js';
 
 function createTask(overrides: Partial<Task['frontmatter']> = {}): Task {
@@ -39,7 +41,7 @@ function createTask(overrides: Partial<Task['frontmatter']> = {}): Task {
     },
     content: 'Test content',
     history: [],
-    filePath: '/tmp/workspace/.pi/tasks/test-1.md',
+    filePath: '/tmp/workspace/.pi/tasks/test-1/task.yaml',
   };
 }
 
@@ -266,7 +268,7 @@ describe('acceptance criteria normalization', () => {
     expect(persisted.frontmatter.acceptanceCriteria).toEqual(['first item', 'second item']);
   });
 
-  it('strips empty acceptance criteria when parsing task files', () => {
+  it('strips empty acceptance criteria when parsing legacy task files', () => {
     const now = new Date().toISOString();
     const rawTask = `---
 id: TEST-RAW
@@ -291,6 +293,33 @@ Body`;
     const parsed = parseTaskContent(rawTask, '/tmp/test-raw.md');
 
     expect(parsed.frontmatter.acceptanceCriteria).toEqual(['Keep this']);
+    expect(parsed.content).toBe('Body');
+  });
+
+  it('strips empty acceptance criteria when parsing YAML task files', () => {
+    const now = new Date().toISOString();
+    const rawTask = `id: TEST-RAW-YAML
+phase: backlog
+created: ${now}
+updated: ${now}
+workspace: /tmp/workspace
+project: workspace
+description: Body from YAML
+acceptanceCriteria:
+  - ""
+  - "   "
+  - Keep this
+testingInstructions: []
+commits: []
+attachments: []
+blocked:
+  isBlocked: false
+`;
+
+    const parsed = parseTaskContent(rawTask, '/tmp/test-raw/task.yaml');
+
+    expect(parsed.frontmatter.acceptanceCriteria).toEqual(['Keep this']);
+    expect(parsed.content).toBe('Body from YAML');
   });
 
   it('normalizes YAML object-style criteria into readable text', () => {
@@ -386,5 +415,248 @@ describe('canMoveToPhase', () => {
 
     expect(blocked.allowed).toBe(false);
     expect(blocked.reason).toBe('Task must have acceptance criteria before moving to Ready');
+  });
+});
+
+describe('directory-per-task format', () => {
+  it('creates tasks as directories with task.yaml inside', () => {
+    const { workspacePath, tasksDir } = createTempWorkspace();
+
+    const task = createTaskFile(workspacePath, tasksDir, {
+      title: 'Directory task',
+      content: 'task description',
+      acceptanceCriteria: ['done'],
+    });
+
+    // filePath should point to task.yaml inside a task directory
+    expect(task.filePath).toContain('task.yaml');
+    expect(existsSync(task.filePath)).toBe(true);
+
+    // Task directory should exist
+    const taskDir = getTaskDir(tasksDir, task.id);
+    expect(existsSync(taskDir)).toBe(true);
+
+    // File should be pure YAML (no frontmatter delimiters)
+    const content = readFileSync(task.filePath, 'utf-8');
+    expect(content.startsWith('---\n')).toBe(false);
+    expect(content).toContain('description: task description');
+  });
+
+  it('round-trips task data through save and load', () => {
+    const { workspacePath, tasksDir } = createTempWorkspace();
+
+    const task = createTaskFile(workspacePath, tasksDir, {
+      title: 'Round trip',
+      content: 'my description',
+      acceptanceCriteria: ['criterion 1', 'criterion 2'],
+    });
+
+    const loaded = discoverTasks(tasksDir).find(t => t.id === task.id)!;
+
+    expect(loaded.frontmatter.title).toBe('Round trip');
+    expect(loaded.content).toBe('my description');
+    expect(loaded.frontmatter.acceptanceCriteria).toEqual(['criterion 1', 'criterion 2']);
+    expect(loaded.frontmatter.phase).toBe('backlog');
+  });
+
+  it('deletes the entire task directory', () => {
+    const { workspacePath, tasksDir } = createTempWorkspace();
+
+    const task = createTaskFile(workspacePath, tasksDir, {
+      title: 'Delete me',
+      content: 'to be deleted',
+      acceptanceCriteria: [],
+    });
+
+    const taskDir = getTaskDir(tasksDir, task.id);
+    expect(existsSync(taskDir)).toBe(true);
+
+    deleteTask(task);
+
+    expect(existsSync(taskDir)).toBe(false);
+  });
+});
+
+describe('migrateLegacyTasks', () => {
+  it('migrates .md files to directory-per-task YAML', () => {
+    const { workspacePath, tasksDir } = createTempWorkspace();
+
+    // Create a legacy-format task file
+    const now = new Date().toISOString();
+    const legacyContent = `---
+id: WORK-1
+title: Legacy task
+phase: backlog
+created: ${now}
+updated: ${now}
+workspace: ${workspacePath}
+project: workspace
+blockedCount: 0
+blockedDuration: 0
+order: 0
+acceptanceCriteria:
+  - criterion one
+testingInstructions: []
+commits: []
+attachments: []
+blocked:
+  isBlocked: false
+---
+
+This is the legacy body content`;
+
+    writeFileSync(join(tasksDir, 'work-1.md'), legacyContent, 'utf-8');
+
+    // Verify legacy file exists
+    expect(existsSync(join(tasksDir, 'work-1.md'))).toBe(true);
+
+    const migrated = migrateLegacyTasks(tasksDir);
+    expect(migrated).toBe(1);
+
+    // Legacy file should be gone
+    expect(existsSync(join(tasksDir, 'work-1.md'))).toBe(false);
+
+    // New directory should exist with task.yaml
+    const newDir = join(tasksDir, 'work-1');
+    expect(existsSync(newDir)).toBe(true);
+    expect(existsSync(join(newDir, 'task.yaml'))).toBe(true);
+
+    // Content should be preserved
+    const tasks = discoverTasks(tasksDir);
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0].id).toBe('WORK-1');
+    expect(tasks[0].frontmatter.title).toBe('Legacy task');
+    expect(tasks[0].content).toBe('This is the legacy body content');
+    expect(tasks[0].frontmatter.acceptanceCriteria).toEqual(['criterion one']);
+  });
+
+  it('migrates attachments into the task directory', () => {
+    const { workspacePath, tasksDir } = createTempWorkspace();
+
+    // Create legacy task file
+    const now = new Date().toISOString();
+    const legacyContent = `---
+id: WORK-2
+title: Task with attachments
+phase: backlog
+created: ${now}
+updated: ${now}
+workspace: ${workspacePath}
+project: workspace
+blockedCount: 0
+blockedDuration: 0
+order: 0
+acceptanceCriteria: []
+testingInstructions: []
+commits: []
+attachments:
+  - id: abc123
+    filename: screenshot.png
+    storedName: abc123.png
+    mimeType: image/png
+    size: 100
+    createdAt: ${now}
+blocked:
+  isBlocked: false
+---
+
+Task body`;
+
+    writeFileSync(join(tasksDir, 'work-2.md'), legacyContent, 'utf-8');
+
+    // Create legacy attachments directory
+    const oldAttDir = join(tasksDir, 'attachments', 'WORK-2');
+    mkdirSync(oldAttDir, { recursive: true });
+    writeFileSync(join(oldAttDir, 'abc123.png'), 'fake-png-data', 'utf-8');
+
+    const migrated = migrateLegacyTasks(tasksDir);
+    expect(migrated).toBe(1);
+
+    // Old attachment directory should be cleaned up
+    expect(existsSync(oldAttDir)).toBe(false);
+
+    // New attachment should be in the task directory
+    const newAttDir = join(tasksDir, 'work-2', 'attachments');
+    expect(existsSync(newAttDir)).toBe(true);
+    expect(existsSync(join(newAttDir, 'abc123.png'))).toBe(true);
+    expect(readFileSync(join(newAttDir, 'abc123.png'), 'utf-8')).toBe('fake-png-data');
+  });
+
+  it('is idempotent — running twice does not fail', () => {
+    const { workspacePath, tasksDir } = createTempWorkspace();
+
+    const now = new Date().toISOString();
+    const legacyContent = `---
+id: WORK-3
+title: Idempotent test
+phase: backlog
+created: ${now}
+updated: ${now}
+workspace: ${workspacePath}
+project: workspace
+blockedCount: 0
+blockedDuration: 0
+order: 0
+acceptanceCriteria: []
+testingInstructions: []
+commits: []
+attachments: []
+blocked:
+  isBlocked: false
+---
+
+Body`;
+
+    writeFileSync(join(tasksDir, 'work-3.md'), legacyContent, 'utf-8');
+
+    expect(migrateLegacyTasks(tasksDir)).toBe(1);
+    expect(migrateLegacyTasks(tasksDir)).toBe(0); // No more .md files
+
+    const tasks = discoverTasks(tasksDir);
+    expect(tasks).toHaveLength(1);
+  });
+
+  it('discovers both legacy and new tasks in mixed directory', () => {
+    const { workspacePath, tasksDir } = createTempWorkspace();
+
+    // Create a new-format task
+    const task1 = createTaskFile(workspacePath, tasksDir, {
+      title: 'New format task',
+      content: 'new',
+      acceptanceCriteria: [],
+    });
+
+    // Create a legacy-format task manually
+    const now = new Date().toISOString();
+    const legacyContent = `---
+id: WORK-99
+title: Legacy format task
+phase: backlog
+created: ${now}
+updated: ${now}
+workspace: ${workspacePath}
+project: workspace
+blockedCount: 0
+blockedDuration: 0
+order: 1
+acceptanceCriteria: []
+testingInstructions: []
+commits: []
+attachments: []
+blocked:
+  isBlocked: false
+---
+
+Legacy body`;
+
+    writeFileSync(join(tasksDir, 'work-99.md'), legacyContent, 'utf-8');
+
+    // discoverTasks should find both
+    const tasks = discoverTasks(tasksDir);
+    expect(tasks).toHaveLength(2);
+
+    const ids = tasks.map(t => t.id).sort();
+    expect(ids).toContain(task1.id);
+    expect(ids).toContain('WORK-99');
   });
 });

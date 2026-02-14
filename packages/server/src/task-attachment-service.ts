@@ -8,7 +8,7 @@ import { existsSync } from 'fs';
 import { copyFile, mkdir, stat, unlink } from 'fs/promises';
 import { basename, extname, isAbsolute, join, resolve } from 'path';
 import type { Attachment, Task } from '@pi-factory/shared';
-import { parseTaskFile, saveTaskFile } from './task-service.js';
+import { parseTaskFile, saveTaskFile, getTaskFilePath, getTaskAttachmentsDir as getTaskAttachmentsDirFromService } from './task-service.js';
 
 export interface AttachTaskFileRequest {
   path: string;
@@ -34,12 +34,20 @@ const MIME_BY_EXTENSION: Record<string, string> = {
   '.pdf': 'application/pdf',
 };
 
-function getTaskFilePath(workspacePath: string, taskId: string): string {
-  return join(workspacePath, '.pi', 'tasks', `${taskId.toLowerCase()}.md`);
+function resolveTaskFilePath(workspacePath: string, taskId: string): string {
+  const tasksDir = join(workspacePath, '.pi', 'tasks');
+  // New format: directory-per-task
+  const newPath = getTaskFilePath(tasksDir, taskId);
+  if (existsSync(newPath)) return newPath;
+  // Legacy format: standalone .md file
+  const legacyPath = join(tasksDir, `${taskId.toLowerCase()}.md`);
+  if (existsSync(legacyPath)) return legacyPath;
+  return newPath; // Default to new format
 }
 
-function getTaskAttachmentsDir(workspacePath: string, taskId: string): string {
-  return join(workspacePath, '.pi', 'tasks', 'attachments', taskId);
+function resolveTaskAttachmentsDir(workspacePath: string, taskId: string): string {
+  const tasksDir = join(workspacePath, '.pi', 'tasks');
+  return getTaskAttachmentsDirFromService(tasksDir, taskId);
 }
 
 function resolveSourcePath(workspacePath: string, sourcePath: string): string {
@@ -83,7 +91,7 @@ function inferMimeType(filename: string, sourcePath: string): string {
 }
 
 function loadTaskFromDisk(workspacePath: string, taskId: string): Task {
-  const taskFilePath = getTaskFilePath(workspacePath, taskId);
+  const taskFilePath = resolveTaskFilePath(workspacePath, taskId);
   if (!existsSync(taskFilePath)) {
     throw new Error(`Task not found: ${taskId}`);
   }
@@ -114,7 +122,7 @@ export async function attachTaskFileToTask(
   const storedName = `${attachmentId}${storedExtension}`;
   const now = new Date().toISOString();
 
-  const attachmentsDir = getTaskAttachmentsDir(workspacePath, taskId);
+  const attachmentsDir = resolveTaskAttachmentsDir(workspacePath, taskId);
   await mkdir(attachmentsDir, { recursive: true });
 
   const destinationPath = join(attachmentsDir, storedName);

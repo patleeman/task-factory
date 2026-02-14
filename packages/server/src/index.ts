@@ -34,6 +34,7 @@ import {
   reorderTasks,
   saveTaskFile,
   shouldResumeInterruptedPlanning,
+  migrateLegacyTasks,
 } from './task-service.js';
 import { prepareTaskUpdateRequest } from './task-update-service.js';
 import {
@@ -1820,7 +1821,8 @@ import { mkdir, unlink, stat } from 'fs/promises';
 import { extname } from 'path';
 
 function getAttachmentsDir(workspace: import('@pi-factory/shared').Workspace, taskId: string): string {
-  return join(workspace.path, '.pi', 'tasks', 'attachments', taskId);
+  const tasksDir = getTasksDir(workspace);
+  return join(tasksDir, taskId.toLowerCase(), 'attachments');
 }
 
 // Configure multer to store files in task-specific directories
@@ -2612,6 +2614,16 @@ async function main() {
 ║  Listening on http://${HOST}:${PORT}                    ║
 ╚══════════════════════════════════════════════════════════╝
     `);
+
+    // Migrate any legacy .md task files to directory-per-task format
+    listWorkspaces().then(async (workspaces) => {
+      for (const ws of workspaces) {
+        const tasksDir = getTasksDir(ws);
+        migrateLegacyTasks(tasksDir);
+      }
+    }).catch((err) => {
+      logger.error('[Startup] Failed to migrate legacy tasks:', err);
+    });
 
     // Resume queue processing for workspaces that had it enabled
     initializeQueueManagers((workspaceId, event) => {
