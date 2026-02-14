@@ -36,13 +36,7 @@ const MIME_BY_EXTENSION: Record<string, string> = {
 
 function resolveTaskFilePath(workspacePath: string, taskId: string): string {
   const tasksDir = join(workspacePath, '.pi', 'tasks');
-  // New format: directory-per-task
-  const newPath = getTaskFilePath(tasksDir, taskId);
-  if (existsSync(newPath)) return newPath;
-  // Legacy format: standalone .md file
-  const legacyPath = join(tasksDir, `${taskId.toLowerCase()}.md`);
-  if (existsSync(legacyPath)) return legacyPath;
-  return newPath; // Default to new format
+  return getTaskFilePath(tasksDir, taskId);
 }
 
 function resolveTaskAttachmentsDir(workspacePath: string, taskId: string): string {

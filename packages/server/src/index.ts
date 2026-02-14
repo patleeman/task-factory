@@ -34,7 +34,6 @@ import {
   reorderTasks,
   saveTaskFile,
   shouldResumeInterruptedPlanning,
-  migrateLegacyTasks,
 } from './task-service.js';
 import { prepareTaskUpdateRequest } from './task-update-service.js';
 import {
@@ -2614,16 +2613,6 @@ async function main() {
 ║  Listening on http://${HOST}:${PORT}                    ║
 ╚══════════════════════════════════════════════════════════╝
     `);
-
-    // Migrate any legacy .md task files to directory-per-task format
-    listWorkspaces().then(async (workspaces) => {
-      for (const ws of workspaces) {
-        const tasksDir = getTasksDir(ws);
-        migrateLegacyTasks(tasksDir);
-      }
-    }).catch((err) => {
-      logger.error('[Startup] Failed to migrate legacy tasks:', err);
-    });
 
     // Resume queue processing for workspaces that had it enabled
     initializeQueueManagers((workspaceId, event) => {

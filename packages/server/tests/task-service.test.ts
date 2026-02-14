@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from 'fs';
+import { mkdtempSync, mkdirSync, rmSync, existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import type { Task } from '@pi-factory/shared';
@@ -12,7 +12,6 @@ import {
   parseTaskContent,
   shouldResumeInterruptedPlanning,
   updateTask,
-  migrateLegacyTasks,
   getTaskDir,
 } from '../src/task-service.js';
 
@@ -268,43 +267,15 @@ describe('acceptance criteria normalization', () => {
     expect(persisted.frontmatter.acceptanceCriteria).toEqual(['first item', 'second item']);
   });
 
-  it('strips empty acceptance criteria when parsing legacy task files', () => {
+  it('strips empty acceptance criteria when parsing task files', () => {
     const now = new Date().toISOString();
-    const rawTask = `---
-id: TEST-RAW
+    const rawTask = `id: TEST-RAW
 phase: backlog
 created: ${now}
 updated: ${now}
 workspace: /tmp/workspace
 project: workspace
-acceptanceCriteria:
-  - ""
-  - "   "
-  - Keep this
-testingInstructions: []
-commits: []
-attachments: []
-blocked:
-  isBlocked: false
----
-
-Body`;
-
-    const parsed = parseTaskContent(rawTask, '/tmp/test-raw.md');
-
-    expect(parsed.frontmatter.acceptanceCriteria).toEqual(['Keep this']);
-    expect(parsed.content).toBe('Body');
-  });
-
-  it('strips empty acceptance criteria when parsing YAML task files', () => {
-    const now = new Date().toISOString();
-    const rawTask = `id: TEST-RAW-YAML
-phase: backlog
-created: ${now}
-updated: ${now}
-workspace: /tmp/workspace
-project: workspace
-description: Body from YAML
+description: Body content
 acceptanceCriteria:
   - ""
   - "   "
@@ -319,30 +290,28 @@ blocked:
     const parsed = parseTaskContent(rawTask, '/tmp/test-raw/task.yaml');
 
     expect(parsed.frontmatter.acceptanceCriteria).toEqual(['Keep this']);
-    expect(parsed.content).toBe('Body from YAML');
+    expect(parsed.content).toBe('Body content');
   });
 
   it('normalizes YAML object-style criteria into readable text', () => {
     const now = new Date().toISOString();
-    const rawTask = `---
-id: TEST-OBJ
+    const rawTask = `id: TEST-OBJ
 phase: backlog
 created: ${now}
 updated: ${now}
 workspace: /tmp/workspace
 project: workspace
+description: Body
 acceptanceCriteria:
-  - Criterion with colon: still valid text
+  - "Criterion with colon: still valid text"
 testingInstructions: []
 commits: []
 attachments: []
 blocked:
   isBlocked: false
----
+`;
 
-Body`;
-
-    const parsed = parseTaskContent(rawTask, '/tmp/test-obj.md');
+    const parsed = parseTaskContent(rawTask, '/tmp/test-obj/task.yaml');
 
     expect(parsed.frontmatter.acceptanceCriteria).toEqual(['Criterion with colon: still valid text']);
   });
@@ -477,186 +446,4 @@ describe('directory-per-task format', () => {
   });
 });
 
-describe('migrateLegacyTasks', () => {
-  it('migrates .md files to directory-per-task YAML', () => {
-    const { workspacePath, tasksDir } = createTempWorkspace();
 
-    // Create a legacy-format task file
-    const now = new Date().toISOString();
-    const legacyContent = `---
-id: WORK-1
-title: Legacy task
-phase: backlog
-created: ${now}
-updated: ${now}
-workspace: ${workspacePath}
-project: workspace
-blockedCount: 0
-blockedDuration: 0
-order: 0
-acceptanceCriteria:
-  - criterion one
-testingInstructions: []
-commits: []
-attachments: []
-blocked:
-  isBlocked: false
----
-
-This is the legacy body content`;
-
-    writeFileSync(join(tasksDir, 'work-1.md'), legacyContent, 'utf-8');
-
-    // Verify legacy file exists
-    expect(existsSync(join(tasksDir, 'work-1.md'))).toBe(true);
-
-    const migrated = migrateLegacyTasks(tasksDir);
-    expect(migrated).toBe(1);
-
-    // Legacy file should be gone
-    expect(existsSync(join(tasksDir, 'work-1.md'))).toBe(false);
-
-    // New directory should exist with task.yaml
-    const newDir = join(tasksDir, 'work-1');
-    expect(existsSync(newDir)).toBe(true);
-    expect(existsSync(join(newDir, 'task.yaml'))).toBe(true);
-
-    // Content should be preserved
-    const tasks = discoverTasks(tasksDir);
-    expect(tasks).toHaveLength(1);
-    expect(tasks[0].id).toBe('WORK-1');
-    expect(tasks[0].frontmatter.title).toBe('Legacy task');
-    expect(tasks[0].content).toBe('This is the legacy body content');
-    expect(tasks[0].frontmatter.acceptanceCriteria).toEqual(['criterion one']);
-  });
-
-  it('migrates attachments into the task directory', () => {
-    const { workspacePath, tasksDir } = createTempWorkspace();
-
-    // Create legacy task file
-    const now = new Date().toISOString();
-    const legacyContent = `---
-id: WORK-2
-title: Task with attachments
-phase: backlog
-created: ${now}
-updated: ${now}
-workspace: ${workspacePath}
-project: workspace
-blockedCount: 0
-blockedDuration: 0
-order: 0
-acceptanceCriteria: []
-testingInstructions: []
-commits: []
-attachments:
-  - id: abc123
-    filename: screenshot.png
-    storedName: abc123.png
-    mimeType: image/png
-    size: 100
-    createdAt: ${now}
-blocked:
-  isBlocked: false
----
-
-Task body`;
-
-    writeFileSync(join(tasksDir, 'work-2.md'), legacyContent, 'utf-8');
-
-    // Create legacy attachments directory
-    const oldAttDir = join(tasksDir, 'attachments', 'WORK-2');
-    mkdirSync(oldAttDir, { recursive: true });
-    writeFileSync(join(oldAttDir, 'abc123.png'), 'fake-png-data', 'utf-8');
-
-    const migrated = migrateLegacyTasks(tasksDir);
-    expect(migrated).toBe(1);
-
-    // Old attachment directory should be cleaned up
-    expect(existsSync(oldAttDir)).toBe(false);
-
-    // New attachment should be in the task directory
-    const newAttDir = join(tasksDir, 'work-2', 'attachments');
-    expect(existsSync(newAttDir)).toBe(true);
-    expect(existsSync(join(newAttDir, 'abc123.png'))).toBe(true);
-    expect(readFileSync(join(newAttDir, 'abc123.png'), 'utf-8')).toBe('fake-png-data');
-  });
-
-  it('is idempotent — running twice does not fail', () => {
-    const { workspacePath, tasksDir } = createTempWorkspace();
-
-    const now = new Date().toISOString();
-    const legacyContent = `---
-id: WORK-3
-title: Idempotent test
-phase: backlog
-created: ${now}
-updated: ${now}
-workspace: ${workspacePath}
-project: workspace
-blockedCount: 0
-blockedDuration: 0
-order: 0
-acceptanceCriteria: []
-testingInstructions: []
-commits: []
-attachments: []
-blocked:
-  isBlocked: false
----
-
-Body`;
-
-    writeFileSync(join(tasksDir, 'work-3.md'), legacyContent, 'utf-8');
-
-    expect(migrateLegacyTasks(tasksDir)).toBe(1);
-    expect(migrateLegacyTasks(tasksDir)).toBe(0); // No more .md files
-
-    const tasks = discoverTasks(tasksDir);
-    expect(tasks).toHaveLength(1);
-  });
-
-  it('discovers both legacy and new tasks in mixed directory', () => {
-    const { workspacePath, tasksDir } = createTempWorkspace();
-
-    // Create a new-format task
-    const task1 = createTaskFile(workspacePath, tasksDir, {
-      title: 'New format task',
-      content: 'new',
-      acceptanceCriteria: [],
-    });
-
-    // Create a legacy-format task manually
-    const now = new Date().toISOString();
-    const legacyContent = `---
-id: WORK-99
-title: Legacy format task
-phase: backlog
-created: ${now}
-updated: ${now}
-workspace: ${workspacePath}
-project: workspace
-blockedCount: 0
-blockedDuration: 0
-order: 1
-acceptanceCriteria: []
-testingInstructions: []
-commits: []
-attachments: []
-blocked:
-  isBlocked: false
----
-
-Legacy body`;
-
-    writeFileSync(join(tasksDir, 'work-99.md'), legacyContent, 'utf-8');
-
-    // discoverTasks should find both
-    const tasks = discoverTasks(tasksDir);
-    expect(tasks).toHaveLength(2);
-
-    const ids = tasks.map(t => t.id).sort();
-    expect(ids).toContain(task1.id);
-    expect(ids).toContain('WORK-99');
-  });
-});
