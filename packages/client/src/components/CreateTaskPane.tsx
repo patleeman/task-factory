@@ -335,11 +335,11 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
 
   // Shared sub-components for DRY between layouts
   const descriptionSection = (
-    <div className="flex flex-col shrink-0">
+    <div className={`flex flex-col min-h-0 ${isWide ? 'flex-1' : 'shrink-0'}`}>
       <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2 shrink-0">
         Task Description
       </label>
-      <div className="h-80 min-h-[220px] max-h-[75vh] resize-y overflow-auto">
+      <div className={isWide ? 'flex-1 min-h-0' : 'h-80 min-h-[220px] max-h-[75vh] resize-y overflow-auto'}>
         <MarkdownEditor
           value={content}
           onChange={setContent}
@@ -544,26 +544,26 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
       )}
 
       {isWide ? (
-        /* ── Wide: side-by-side — Left: description/criteria/attachments | Right: config ── */
+        /* ── Wide: side-by-side — Left: description | Right: config + attachments ── */
         <div className="flex flex-1 min-h-0 overflow-hidden">
           {/* Left panel — content editing */}
-          <div className="flex-[2] flex flex-col min-h-0 min-w-0 p-5 gap-4 overflow-y-auto border-r border-slate-200">
+          <div className="flex-[2] flex flex-col min-h-0 min-w-0 p-5 border-r border-slate-200">
             {descriptionSection}
-            {attachmentsSection}
           </div>
           {/* Right panel — configuration */}
           <div className="flex-1 min-w-0 p-5 space-y-5 overflow-y-auto">
             {modelSection}
             {executionPipelineSection}
+            {attachmentsSection}
           </div>
         </div>
       ) : (
         /* ── Narrow: single column stacked ── */
         <div className="flex-1 flex flex-col min-h-0 p-5 gap-4 overflow-y-auto">
           {descriptionSection}
-          {attachmentsSection}
           {modelSection}
           {executionPipelineSection}
+          {attachmentsSection}
         </div>
       )}
 

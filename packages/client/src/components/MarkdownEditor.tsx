@@ -1,4 +1,4 @@
-import { useRef, useEffect, useMemo } from 'react'
+import { useRef, useEffect, useMemo, type MouseEvent } from 'react'
 import { EditorView, keymap, placeholder as cmPlaceholder, highlightActiveLine } from '@codemirror/view'
 import { EditorState } from '@codemirror/state'
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
@@ -195,5 +195,25 @@ export function MarkdownEditor({
     }
   }, [value])
 
-  return <div ref={containerRef} className={fill ? 'editor-fill' : ''} />
+  const handleContainerMouseDown = (event: MouseEvent<HTMLDivElement>) => {
+    if (readOnly || event.button !== 0) return
+
+    const view = viewRef.current
+    if (!view) return
+
+    const container = containerRef.current
+    const target = event.target
+    if (!(target instanceof HTMLElement)) return
+
+    if (target === container || !target.closest('.cm-editor')) {
+      view.focus()
+      return
+    }
+
+    if (!target.closest('.cm-content')) {
+      view.focus()
+    }
+  }
+
+  return <div ref={containerRef} className={fill ? 'editor-fill' : ''} onMouseDown={handleContainerMouseDown} />
 }
