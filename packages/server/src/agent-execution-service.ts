@@ -536,7 +536,7 @@ function buildTaskPrompt(
   prompt += `2. Plan your approach before implementing\n`;
   prompt += `3. Use the available skills when appropriate\n`;
   prompt += `4. Run tests to verify your implementation\n`;
-  prompt += `5. When you are DONE with the task and all acceptance criteria are met, call the \`task_complete\` tool with this task's ID ("${task.id}") and a brief summary\n`;
+  prompt += `5. When you are DONE with the task and all acceptance criteria are met, call the \`task_complete\` tool with this task's ID ("${task.id}") and a brief summary (1-2 short sentences, easy to scan).\n`;
   prompt += `6. If you have questions, need clarification, or hit a blocker, do NOT call task_complete — just explain the situation and stop. The user will respond.\n\n`;
 
   return prompt;
@@ -590,7 +590,7 @@ function buildReworkPrompt(
   prompt += `3. Make the necessary changes\n`;
   prompt += `4. Re-verify all acceptance criteria are met\n`;
   prompt += `5. Run tests to confirm everything works\n`;
-  prompt += `6. When DONE, call the \`task_complete\` tool with task ID "${task.id}" and a brief summary\n`;
+  prompt += `6. When DONE, call the \`task_complete\` tool with task ID "${task.id}" and a brief summary (1-2 short sentences, easy to scan).\n`;
   prompt += `7. If you have questions or hit a blocker, do NOT call task_complete — just explain and stop.\n\n`;
 
   return prompt;
@@ -1789,7 +1789,7 @@ function buildPlanningGraceTurnPrompt(taskId: string, reason: string): string {
   return (
     `Your planning run ended because ${reason}. You must call \`save_plan\` NOW with taskId "${taskId}" `
     + 'using the research you have gathered so far. Do not call any other tools — only `save_plan`. '
-    + 'Produce your best plan from the information already collected.'
+    + 'Produce your best plan from the information already collected. Keep wording concise, easy to scan, and not overly wordy.'
   );
 }
 
@@ -1841,13 +1841,13 @@ export function buildPlanningPrompt(
   prompt += `4. From your investigation, produce 3-7 specific, testable acceptance criteria for this task.\n`;
   prompt += `5. Then produce a plan that directly satisfies those acceptance criteria.\n`;
   prompt += `6. The plan is a high-level task summary for humans. Keep it concise and easy to parse.\n`;
-  prompt += `7. Steps should be short outcome-focused summaries (usually 3-6 steps). Avoid line-level implementation details, exact file paths, and low-level function-by-function instructions.\n`;
-  prompt += `8. Validation items must verify the acceptance criteria and overall outcome without turning into a detailed test script.\n`;
-  prompt += `9. Call the \`save_plan\` tool **exactly once** with taskId "${task.id}", acceptanceCriteria, goal, steps, validation, and cleanup.\n`;
-  prompt += `10. Cleanup items are post-completion tasks (pass an empty array if none needed).\n`;
-  prompt += `11. After calling \`save_plan\`, stop immediately. Do not run any further tools or actions.\n`;
-  prompt += `12. Stay within planning guardrails: at most ${guardrails.maxToolCalls} tool calls and about ${Math.round(guardrails.maxReadBytes / 1024)}KB of total read output. Prefer targeted reads over broad scans.\n`;
-
+  prompt += `7. Keep wording short and scannable: goal should be 1-2 short sentences, and each step/validation/cleanup item should be a short outcome-focused line. Avoid walls of text.\n`;
+  prompt += `8. Steps should be short outcome-focused summaries (usually 3-6 steps). Avoid line-level implementation details, exact file paths, and low-level function-by-function instructions.\n`;
+  prompt += `9. Validation items must verify the acceptance criteria and overall outcome without turning into a detailed test script.\n`;
+  prompt += `10. Call the \`save_plan\` tool **exactly once** with taskId "${task.id}", acceptanceCriteria, goal, steps, validation, and cleanup.\n`;
+  prompt += `11. Cleanup items are post-completion tasks (pass an empty array if none needed).\n`;
+  prompt += `12. After calling \`save_plan\`, stop immediately. Do not run any further tools or actions.\n`;
+  prompt += `13. Stay within planning guardrails: at most ${guardrails.maxToolCalls} tool calls and about ${Math.round(guardrails.maxReadBytes / 1024)}KB of total read output. Prefer targeted reads over broad scans.\n`;
   return prompt;
 }
 
@@ -1897,9 +1897,10 @@ export function buildPlanningResumePrompt(
   prompt += `3. Do NOT read other task files in .pi/tasks/. They are irrelevant and waste your tool budget.\n`;
   prompt += `4. Produce 3-7 specific, testable acceptance criteria.\n`;
   prompt += `5. Produce a concise high-level plan aligned to those criteria.\n`;
-  prompt += `6. Call the \`save_plan\` tool exactly once with taskId "${task.id}", acceptanceCriteria, goal, steps, validation, and cleanup.\n`;
-  prompt += `7. After calling \`save_plan\`, stop immediately.\n`;
-  prompt += `8. Stay within planning guardrails: at most ${guardrails.maxToolCalls} tool calls and about ${Math.round(guardrails.maxReadBytes / 1024)}KB of total read output.\n`;
+  prompt += `6. Keep wording short and easy to scan: goal should be 1-2 short sentences, and each step/validation/cleanup item should be one short line when possible. Avoid walls of text.\n`;
+  prompt += `7. Call the \`save_plan\` tool exactly once with taskId "${task.id}", acceptanceCriteria, goal, steps, validation, and cleanup.\n`;
+  prompt += `8. After calling \`save_plan\`, stop immediately.\n`;
+  prompt += `9. Stay within planning guardrails: at most ${guardrails.maxToolCalls} tool calls and about ${Math.round(guardrails.maxReadBytes / 1024)}KB of total read output.\n`;
 
   return prompt;
 }

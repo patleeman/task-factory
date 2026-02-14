@@ -29,6 +29,8 @@ interface CreateTaskPaneProps {
   onSubmit: (data: CreateTaskData) => void
   /** Incoming form updates from the planning agent (via WebSocket) */
   agentFormUpdates?: Partial<NewTaskFormState> | null
+  /** Optional one-shot prefill payload when opening from inline draft-task cards. */
+  prefillRequest?: { id: string; formState: Partial<NewTaskFormState> } | null
 }
 
 const CREATE_TASK_WHITEBOARD_STORAGE_KEY_PREFIX = 'pi-factory:create-task-whiteboard'
@@ -43,22 +45,37 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdates }: CreateTaskPaneProps) {
+export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdates, prefillRequest }: CreateTaskPaneProps) {
   const { initialDraft, restoredFromDraft, updateDraft, clearDraft, dismissRestoredBanner } = useLocalStorageDraft(workspaceId)
   const whiteboardStorageKey = getCreateTaskWhiteboardStorageKey(workspaceId)
-  const hasRestoredDraftContent = initialDraft.content.trim().length > 0
+  const hasRestoredDraftContent = !prefillRequest && initialDraft.content.trim().length > 0
 
-  const [content, setContent] = useState(initialDraft.content)
+  const [content, setContent] = useState(
+    typeof prefillRequest?.formState.content === 'string'
+      ? prefillRequest.formState.content
+      : initialDraft.content,
+  )
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [availableSkills, setAvailableSkills] = useState<PostExecutionSkill[]>([])
-  const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>(initialDraft.selectedSkillIds)
-  const [selectedPreSkillIds, setSelectedPreSkillIds] = useState<string[]>(initialDraft.selectedPreSkillIds || [])
+  const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>(
+    Array.isArray(prefillRequest?.formState.selectedSkillIds)
+      ? prefillRequest.formState.selectedSkillIds
+      : initialDraft.selectedSkillIds,
+  )
+  const [selectedPreSkillIds, setSelectedPreSkillIds] = useState<string[]>(
+    Array.isArray(prefillRequest?.formState.selectedPreSkillIds)
+      ? prefillRequest.formState.selectedPreSkillIds
+      : (initialDraft.selectedPreSkillIds || []),
+  )
   const [skillConfigs, setSkillConfigs] = useState<Record<string, Record<string, string>>>({})
   const [planningModelConfig, setPlanningModelConfig] = useState<ModelConfig | undefined>(
-    initialDraft.planningModelConfig as ModelConfig | undefined
+    (prefillRequest?.formState.planningModelConfig ?? initialDraft.planningModelConfig) as ModelConfig | undefined
   )
   const [executionModelConfig, setExecutionModelConfig] = useState<ModelConfig | undefined>(
-    (initialDraft.executionModelConfig ?? initialDraft.modelConfig) as ModelConfig | undefined
+    (prefillRequest?.formState.executionModelConfig
+      ?? prefillRequest?.formState.modelConfig
+      ?? initialDraft.executionModelConfig
+      ?? initialDraft.modelConfig) as ModelConfig | undefined
   )
   const [availableWrappers, setAvailableWrappers] = useState<ExecutionWrapper[]>([])
   const [selectedWrapperId, setSelectedWrapperId] = useState<string>('')
@@ -81,6 +98,7 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
   const containerRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const whiteboardSceneRef = useRef<WhiteboardSceneSnapshot | null>(initialWhiteboardScene)
+  const appliedPrefillIdRef = useRef<string | null>(prefillRequest?.id ?? null)
 
   useEffect(() => {
     fetch('/api/factory/skills')
@@ -172,6 +190,31 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
     }
     if (hasPipelineUpdate) setSelectedWrapperId('')
   }, [agentFormUpdates])
+
+  // Apply one-shot prefill payloads (e.g. opening from inline draft-task cards)
+  useEffect(() => {
+    if (!prefillRequest) return
+    if (appliedPrefillIdRef.current === prefillRequest.id) return
+
+    appliedPrefillIdRef.current = prefillRequest.id
+
+    const updates = prefillRequest.formState
+    const hasPipelineUpdate =
+      updates.selectedSkillIds !== undefined ||
+      updates.selectedPreSkillIds !== undefined
+
+    if (updates.content !== undefined) setContent(updates.content)
+    if (updates.selectedSkillIds !== undefined) setSelectedSkillIds(updates.selectedSkillIds)
+    if (updates.selectedPreSkillIds !== undefined) setSelectedPreSkillIds(updates.selectedPreSkillIds)
+    if (updates.planningModelConfig !== undefined) setPlanningModelConfig(updates.planningModelConfig)
+    if (updates.executionModelConfig !== undefined) {
+      setExecutionModelConfig(updates.executionModelConfig)
+    } else if (updates.modelConfig !== undefined) {
+      setExecutionModelConfig(updates.modelConfig)
+    }
+
+    if (hasPipelineUpdate) setSelectedWrapperId('')
+  }, [prefillRequest])
 
   // Measure container width to decide side-by-side vs stacked layout
   useLayoutEffect(() => {
@@ -515,7 +558,7 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
       </div>
 
       {/* Restored draft banner */}
-      {restoredFromDraft && (
+      {restoredFromDraft && !prefillRequest && (
         <div className="flex items-center justify-between px-5 py-2 bg-blue-50 border-b border-blue-200 text-blue-800 text-sm shrink-0">
           <span className="flex items-center gap-2">
             <span>Draft restored from your previous session</span>

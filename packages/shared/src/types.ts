@@ -564,6 +564,10 @@ export interface PlanningMessage {
     /** Stable reference for create_artifact tool messages. */
     artifactId?: string;
     artifactName?: string;
+    /** Renderable HTML payload for inline artifact reopen in chat history. */
+    artifactHtml?: string;
+    /** Full draft-task payload for inline task cards in chat history. */
+    draftTask?: DraftTask;
     qaRequest?: QARequest;
     qaResponse?: QAResponse;
   };

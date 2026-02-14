@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, Power } from 'lucide-react'
 import { useParams, useNavigate, useMatch, useOutletContext } from 'react-router-dom'
-import type { Task, Workspace, ActivityEntry, Phase, QueueStatus, Shelf, PlanningMessage, QAAnswer, AgentExecutionStatus, WorkspaceAutomationSettings, Artifact } from '@pi-factory/shared'
+import type { Task, Workspace, ActivityEntry, Phase, QueueStatus, PlanningMessage, QAAnswer, AgentExecutionStatus, WorkspaceAutomationSettings, Artifact, DraftTask, NewTaskFormState } from '@pi-factory/shared'
 import { api } from '../api'
 import { AppIcon } from './AppIcon'
 import { PipelineBar } from './PipelineBar'
@@ -31,6 +31,43 @@ function isExecutionStatusRunning(status: AgentExecutionStatus): boolean {
   return RUNNING_EXECUTION_STATUSES.has(status)
 }
 
+function formatDraftTaskForNewTaskForm(draftTask: DraftTask): string {
+  const sections: string[] = []
+
+  sections.push(`# ${draftTask.title}`)
+
+  if (draftTask.content.trim()) {
+    sections.push(draftTask.content.trim())
+  }
+
+  if (draftTask.acceptanceCriteria.length > 0) {
+    sections.push('## Acceptance Criteria')
+    sections.push(draftTask.acceptanceCriteria.map((criterion) => `- ${criterion}`).join('\n'))
+  }
+
+  if (draftTask.plan) {
+    sections.push('## Draft Plan')
+    sections.push(`**Goal:** ${draftTask.plan.goal}`)
+
+    if (draftTask.plan.steps.length > 0) {
+      sections.push('### Steps')
+      sections.push(draftTask.plan.steps.map((step, index) => `${index + 1}. ${step}`).join('\n'))
+    }
+
+    if (draftTask.plan.validation.length > 0) {
+      sections.push('### Validation')
+      sections.push(draftTask.plan.validation.map((item, index) => `${index + 1}. ${item}`).join('\n'))
+    }
+
+    if (draftTask.plan.cleanup.length > 0) {
+      sections.push('### Cleanup')
+      sections.push(draftTask.plan.cleanup.map((item, index) => `${index + 1}. ${item}`).join('\n'))
+    }
+  }
+
+  return sections.join('\n\n').trim()
+}
+
 export function WorkspacePage() {
   const { workspaceId, taskId } = useParams<{ workspaceId: string; taskId?: string }>()
   const navigate = useNavigate()
@@ -56,15 +93,19 @@ export function WorkspacePage() {
   })
   const [backlogAutomationToggling, setBacklogAutomationToggling] = useState(false)
   const [readyAutomationToggling, setReadyAutomationToggling] = useState(false)
+  const [factoryToggling, setFactoryToggling] = useState(false)
   const toastTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
 
-  const [shelf, setShelf] = useState<Shelf>({ items: [] })
-  const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null)
+  const [selectedArtifact, setSelectedArtifact] = useState<Artifact | null>(null)
   const [planningMessages, setPlanningMessages] = useState<PlanningMessage[]>([])
+  const [agentTaskFormUpdates, setAgentTaskFormUpdates] = useState<Partial<NewTaskFormState> | null>(null)
+  const [newTaskPrefill, setNewTaskPrefill] = useState<{ id: string; formState: Partial<NewTaskFormState> } | null>(null)
   const [runningExecutionTaskIds, setRunningExecutionTaskIds] = useState<Set<string>>(new Set())
   const [awaitingInputTaskIds, setAwaitingInputTaskIds] = useState<Set<string>>(new Set())
   const [stoppingTaskIds, setStoppingTaskIds] = useState<Set<string>>(new Set())
+  const [isStoppingPlanning, setIsStoppingPlanning] = useState(false)
   const stoppingTaskIdsRef = useRef<Set<string>>(new Set())
+  const stoppingPlanningRef = useRef(false)
   const tasksByIdRef = useRef<Map<string, Task>>(new Map())
 
   const selectedTask = taskId ? tasks.find((t) => t.id === taskId) || null : null
@@ -89,20 +130,16 @@ export function WorkspacePage() {
   const awaitingInputCount = nonArchivedTasks.filter((task) => awaitingTaskIds.has(task.id)).length
   const readyTasksCount = queueStatus?.tasksInReady
     ?? nonArchivedTasks.filter((task) => task.frontmatter.phase === 'ready').length
+  const executingTasks = nonArchivedTasks.filter((task) => task.frontmatter.phase === 'executing')
   const effectiveAutomationSettings: WorkspaceAutomationSettings = syncAutomationSettingsWithQueue(
     automationSettings,
     queueStatus,
   )
-  const shelfArtifacts = useMemo<Artifact[]>(
-    () => shelf.items
-      .filter((item): item is { type: 'artifact'; item: Artifact } => item.type === 'artifact')
-      .map((item) => item.item),
-    [shelf.items],
+  const isFactoryRunning = (
+    effectiveAutomationSettings.backlogToReady
+    || effectiveAutomationSettings.readyToExecuting
+    || executingTasks.length > 0
   )
-  const isArtifactAvailable = useCallback((artifactId: string) => {
-    return shelfArtifacts.some((artifact) => artifact.id === artifactId)
-  }, [shelfArtifacts])
-
   const planGeneratingTaskIds = useMemo(() => {
     return new Set(
       tasks
@@ -188,13 +225,18 @@ export function WorkspacePage() {
     setIsLoading(true)
     setError(null)
     setActivity([])
-    setSelectedArtifactId(null)
+    setSelectedArtifact(null)
+    setAgentTaskFormUpdates(null)
+    setNewTaskPrefill(null)
     setRunningExecutionTaskIds(new Set())
     setAwaitingInputTaskIds(new Set())
     stoppingTaskIdsRef.current = new Set()
+    stoppingPlanningRef.current = false
     setStoppingTaskIds(new Set())
+    setIsStoppingPlanning(false)
     setBacklogAutomationToggling(false)
     setReadyAutomationToggling(false)
+    setFactoryToggling(false)
     setAutomationSettings({ backlogToReady: false, readyToExecuting: false })
 
     Promise.all([
@@ -202,14 +244,13 @@ export function WorkspacePage() {
       api.getTasks(workspaceId),
       api.getActivity(workspaceId, 100),
       api.getWorkflowAutomation(workspaceId),
-      api.getShelf(workspaceId),
       api.getPlanningMessages(workspaceId),
       api.getActiveExecutions(workspaceId).catch((err) => {
         console.warn('Failed to load active execution snapshots:', err)
         return []
       }),
     ])
-      .then(([ws, tasksData, activityData, automationData, shelfData, planningMsgs, activeExecutions]) => {
+      .then(([ws, tasksData, activityData, automationData, planningMsgs, activeExecutions]) => {
         setWorkspace({
           ...ws,
           config: {
@@ -240,7 +281,6 @@ export function WorkspacePage() {
         })
         setAutomationSettings(automationData.settings)
         setQueueStatus(automationData.queueStatus)
-        setShelf(shelfData)
         setPlanningMessages(planningMsgs)
 
         const tasksById = new Map(tasksData.map((task) => [task.id, task]))
@@ -420,8 +460,16 @@ export function WorkspacePage() {
 
           break
         }
+        case 'planning:session_reset':
+          setSelectedArtifact(null)
+          setAgentTaskFormUpdates(null)
+          setNewTaskPrefill(null)
+          break
+        case 'planning:task_form_updated':
+          setAgentTaskFormUpdates(msg.formState)
+          break
         case 'shelf:updated':
-          setShelf(msg.shelf)
+          // Legacy event retained for compatibility with older clients/tools.
           break
       }
     })
@@ -440,6 +488,8 @@ export function WorkspacePage() {
           console.error('Failed to upload attachments:', uploadErr)
         }
       }
+      setNewTaskPrefill(null)
+      setAgentTaskFormUpdates(null)
       navigate(`${workspaceRootPath}/tasks/${task.id}`)
     } catch (err) {
       console.error('Failed to create task:', err)
@@ -457,6 +507,22 @@ export function WorkspacePage() {
     setToast(message)
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
     toastTimerRef.current = setTimeout(() => setToast(null), 5000)
+  }, [])
+
+  const applyAutomationResult = useCallback((result: { settings: WorkspaceAutomationSettings; queueStatus: QueueStatus }) => {
+    setAutomationSettings(result.settings)
+    setQueueStatus(result.queueStatus)
+    setWorkspace((prev) => {
+      if (!prev) return prev
+      return {
+        ...prev,
+        config: {
+          ...prev.config,
+          workflowAutomation: result.settings,
+          queueProcessing: { enabled: result.settings.readyToExecuting },
+        },
+      }
+    })
   }, [])
 
   const markTaskStopping = useCallback((id: string): boolean => {
@@ -606,26 +672,64 @@ export function WorkspacePage() {
     return api.uploadPlanningAttachments(workspaceId, files)
   }
 
+  const handleStopPlanningExecution = async () => {
+    if (!workspaceId || stoppingPlanningRef.current) return
+    stoppingPlanningRef.current = true
+    setIsStoppingPlanning(true)
+    try {
+      const result = await api.stopPlanningExecution(workspaceId)
+      if (!result.stopped) {
+        showToast('Foreman is no longer running')
+      }
+    } catch (err) {
+      console.error('Failed to stop planning execution:', err)
+      showToast('Failed to stop foreman')
+    } finally {
+      stoppingPlanningRef.current = false
+      setIsStoppingPlanning(false)
+    }
+  }
+
   const handleResetPlanning = async () => {
     if (!workspaceId) return
     try {
       await api.resetPlanningSession(workspaceId)
       setPlanningMessages([]) // Clear local state to reset the hook
+      setSelectedArtifact(null)
+      setAgentTaskFormUpdates(null)
+      setNewTaskPrefill(null)
     } catch (err) {
       console.error('Failed to reset planning session:', err)
     }
   }
 
-  const handleOpenArtifact = useCallback((artifactId: string) => {
-    setSelectedArtifactId(artifactId)
+  const handleOpenArtifact = useCallback((artifact: { id: string; name: string; html: string }) => {
+    setSelectedArtifact({
+      id: artifact.id,
+      name: artifact.name,
+      html: artifact.html,
+      createdAt: new Date().toISOString(),
+    })
     if (isCreateRoute) {
       navigate(workspaceRootPath)
     }
   }, [isCreateRoute, navigate, workspaceRootPath])
 
   const handleCloseArtifact = useCallback(() => {
-    setSelectedArtifactId(null)
+    setSelectedArtifact(null)
   }, [])
+
+  const handleOpenDraftTask = useCallback((draftTask: DraftTask) => {
+    const content = formatDraftTaskForNewTaskForm(draftTask)
+    setNewTaskPrefill({
+      id: `${draftTask.id}-${Date.now()}`,
+      formState: {
+        content,
+      },
+    })
+    setAgentTaskFormUpdates(null)
+    navigate(`${workspaceRootPath}/tasks/new`)
+  }, [navigate, workspaceRootPath])
 
   // Q&A disambiguation handlers
   const handleQASubmit = async (answers: QAAnswer[]) => {
@@ -647,75 +751,13 @@ export function WorkspacePage() {
     }
   }
 
-  // Shelf handlers
-  const handlePushDraft = async (draftId: string) => {
-    if (!workspaceId) return
-    try {
-      await api.pushDraftToBacklog(workspaceId, draftId)
-    } catch (err) {
-      console.error('Failed to push draft:', err)
-      showToast('Failed to push draft to backlog')
-    }
-  }
-
-  const handlePushAllDrafts = async () => {
-    if (!workspaceId) return
-    try {
-      const result = await api.pushAllDraftsToBacklog(workspaceId)
-      showToast(`Created ${result.count} task${result.count !== 1 ? 's' : ''} from drafts`)
-    } catch (err) {
-      console.error('Failed to push all drafts:', err)
-      showToast('Failed to push drafts to backlog')
-    }
-  }
-
-  const handleRemoveShelfItem = async (itemId: string) => {
-    if (!workspaceId) return
-    try {
-      await api.removeShelfItem(workspaceId, itemId)
-    } catch (err) {
-      console.error('Failed to remove shelf item:', err)
-    }
-  }
-
-  const handleUpdateDraft = async (draftId: string, updates: Partial<import('@pi-factory/shared').DraftTask>) => {
-    if (!workspaceId) return
-    try {
-      await api.updateDraftTask(workspaceId, draftId, updates)
-    } catch (err) {
-      console.error('Failed to update draft:', err)
-    }
-  }
-
-  const handleClearShelf = async () => {
-    if (!workspaceId) return
-    if (!confirm('Clear all items from the shelf?')) return
-    try {
-      await api.clearShelf(workspaceId)
-    } catch (err) {
-      console.error('Failed to clear shelf:', err)
-    }
-  }
-
   const handleToggleBacklogAutomation = async () => {
     if (!workspaceId || backlogAutomationToggling) return
     setBacklogAutomationToggling(true)
     try {
       const nextValue = !automationSettings.backlogToReady
       const result = await api.updateWorkflowAutomation(workspaceId, { backlogToReady: nextValue })
-      setAutomationSettings(result.settings)
-      setQueueStatus(result.queueStatus)
-      setWorkspace((prev) => {
-        if (!prev) return prev
-        return {
-          ...prev,
-          config: {
-            ...prev.config,
-            workflowAutomation: result.settings,
-            queueProcessing: { enabled: result.settings.readyToExecuting },
-          },
-        }
-      })
+      applyAutomationResult(result)
     } catch (err) {
       console.error('Failed to toggle backlog auto-promotion:', err)
       showToast('Failed to toggle backlog auto-promotion')
@@ -730,24 +772,60 @@ export function WorkspacePage() {
     try {
       const nextValue = !automationSettings.readyToExecuting
       const result = await api.updateWorkflowAutomation(workspaceId, { readyToExecuting: nextValue })
-      setAutomationSettings(result.settings)
-      setQueueStatus(result.queueStatus)
-      setWorkspace((prev) => {
-        if (!prev) return prev
-        return {
-          ...prev,
-          config: {
-            ...prev.config,
-            workflowAutomation: result.settings,
-            queueProcessing: { enabled: result.settings.readyToExecuting },
-          },
-        }
-      })
+      applyAutomationResult(result)
     } catch (err) {
       console.error('Failed to toggle ready auto-execution:', err)
       showToast('Failed to toggle ready auto-execution')
     } finally {
       setReadyAutomationToggling(false)
+    }
+  }
+
+  const handleToggleFactory = async () => {
+    if (!workspaceId || factoryToggling) return
+
+    setFactoryToggling(true)
+    try {
+      if (isFactoryRunning) {
+        const automationResult = await api.updateWorkflowAutomation(workspaceId, {
+          backlogToReady: false,
+          readyToExecuting: false,
+        })
+        applyAutomationResult(automationResult)
+
+        const tasksToStop = tasks.filter((task) => task.frontmatter.phase === 'executing')
+        let failedStops = 0
+
+        await Promise.all(tasksToStop.map(async (task) => {
+          if (!markTaskStopping(task.id)) return
+          try {
+            await api.stopTaskExecution(workspaceId, task.id)
+          } catch (err) {
+            failedStops++
+            console.error(`Failed to stop task ${task.id}:`, err)
+          } finally {
+            clearTaskStopping(task.id)
+          }
+        }))
+
+        if (failedStops > 0) {
+          showToast(`Factory paused, but ${failedStops} task${failedStops === 1 ? '' : 's'} failed to stop`)
+        } else {
+          showToast('Factory paused')
+        }
+      } else {
+        const automationResult = await api.updateWorkflowAutomation(workspaceId, {
+          backlogToReady: true,
+          readyToExecuting: true,
+        })
+        applyAutomationResult(automationResult)
+        showToast('Factory started')
+      }
+    } catch (err) {
+      console.error('Failed to toggle factory state:', err)
+      showToast('Failed to toggle factory state')
+    } finally {
+      setFactoryToggling(false)
     }
   }
 
@@ -831,6 +909,23 @@ export function WorkspacePage() {
         </div>
 
         <div className="flex items-center gap-3">
+          <button
+            onClick={handleToggleFactory}
+            disabled={factoryToggling}
+            className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-semibold border transition-colors ${
+              isFactoryRunning
+                ? 'bg-red-600 text-white border-red-700 hover:bg-red-500'
+                : 'bg-emerald-600 text-white border-emerald-700 hover:bg-emerald-500'
+            } ${factoryToggling ? 'opacity-60 cursor-not-allowed' : ''}`}
+            title={isFactoryRunning ? 'Stop all workspace automation and running executions' : 'Start workspace automation'}
+          >
+            {factoryToggling ? (
+              <span className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+            ) : (
+              <AppIcon icon={Power} size="xs" />
+            )}
+            {isFactoryRunning ? 'STOP FACTORY' : 'START FACTORY'}
+          </button>
           <ThemeToggle />
           {isConnected ? (
             <span className="flex items-center gap-1.5 text-xs text-green-400">
@@ -885,6 +980,8 @@ export function WorkspacePage() {
                 onSendMessage={handlePlanningMessage}
                 onSteer={handlePlanningMessage}
                 onFollowUp={handlePlanningMessage}
+                onStop={handleStopPlanningExecution}
+                isStopping={isStoppingPlanning}
                 onUploadFiles={handlePlanningUpload}
                 getAttachmentUrl={(storedName) => api.getPlanningAttachmentUrl(workspaceId!, storedName)}
                 onReset={handleResetPlanning}
@@ -900,7 +997,7 @@ export function WorkspacePage() {
                   ) : undefined
                 }
                 onOpenArtifact={handleOpenArtifact}
-                isArtifactAvailable={isArtifactAvailable}
+                onOpenDraftTask={handleOpenDraftTask}
               />
             ) : (
               /* Task mode: show task chat in left pane */
@@ -952,26 +1049,25 @@ export function WorkspacePage() {
                 <CreateTaskPane
                   key={`create-task-${workspaceId || ''}`}
                   workspaceId={workspaceId || ''}
-                  onCancel={() => navigate(workspaceRootPath)}
+                  onCancel={() => {
+                    setNewTaskPrefill(null)
+                    setAgentTaskFormUpdates(null)
+                    navigate(workspaceRootPath)
+                  }}
                   onSubmit={handleCreateTask}
+                  agentFormUpdates={agentTaskFormUpdates}
+                  prefillRequest={newTaskPrefill}
                 />
               ) : (
                 <ShelfPane
-                  shelf={shelf}
-                  selectedArtifactId={selectedArtifactId}
+                  activeArtifact={selectedArtifact}
                   automationSettings={effectiveAutomationSettings}
                   readyTasksCount={readyTasksCount}
                   backlogAutomationToggling={backlogAutomationToggling}
                   readyAutomationToggling={readyAutomationToggling}
                   onToggleBacklogAutomation={handleToggleBacklogAutomation}
                   onToggleReadyAutomation={handleToggleReadyAutomation}
-                  onSelectArtifact={handleOpenArtifact}
                   onCloseArtifact={handleCloseArtifact}
-                  onPushDraft={handlePushDraft}
-                  onPushAll={handlePushAllDrafts}
-                  onRemoveItem={handleRemoveShelfItem}
-                  onUpdateDraft={handleUpdateDraft}
-                  onClearShelf={handleClearShelf}
                 />
               )
             ) : selectedTask ? (
@@ -1005,7 +1101,11 @@ export function WorkspacePage() {
             onTaskClick={handleSelectTask}
             onMoveTask={handleMoveTask}
             onReorderTasks={handleReorderTasks}
-            onCreateTask={() => navigate(`${workspaceRootPath}/tasks/new`)}
+            onCreateTask={() => {
+              setNewTaskPrefill(null)
+              setAgentTaskFormUpdates(null)
+              navigate(`${workspaceRootPath}/tasks/new`)
+            }}
             archivedTasks={archivedTasks}
           />
         </div>

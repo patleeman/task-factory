@@ -2130,6 +2130,7 @@ import {
   sendPlanningMessage,
   getPlanningMessages,
   getPlanningStatus,
+  stopPlanningExecution,
   resetPlanningSession,
   registerTaskFormCallbacks,
   unregisterTaskFormCallbacks,
@@ -2291,6 +2292,26 @@ app.get('/api/workspaces/:workspaceId/planning/status', async (req, res) => {
     return;
   }
   res.json({ status: getPlanningStatus(workspace.id) });
+});
+
+// Stop current planning turn (without resetting conversation)
+app.post('/api/workspaces/:workspaceId/planning/stop', async (req, res) => {
+  const workspace = await getWorkspaceById(req.params.workspaceId);
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return;
+  }
+
+  try {
+    const stopped = await stopPlanningExecution(
+      workspace.id,
+      (event) => broadcastToWorkspace(workspace.id, event),
+    );
+    res.json({ stopped });
+  } catch (err) {
+    logger.error('Error stopping planning execution', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
 });
 
 // Reset planning session

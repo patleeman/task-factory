@@ -507,6 +507,19 @@ export const api = {
     return data.status
   },
 
+  async stopPlanningExecution(workspaceId: string): Promise<{ stopped: boolean }> {
+    const res = await fetch(`/api/workspaces/${workspaceId}/planning/stop`, { method: 'POST' })
+    if (!res.ok) {
+      const err = await res.json().catch(() => null)
+      const message = err && typeof err.error === 'string' && err.error.trim().length > 0
+        ? err.error
+        : `Stop failed (${res.status})`
+      throw new Error(message)
+    }
+    const data = await res.json().catch(() => ({ stopped: false }))
+    return { stopped: !!data.stopped }
+  },
+
   async resetPlanningSession(workspaceId: string): Promise<void> {
     await fetch(`/api/workspaces/${workspaceId}/planning/reset`, { method: 'POST' })
   },

@@ -36,7 +36,7 @@ export default function (pi: ExtensionAPI) {
     description:
       'Save investigated acceptance criteria and a structured task plan. ' +
       'Call this exactly once after investigation is complete and criteria are finalized. ' +
-      'Plans are user-facing summaries, not file-by-file implementation checklists.',
+      'Plans are user-facing summaries: keep them concise, easy to scan, and not file-by-file implementation checklists.',
     parameters: Type.Object({
       taskId: Type.String({ description: 'The task ID this plan is for (e.g. "PIFA-3")' }),
       acceptanceCriteria: Type.Array(Type.String(), {

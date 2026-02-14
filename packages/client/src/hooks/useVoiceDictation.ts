@@ -114,6 +114,14 @@ function mapErrorMessage(errorCode?: string): string {
   }
 }
 
+function getRecognitionLanguage(): string {
+  if (typeof navigator === 'undefined') return 'en-US'
+  if (typeof navigator.language === 'string' && navigator.language.trim().length > 0) {
+    return navigator.language
+  }
+  return 'en-US'
+}
+
 export function useVoiceDictation({ setInput }: UseVoiceDictationOptions): VoiceDictationState {
   const [isSupported, setIsSupported] = useState(() => Boolean(getSpeechRecognitionCtor()))
   const [isListening, setIsListening] = useState(false)
@@ -157,12 +165,11 @@ export function useVoiceDictation({ setInput }: UseVoiceDictationOptions): Voice
     stop()
 
     const recognition = new RecognitionCtor()
-    const sessionId = sessionIdRef.current + 1
-    sessionIdRef.current = sessionId
+    const sessionId = sessionIdRef.current
     recognitionRef.current = recognition
     insertedTextRef.current = ''
 
-    recognition.lang = 'en-US'
+    recognition.lang = getRecognitionLanguage()
     recognition.interimResults = true
     recognition.continuous = true
     recognition.maxAlternatives = 1

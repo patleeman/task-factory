@@ -545,7 +545,7 @@ export function ExecutionPipelineEditor({
   }, [selection, selectedSkillSet, skillById, wrapperById])
 
   const executionCore = (
-    <div className={selectedWrapper ? 'ml-3 border-l border-violet-200/80 pl-3 space-y-3' : 'space-y-3'}>
+    <div className="space-y-3">
       {renderLane('pre')}
 
       <div className="rounded-xl border-2 border-dashed border-slate-300 bg-white px-3 py-6 text-center text-sm font-medium text-slate-500">

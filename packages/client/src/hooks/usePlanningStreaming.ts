@@ -43,6 +43,8 @@ function messagesToEntries(messages: PlanningMessage[]): ActivityEntry[] {
           isError: msg.metadata?.isError,
           artifactId: msg.metadata?.artifactId,
           artifactName: msg.metadata?.artifactName,
+          artifactHtml: msg.metadata?.artifactHtml,
+          draftTask: msg.metadata?.draftTask,
         },
       }
     }

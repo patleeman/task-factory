@@ -7,7 +7,7 @@ import type { Phase, TaskFrontmatter } from '@pi-factory/shared';
 // Two agent roles:
 //
 //   foreman     — workspace-level planning agent. Can research, create/delete/
-//                 move tasks, manage the shelf. Cannot edit or write code.
+//                 move tasks, and manage session outputs. Cannot edit or write code.
 //
 //   task agent  — scoped to a single task. Three phases:
 //
@@ -35,7 +35,7 @@ interface ModeContract {
 
 const MODE_CONTRACTS: Record<AgentMode, ModeContract> = {
   foreman: {
-    meaning: 'Workspace-level planning agent. Research, create/move/delete tasks, manage shelf. No code changes.',
+    meaning: 'Workspace-level planning agent. Research, create/move/delete tasks, manage session outputs. No code changes.',
     allowed: [
       'read',
       'bash',

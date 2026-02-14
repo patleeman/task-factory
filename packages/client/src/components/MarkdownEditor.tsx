@@ -215,5 +215,5 @@ export function MarkdownEditor({
     }
   }
 
-  return <div ref={containerRef} className={fill ? 'editor-fill' : ''} onMouseDown={handleContainerMouseDown} />
+  return <div ref={containerRef} className={fill ? 'editor-fill h-full' : ''} onMouseDown={handleContainerMouseDown} />
 }

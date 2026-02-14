@@ -2,19 +2,27 @@
  * Create Draft Task Extension
  *
  * Registers a `create_draft_task` tool that the planning agent calls to
- * stage a new task on the shelf. The task is not yet committed to the
- * backlog — the user reviews and pushes it.
- *
- * Communication with the server: the planning-agent-service registers a
- * callback on `globalThis.__piFactoryShelfCallbacks` before starting the
- * session. The tool looks it up by workspaceId and calls it.
+ * create an inline draft task card in Foreman chat.
  */
 import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
 
 declare global {
   var __piFactoryShelfCallbacks: Map<string, {
-    createDraftTask: (args: any) => Promise<void>;
+    createDraftTask: (args: any) => Promise<{
+      id: string;
+      title: string;
+      content: string;
+      acceptanceCriteria: string[];
+      plan?: {
+        goal: string;
+        steps: string[];
+        validation: string[];
+        cleanup: string[];
+        generatedAt: string;
+      };
+      createdAt: string;
+    }>;
     createArtifact: (args: any) => Promise<{ id: string; name: string }>;
   }> | undefined;
 }
@@ -24,8 +32,9 @@ export default function (pi: ExtensionAPI) {
     name: 'create_draft_task',
     label: 'Create Draft Task',
     description:
-      'Create a draft task on the shelf. The user will review it before pushing to the backlog. ' +
-      'Use this to break down work into small, focused tasks with clear acceptance criteria.',
+      'Create an inline draft task card in Foreman chat. ' +
+      'Use this to break down work into small, focused tasks with clear acceptance criteria and concise, easy-to-scan plans. ' +
+      'Users can click the card to open the New Task draft screen prefilled.',
     parameters: Type.Object({
       title: Type.String({ description: 'Short descriptive title for the task' }),
       content: Type.String({ description: 'Markdown description of what needs to be done' }),
@@ -57,27 +66,37 @@ export default function (pi: ExtensionAPI) {
     async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
       const { title, content, acceptance_criteria, plan } = params;
 
-      // Find the active shelf callback (from planning agent session)
       const callbacks = globalThis.__piFactoryShelfCallbacks;
-      let called = false;
+      let createdDraftTask: {
+        id: string;
+        title: string;
+        content: string;
+        acceptanceCriteria: string[];
+        plan?: {
+          goal: string;
+          steps: string[];
+          validation: string[];
+          cleanup: string[];
+          generatedAt: string;
+        };
+        createdAt: string;
+      } | null = null;
 
       if (callbacks) {
-        // Try all registered callbacks — the planning agent service will handle routing
         for (const [, cb] of callbacks) {
-          await cb.createDraftTask({
+          createdDraftTask = await cb.createDraftTask({
             title,
             content,
             acceptance_criteria,
             plan,
           });
-          called = true;
-          break; // Only call the first one (there should only be one active)
+          break;
         }
       }
 
-      if (!called) {
+      if (!createdDraftTask) {
         return {
-          content: [{ type: 'text' as const, text: 'Draft task created (shelf callbacks not available — task may not appear on shelf).' }],
+          content: [{ type: 'text' as const, text: 'Draft task created (planning callbacks not available — inline card may not appear).' }],
           details: {} as Record<string, unknown>,
         };
       }
@@ -85,9 +104,11 @@ export default function (pi: ExtensionAPI) {
       return {
         content: [{
           type: 'text' as const,
-          text: `Draft task created: "${title}"\n\nAcceptance criteria:\n${acceptance_criteria.map((c, i) => `${i + 1}. ${c}`).join('\n')}\n\nThe user can review and push this to the backlog.`,
+          text: `Draft task created: "${title}"\n\nAcceptance criteria:\n${acceptance_criteria.map((c, i) => `${i + 1}. ${c}`).join('\n')}\n\nThe user can open it from chat to continue refining in the New Task draft screen.`,
         }],
-        details: {} as Record<string, unknown>,
+        details: {
+          draftTask: createdDraftTask,
+        },
       };
     },
   });

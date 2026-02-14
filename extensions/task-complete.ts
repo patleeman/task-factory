@@ -31,7 +31,7 @@ export default function (pi: ExtensionAPI) {
       'just explain the situation and the user will respond.',
     parameters: Type.Object({
       taskId: Type.String({ description: 'The task ID (e.g. "PIFA-3")' }),
-      summary: Type.String({ description: 'Brief summary of what was accomplished' }),
+      summary: Type.String({ description: 'Brief, easy-to-scan summary of what was accomplished (1-2 short sentences)' }),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
       const { taskId, summary } = params;

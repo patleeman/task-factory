@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, memo, useMemo, useCallback } from 'react'
 import { CornerUpLeft, Loader2, Mic, Paperclip, PencilLine, SendHorizontal, X, Zap } from 'lucide-react'
-import type { ActivityEntry, Attachment, Phase, AgentExecutionStatus } from '@pi-factory/shared'
+import type { ActivityEntry, Attachment, DraftTask, Phase, AgentExecutionStatus } from '@pi-factory/shared'
 import type { AgentStreamState, ToolCallState } from '../hooks/useAgentStreaming'
 import { useVoiceDictation } from '../hooks/useVoiceDictation'
 import ReactMarkdown from 'react-markdown'
@@ -35,10 +35,10 @@ interface TaskChatProps {
   emptyState?: { title: string; subtitle: string }
   /** Optional element rendered above the input area (e.g. QADialog) */
   bottomSlot?: React.ReactNode
-  /** Planning-mode hook: open a shelf artifact in the right pane. */
-  onOpenArtifact?: (artifactId: string) => void
-  /** Planning-mode availability check for artifact reopen widgets. */
-  isArtifactAvailable?: (artifactId: string) => boolean
+  /** Planning-mode hook: open an inline artifact in the right pane. */
+  onOpenArtifact?: (artifact: { id: string; name: string; html: string }) => void
+  /** Planning-mode hook: open inline draft task in the New Task pane. */
+  onOpenDraftTask?: (draftTask: DraftTask) => void
 }
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; pulse?: boolean }> = {
@@ -182,6 +182,32 @@ function guessToolInfo(content: string): { prefix: string; detail: string } | nu
   // Structured tool entries now carry metadata; this heuristic is only for
   // obvious legacy outputs (code, file lists, git output, etc.).
   return null
+}
+
+function isDraftTaskMetadata(value: unknown): value is DraftTask {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const draft = value as Partial<DraftTask>
+
+  const hasValidPlan = (() => {
+    if (draft.plan == null) return true
+    if (typeof draft.plan !== 'object' || Array.isArray(draft.plan)) return false
+
+    const plan = draft.plan as any
+    return (
+      typeof plan.goal === 'string'
+      && Array.isArray(plan.steps)
+      && Array.isArray(plan.validation)
+      && Array.isArray(plan.cleanup)
+    )
+  })()
+
+  return (
+    typeof draft.id === 'string'
+    && typeof draft.title === 'string'
+    && typeof draft.content === 'string'
+    && Array.isArray(draft.acceptanceCriteria)
+    && hasValidPlan
+  )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -329,17 +355,17 @@ const PersistedToolBlock = memo(function PersistedToolBlock({
 const ArtifactReopenWidget = memo(function ArtifactReopenWidget({
   artifactId,
   artifactName,
-  isAvailable,
+  artifactHtml,
   onOpen,
   result,
 }: {
   artifactId: string
   artifactName: string
-  isAvailable: boolean
-  onOpen?: (artifactId: string) => void
+  artifactHtml?: string
+  onOpen?: (artifact: { id: string; name: string; html: string }) => void
   result?: string
 }) {
-  const canOpen = isAvailable && !!onOpen
+  const canOpen = !!onOpen && typeof artifactHtml === 'string' && artifactHtml.length > 0
 
   return (
     <div className="-mx-4 border-l-2 border-indigo-400 bg-indigo-50/70 px-4 py-2.5">
@@ -347,13 +373,16 @@ const ArtifactReopenWidget = memo(function ArtifactReopenWidget({
         <div className="min-w-0">
           <div className="text-[10px] font-semibold text-indigo-600 uppercase tracking-wide">Artifact</div>
           <div className="text-sm font-medium text-slate-800 truncate">{artifactName}</div>
-          <div className={`text-xs mt-0.5 ${isAvailable ? 'text-slate-500' : 'text-amber-700'}`}>
-            {isAvailable ? 'Open in the right pane' : 'Artifact unavailable (removed from shelf)'}
+          <div className={`text-xs mt-0.5 ${canOpen ? 'text-slate-500' : 'text-amber-700'}`}>
+            {canOpen ? 'Open in the right pane' : 'Artifact payload unavailable for reopen'}
           </div>
         </div>
 
         <button
-          onClick={() => onOpen?.(artifactId)}
+          onClick={() => {
+            if (!canOpen || !artifactHtml) return
+            onOpen?.({ id: artifactId, name: artifactName, html: artifactHtml })
+          }}
           disabled={!canOpen}
           className={`shrink-0 text-xs px-2.5 py-1 rounded font-medium transition-colors ${
             canOpen
@@ -370,6 +399,79 @@ const ArtifactReopenWidget = memo(function ArtifactReopenWidget({
           {result}
         </div>
       )}
+    </div>
+  )
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Inline draft-task reopen widget (planning create_draft_task tool output)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const InlineDraftTaskWidget = memo(function InlineDraftTaskWidget({
+  draftTask,
+  onOpen,
+}: {
+  draftTask: DraftTask
+  onOpen?: (draftTask: DraftTask) => void
+}) {
+  const canOpen = !!onOpen
+
+  return (
+    <div className="-mx-4 border-l-2 border-emerald-400 bg-emerald-50/70 px-4 py-2.5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="text-[10px] font-semibold text-emerald-700 uppercase tracking-wide">Draft Task</div>
+          <div className="text-sm font-medium text-slate-800">{draftTask.title}</div>
+
+          {draftTask.content.trim() && (
+            <div className="text-xs text-slate-600 mt-1 whitespace-pre-wrap line-clamp-3">{draftTask.content.trim()}</div>
+          )}
+
+          <div className="mt-2">
+            <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Acceptance Criteria</div>
+            {draftTask.acceptanceCriteria.length > 0 ? (
+              <ul className="mt-1 space-y-0.5">
+                {draftTask.acceptanceCriteria.map((criterion, index) => (
+                  <li key={index} className="text-xs text-slate-600 flex items-start gap-1">
+                    <span className="text-slate-400 shrink-0">•</span>
+                    <span>{criterion}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div className="text-xs text-slate-500 mt-1">(none)</div>
+            )}
+          </div>
+
+          <div className="mt-2">
+            <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Plan</div>
+            {draftTask.plan ? (
+              <div className="text-xs text-slate-600 mt-1 space-y-1">
+                <div><span className="font-medium">Goal:</span> {draftTask.plan.goal}</div>
+                <div>
+                  <span className="font-medium">Steps:</span> {draftTask.plan.steps.length} ·
+                  <span className="font-medium"> Validation:</span> {draftTask.plan.validation.length} ·
+                  <span className="font-medium"> Cleanup:</span> {draftTask.plan.cleanup.length}
+                </div>
+              </div>
+            ) : (
+              <div className="text-xs text-slate-500 mt-1">(none)</div>
+            )}
+          </div>
+        </div>
+
+        <button
+          onClick={() => onOpen?.(draftTask)}
+          disabled={!canOpen}
+          className={`shrink-0 text-xs px-2.5 py-1 rounded font-medium transition-colors ${
+            canOpen
+              ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+              : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+          }`}
+        >
+          Open draft
+        </button>
+      </div>
     </div>
   )
 })
@@ -461,7 +563,7 @@ export function TaskChat({
   emptyState,
   bottomSlot,
   onOpenArtifact,
-  isArtifactAvailable,
+  onOpenDraftTask,
 }: TaskChatProps) {
   const [input, setInput] = useState('')
   const [isComposing, setIsComposing] = useState(false)
@@ -489,6 +591,13 @@ export function TaskChat({
     clearError: clearDictationError,
   } = useVoiceDictation({ setInput })
 
+  const resizeComposer = useCallback(() => {
+    const textarea = textareaRef.current
+    if (!textarea) return
+    textarea.style.height = 'auto'
+    textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px'
+  }, [])
+
   // Show agent activity for all phases (including complete), so chat mode
   // still displays running status while the model responds.
   const isAgentActive = agentStream.isActive
@@ -511,6 +620,10 @@ export function TaskChat({
   useEffect(() => {
     stopDictation()
   }, [taskId, stopDictation])
+
+  useEffect(() => {
+    resizeComposer()
+  }, [input, resizeComposer])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -789,6 +902,8 @@ export function TaskChat({
                 const toolName = String(meta.toolName)
                 const artifactId = typeof meta.artifactId === 'string' ? meta.artifactId : undefined
                 const artifactName = typeof meta.artifactName === 'string' ? meta.artifactName : undefined
+                const artifactHtml = typeof meta.artifactHtml === 'string' ? meta.artifactHtml : undefined
+                const draftTask = isDraftTaskMetadata(meta.draftTask) ? meta.draftTask : undefined
 
                 if (
                   toolName === 'create_artifact' &&
@@ -796,15 +911,28 @@ export function TaskChat({
                   artifactName &&
                   !Boolean(meta.isError)
                 ) {
-                  const available = isArtifactAvailable ? isArtifactAvailable(artifactId) : true
                   return (
                     <ArtifactReopenWidget
                       key={entry.id}
                       artifactId={artifactId}
                       artifactName={artifactName}
-                      isAvailable={available}
+                      artifactHtml={artifactHtml}
                       onOpen={onOpenArtifact}
                       result={entry.content}
+                    />
+                  )
+                }
+
+                if (
+                  toolName === 'create_draft_task' &&
+                  draftTask &&
+                  !Boolean(meta.isError)
+                ) {
+                  return (
+                    <InlineDraftTaskWidget
+                      key={entry.id}
+                      draftTask={draftTask}
+                      onOpen={onOpenDraftTask}
                     />
                   )
                 }
@@ -1075,10 +1203,10 @@ export function TaskChat({
                 clearDictationError()
                 toggleDictation()
               }}
-              className={`rounded-md border p-2 shrink-0 transition-colors ${
+              className={`text-[10px] font-medium transition-colors py-2 px-1.5 shrink-0 rounded-md ${
                 isDictating
-                  ? 'border-red-200 bg-red-50 text-red-700 hover:bg-red-100'
-                  : 'border-slate-200 text-slate-400 hover:text-slate-600 hover:bg-slate-50'
+                  ? 'bg-red-50 text-red-700 hover:bg-red-100'
+                  : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'
               }`}
               title={isDictating ? 'Stop voice dictation' : 'Start voice dictation'}
               aria-label={isDictating ? 'Stop voice dictation' : 'Start voice dictation'}
@@ -1121,11 +1249,6 @@ export function TaskChat({
                 : 'border-slate-200 focus:border-slate-400 focus:ring-slate-200'
             }`}
             rows={1}
-            onInput={(e) => {
-              const t = e.target as HTMLTextAreaElement
-              t.style.height = 'auto'
-              t.style.height = Math.min(t.scrollHeight, 120) + 'px'
-            }}
           />
           <button
             onClick={() => void handleSend()}

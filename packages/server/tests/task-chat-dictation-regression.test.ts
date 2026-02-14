@@ -12,7 +12,7 @@ const dictationHook = readFileSync(dictationHookPath, 'utf-8');
 
 describe('task chat dictation regression checks', () => {
   it('keeps native Web Speech API detection for SpeechRecognition and webkitSpeechRecognition', () => {
-    expect(dictationHook).toContain('speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition || null');
+    expect(dictationHook).toMatch(/speechWindow\.SpeechRecognition\s*\|\|\s*speechWindow\.webkitSpeechRecognition\s*\|\|\s*null/);
   });
 
   it('only renders the dictation control when recognition support is available', () => {
@@ -21,8 +21,8 @@ describe('task chat dictation regression checks', () => {
   });
 
   it('stops dictation on send and task context changes to avoid stale transcript writes', () => {
-    expect(taskChat).toContain('stopDictation()\n    const trimmed = input.trim()');
-    expect(taskChat).toContain('useEffect(() => {\n    stopDictation()\n  }, [taskId, stopDictation])');
+    expect(taskChat).toMatch(/stopDictation\(\)\s*const trimmed = input\.trim\(\)/);
+    expect(taskChat).toMatch(/useEffect\(\(\) => \{\s*stopDictation\(\)\s*\}, \[taskId, stopDictation\]\)/);
   });
 
   it('surfaces dictation errors to the user and keeps lifecycle teardown in the hook', () => {

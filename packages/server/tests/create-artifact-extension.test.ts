@@ -27,7 +27,7 @@ describe('create_artifact extension', () => {
     delete globalObj.__piFactoryShelfCallbacks;
   });
 
-  it('returns a fallback message when shelf callbacks are unavailable', async () => {
+  it('returns a fallback message when planning callbacks are unavailable', async () => {
     const result = await tool.execute(
       'tool-call-1',
       {
@@ -39,11 +39,11 @@ describe('create_artifact extension', () => {
       {} as any,
     );
 
-    expect(extractResultText(result)).toContain('shelf callbacks not available');
+    expect(extractResultText(result)).toContain('callbacks not available');
     expect(result.details).toEqual({});
   });
 
-  it('returns stable artifact metadata from the created shelf artifact', async () => {
+  it('returns stable artifact metadata plus renderable HTML payload', async () => {
     const createArtifact = vi.fn().mockResolvedValue({
       id: 'artifact-abc12345',
       name: 'Voice Dictation Research',
@@ -76,6 +76,7 @@ describe('create_artifact extension', () => {
     expect(result.details).toMatchObject({
       artifactId: 'artifact-abc12345',
       artifactName: 'Voice Dictation Research',
+      artifactHtml: '<!doctype html><html></html>',
     });
   });
 });

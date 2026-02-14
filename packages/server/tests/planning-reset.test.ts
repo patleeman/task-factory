@@ -65,7 +65,7 @@ afterEach(() => {
 });
 
 describe('resetPlanningSession', () => {
-  it('archives messages, clears active history, removes only drafts, and broadcasts both reset events', async () => {
+  it('archives messages, clears active history, clears legacy shelf data, and broadcasts reset events', async () => {
     const homePath = setTempHome();
     const workspacePath = createTempDir('pi-factory-workspace-');
     const workspaceId = 'ws-reset';
@@ -144,10 +144,10 @@ describe('resetPlanningSession', () => {
     expect(JSON.parse(readFileSync(archivePath, 'utf-8'))).toEqual(oldMessages);
 
     const shelfInMemory = await getShelf(workspaceId);
-    expect(shelfInMemory.items).toEqual([{ type: 'artifact', item: artifact }]);
+    expect(shelfInMemory.items).toEqual([]);
 
     const shelfOnDisk = JSON.parse(readFileSync(join(piDir, 'shelf.json'), 'utf-8')) as Shelf;
-    expect(shelfOnDisk.items).toEqual([{ type: 'artifact', item: artifact }]);
+    expect(shelfOnDisk.items).toEqual([]);
 
     const resetEvent = events.find((event) => event.type === 'planning:session_reset');
     expect(resetEvent).toEqual({
@@ -160,13 +160,13 @@ describe('resetPlanningSession', () => {
     expect(shelfUpdatedEvent).toEqual({
       type: 'shelf:updated',
       workspaceId,
-      shelf: { items: [{ type: 'artifact', item: artifact }] },
+      shelf: { items: [] },
     });
 
     // Simulate reload: clear module cache and fetch shelf again from disk.
     vi.resetModules();
     const { getShelf: getShelfAfterReload } = await import('../src/shelf-service.js');
     const shelfAfterReload = await getShelfAfterReload(workspaceId);
-    expect(shelfAfterReload.items).toEqual([{ type: 'artifact', item: artifact }]);
+    expect(shelfAfterReload.items).toEqual([]);
   });
 });

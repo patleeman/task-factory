@@ -34,12 +34,7 @@ import type {
   QAResponse,
 } from '@pi-factory/shared';
 import {
-  addArtifact,
-  addDraftTask,
-  clearDraftTasks,
-  getShelf,
-  removeShelfItem,
-  updateDraftTask as updateDraftTaskFn,
+  clearShelf,
 } from './shelf-service.js';
 import { getWorkspaceById } from './workspace-service.js';
 import { discoverTasks } from './task-service.js';
@@ -65,7 +60,7 @@ import {
 // =============================================================================
 
 export interface ShelfCallbacks {
-  createDraftTask: (args: any) => Promise<void>;
+  createDraftTask: (args: any) => Promise<DraftTask>;
   createArtifact: (args: { name: string; html: string }) => Promise<Artifact>;
   removeItem: (itemId: string) => Promise<string>;
   updateDraftTask: (draftId: string, updates: any) => Promise<string>;
@@ -83,31 +78,85 @@ function ensureShelfCallbackRegistry(): Map<string, ShelfCallbacks> {
   return globalThis.__piFactoryShelfCallbacks;
 }
 
+function normalizeDraftTaskPlan(plan: any): DraftTask['plan'] {
+  if (!plan || typeof plan !== 'object') return undefined;
+
+  return {
+    goal: String(plan.goal || ''),
+    steps: Array.isArray(plan.steps) ? plan.steps.map(String) : [],
+    validation: Array.isArray(plan.validation) ? plan.validation.map(String) : [],
+    cleanup: Array.isArray(plan.cleanup) ? plan.cleanup.map(String) : [],
+    generatedAt: typeof plan.generatedAt === 'string' && plan.generatedAt
+      ? plan.generatedAt
+      : new Date().toISOString(),
+  };
+}
+
+function buildDraftTaskFromArgs(args: any): DraftTask {
+  return {
+    id: `draft-${crypto.randomUUID().slice(0, 8)}`,
+    title: String(args.title || 'Untitled Task'),
+    content: String(args.content || ''),
+    acceptanceCriteria: Array.isArray(args.acceptance_criteria)
+      ? args.acceptance_criteria.map(String)
+      : [],
+    plan: normalizeDraftTaskPlan(args.plan),
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function applyDraftTaskUpdates(draft: DraftTask, updates: any): DraftTask {
+  const nextAcceptanceCriteria = Array.isArray(updates?.acceptanceCriteria)
+    ? updates.acceptanceCriteria.map(String)
+    : Array.isArray(updates?.acceptance_criteria)
+      ? updates.acceptance_criteria.map(String)
+      : draft.acceptanceCriteria;
+
+  const nextPlan = updates && Object.prototype.hasOwnProperty.call(updates, 'plan')
+    ? normalizeDraftTaskPlan(updates.plan)
+    : draft.plan;
+
+  return {
+    ...draft,
+    title: typeof updates?.title === 'string' ? updates.title : draft.title,
+    content: typeof updates?.content === 'string' ? updates.content : draft.content,
+    acceptanceCriteria: nextAcceptanceCriteria,
+    plan: nextPlan,
+  };
+}
+
+function buildSessionOutputShelf(session?: { draftTasks: Map<string, DraftTask>; artifacts: Map<string, Artifact> } | null): Shelf {
+  if (!session) return { items: [] };
+
+  const draftItems = Array.from(session.draftTasks.values()).map((item) => ({
+    type: 'draft-task' as const,
+    item,
+  }));
+  const artifactItems = Array.from(session.artifacts.values()).map((item) => ({
+    type: 'artifact' as const,
+    item,
+  }));
+
+  return { items: [...draftItems, ...artifactItems] };
+}
+
 function registerShelfCallbacks(
   workspaceId: string,
   broadcast: (event: ServerEvent) => void,
+  getSession: () => PlanningSession | undefined,
 ): void {
   const registry = ensureShelfCallbackRegistry();
   registry.set(workspaceId, {
     createDraftTask: async (args: any) => {
-      const draft: DraftTask = {
-        id: `draft-${crypto.randomUUID().slice(0, 8)}`,
-        title: String(args.title || 'Untitled Task'),
-        content: String(args.content || ''),
-        acceptanceCriteria: Array.isArray(args.acceptance_criteria)
-          ? args.acceptance_criteria.map(String)
-          : [],
-        plan: args.plan ? {
-          goal: String(args.plan.goal || ''),
-          steps: Array.isArray(args.plan.steps) ? args.plan.steps.map(String) : [],
-          validation: Array.isArray(args.plan.validation) ? args.plan.validation.map(String) : [],
-          cleanup: Array.isArray(args.plan.cleanup) ? args.plan.cleanup.map(String) : [],
-          generatedAt: new Date().toISOString(),
-        } : undefined,
-        createdAt: new Date().toISOString(),
-      };
-      const shelf = await addDraftTask(workspaceId, draft);
-      broadcast({ type: 'shelf:updated', workspaceId, shelf });
+      const session = getSession();
+      const draft = buildDraftTaskFromArgs(args);
+      session?.draftTasks.set(draft.id, draft);
+
+      if (session) {
+        broadcast({ type: 'shelf:updated', workspaceId, shelf: buildSessionOutputShelf(session) });
+      }
+
+      return draft;
     },
     createArtifact: async (args: { name: string; html: string }) => {
       const artifact: Artifact = {
@@ -116,30 +165,45 @@ function registerShelfCallbacks(
         html: String(args.html || ''),
         createdAt: new Date().toISOString(),
       };
-      const shelf = await addArtifact(workspaceId, artifact);
-      broadcast({ type: 'shelf:updated', workspaceId, shelf });
+
+      const session = getSession();
+      session?.artifacts.set(artifact.id, artifact);
+
+      if (session) {
+        broadcast({ type: 'shelf:updated', workspaceId, shelf: buildSessionOutputShelf(session) });
+      }
+
       return artifact;
     },
     removeItem: async (itemId: string) => {
-      try {
-        const shelf = await removeShelfItem(workspaceId, itemId);
-        broadcast({ type: 'shelf:updated', workspaceId, shelf });
-        return `Removed item ${itemId}`;
-      } catch (err: any) {
-        return `Failed to remove: ${err.message}`;
+      const session = getSession();
+      if (!session) return 'No active planning session';
+
+      const removedDraft = session.draftTasks.delete(itemId);
+      const removedArtifact = session.artifacts.delete(itemId);
+      if (!removedDraft && !removedArtifact) {
+        return `Item ${itemId} not found`;
       }
+
+      broadcast({ type: 'shelf:updated', workspaceId, shelf: buildSessionOutputShelf(session) });
+      return `Removed item ${itemId}`;
     },
     updateDraftTask: async (draftId: string, updates: any) => {
-      try {
-        const shelf = await updateDraftTaskFn(workspaceId, draftId, updates);
-        broadcast({ type: 'shelf:updated', workspaceId, shelf });
-        return `Updated draft ${draftId}`;
-      } catch (err: any) {
-        return `Failed to update: ${err.message}`;
+      const session = getSession();
+      if (!session) return 'No active planning session';
+
+      const existing = session.draftTasks.get(draftId);
+      if (!existing) {
+        return `Draft ${draftId} not found`;
       }
+
+      const updated = applyDraftTaskUpdates(existing, updates);
+      session.draftTasks.set(draftId, updated);
+      broadcast({ type: 'shelf:updated', workspaceId, shelf: buildSessionOutputShelf(session) });
+      return `Updated draft ${draftId}`;
     },
     getShelf: async () => {
-      return getShelf(workspaceId);
+      return buildSessionOutputShelf(getSession());
     },
   });
 }
@@ -231,8 +295,9 @@ function registerQACallbacks(
 
 function unregisterQACallbacks(workspaceId: string): void {
   globalThis.__piFactoryQACallbacks?.delete(workspaceId);
-  // Reject any pending QA requests for this workspace so Promises don't hang
+  // Reject pending QA requests for this workspace so Promises don't hang.
   for (const [requestId, pending] of pendingQARequests) {
+    if (pending.workspaceId !== workspaceId) continue;
     pending.reject(new Error('Planning session reset'));
     pendingQARequests.delete(requestId);
   }
@@ -453,15 +518,73 @@ interface PlanningSession {
   currentStreamText: string;
   currentThinkingText: string;
   toolCallArgs: Map<string, { toolName: string; args: Record<string, unknown> }>;
+  /** Session-scoped inline outputs produced during planning. */
+  artifacts: Map<string, Artifact>;
+  draftTasks: Map<string, DraftTask>;
   unsubscribe?: () => void;
   broadcast: (event: ServerEvent) => void;
   /** Whether the first user message has been sent (system prompt gets prepended) */
   firstMessageSent: boolean;
   /** UUID for the current planning session (persisted in planning-session-id.txt) */
   sessionId: string;
+  /** True when the user explicitly requested to stop the current turn. */
+  abortRequested: boolean;
 }
 
 const planningSessions = new Map<string, PlanningSession>();
+
+function parseDraftTaskFromMetadata(value: unknown): DraftTask | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (typeof record.id !== 'string' || !record.id) return null;
+
+  const acceptanceCriteria = Array.isArray(record.acceptanceCriteria)
+    ? record.acceptanceCriteria.map(String)
+    : [];
+
+  const maybePlan = normalizeDraftTaskPlan(record.plan as any);
+
+  return {
+    id: record.id,
+    title: typeof record.title === 'string' ? record.title : 'Untitled Task',
+    content: typeof record.content === 'string' ? record.content : '',
+    acceptanceCriteria,
+    plan: maybePlan,
+    createdAt: typeof record.createdAt === 'string' && record.createdAt
+      ? record.createdAt
+      : new Date().toISOString(),
+  };
+}
+
+function restoreSessionOutputs(messages: PlanningMessage[]): { artifacts: Map<string, Artifact>; draftTasks: Map<string, DraftTask> } {
+  const artifacts = new Map<string, Artifact>();
+  const draftTasks = new Map<string, DraftTask>();
+
+  for (const message of messages) {
+    const metadata = message.metadata;
+    if (!metadata) continue;
+
+    if (
+      typeof metadata.artifactId === 'string'
+      && typeof metadata.artifactName === 'string'
+      && typeof metadata.artifactHtml === 'string'
+    ) {
+      artifacts.set(metadata.artifactId, {
+        id: metadata.artifactId,
+        name: metadata.artifactName,
+        html: metadata.artifactHtml,
+        createdAt: message.timestamp,
+      });
+    }
+
+    const draftTask = parseDraftTaskFromMetadata(metadata.draftTask);
+    if (draftTask) {
+      draftTasks.set(draftTask.id, draftTask);
+    }
+  }
+
+  return { artifacts, draftTasks };
+}
 
 // =============================================================================
 // Get or create a planning session for a workspace
@@ -483,18 +606,24 @@ async function getOrCreateSession(
     throw new Error(`Workspace ${workspaceId} not found`);
   }
 
+  const restoredMessages = existing?.messages || loadPersistedMessages(workspaceId);
+  const restoredOutputs = restoreSessionOutputs(restoredMessages);
+
   const session: PlanningSession = {
     workspaceId,
     workspacePath: workspace.path,
     piSession: null,
     status: 'idle',
-    messages: existing?.messages || loadPersistedMessages(workspaceId),
+    messages: restoredMessages,
     currentStreamText: '',
     currentThinkingText: '',
     toolCallArgs: new Map(),
+    artifacts: restoredOutputs.artifacts,
+    draftTasks: restoredOutputs.draftTasks,
     broadcast,
     firstMessageSent: false,
     sessionId: getOrCreateSessionId(workspaceId),
+    abortRequested: false,
   };
 
   planningSessions.set(workspaceId, session);
@@ -527,7 +656,7 @@ async function getOrCreateSession(
     session.piSession = piSession;
 
     // Register callbacks so extension tools can interact with the factory
-    registerShelfCallbacks(workspaceId, broadcast);
+    registerShelfCallbacks(workspaceId, broadcast, () => planningSessions.get(workspaceId));
     registerFactoryControlCallbacks(workspaceId, broadcast);
     registerQACallbacks(workspaceId, broadcast, () => planningSessions.get(workspaceId));
 
@@ -604,17 +733,6 @@ export async function buildPlanningSystemPrompt(workspacePath: string, workspace
     } catch { /* ignore */ }
   }
 
-  // Get current production queue contents (draft tasks only)
-  const shelf = await getShelf(workspaceId);
-  let shelfSummary = '';
-  const drafts = shelf.items.filter((si) => si.type === 'draft-task');
-  if (drafts.length > 0) {
-    shelfSummary = '\n## Current Production Queue\n';
-    for (const si of drafts) {
-      shelfSummary += `- **${si.item.title}** (${si.item.id})\n`;
-    }
-  }
-
   // Shared workspace context edited by user + agents
   const workspaceSharedContext = loadWorkspaceSharedContext(workspacePath);
   let sharedContextSummary = '';
@@ -633,12 +751,13 @@ export async function buildPlanningSystemPrompt(workspacePath: string, workspace
 - Have a conversation with the user about their goals and projects
 - Research codebases, architectures, and requirements
 - Break down large goals into well-defined, small tasks
-- Create draft tasks that the user can review before committing to the backlog
+- Create inline draft tasks that users can open into the New Task form for refinement
+- Generate inline artifacts that users can reopen from chat history
 - Answer questions about the current state of work
 
 ## Workspace
 - Path: ${workspacePath}
-${taskSummary}${shelfSummary}${sharedContextSummary}
+${taskSummary}${sharedContextSummary}
 
 ${stateContractSection}
 
@@ -672,23 +791,33 @@ Parameters:
 - raw (boolean, optional): Return raw HTML instead of extracted markdown
 
 ### create_draft_task
-Creates a draft task on the shelf. The user can review and push it to the backlog.
+Creates an inline draft-task card in the Foreman chat session.
 Parameters:
 - title (string): Short descriptive title
 - content (string): Markdown description of what needs to be done
 - acceptance_criteria (string[]): List of specific, testable criteria
-- plan (object): Execution plan for the task. **Always include a plan.** Tasks with plans skip the planning phase and go straight to ready for execution.
-  - goal (string): Concise summary of what the task achieves
-  - steps (string[]): High-level implementation summaries (usually 3-6 short steps)
-  - validation (string[]): High-level checks that confirm the outcome
-  - cleanup (string[]): Post-completion cleanup actions (empty array if none)
+- plan (object): Execution plan for the task. **Always include a plan.** Keep this concise and high-level.
+  - goal (string): Concise summary of what the task achieves (1-2 short sentences)
+  - steps (string[]): High-level implementation summaries (usually 3-6 short, outcome-focused lines)
+  - validation (string[]): Short checks that confirm the outcome
+  - cleanup (string[]): Short post-completion cleanup actions (empty array if none)
+
+### create_artifact
+Creates an inline HTML artifact card in chat that can be reopened from history.
+Parameters:
+- name (string): Descriptive artifact name
+- html (string): Complete self-contained HTML for rendering
+
+### manage_new_task
+Read or update the New Task form when it is open.
+Use this after the user opens a draft from chat, so you can iteratively refine the task content together.
 
 ### manage_shelf
-List, remove, or update shelf items.
+List/remove/update session-scoped output items (legacy tool name).
 Parameters:
 - action (string): "list" | "remove" | "update"
 - item_id (string, optional): ID of the item (required for remove/update)
-- updates (object, optional): Fields to update on a draft task (title, content, acceptance_criteria)
+- updates (object, optional): Draft update fields (title, content, acceptance_criteria)
 
 ### factory_control
 Start, stop, or check the status of the factory queue (the execution pipeline that processes tasks).
@@ -698,11 +827,14 @@ Parameters:
 ## Guidelines
 - **If the user's request is ambiguous, use \`ask_questions\` first** to disambiguate before creating tasks. Present concrete multiple-choice options so the user can quickly clarify intent.
 - **CRITICAL: When using \`ask_questions\`, call the tool IMMEDIATELY with zero preamble.** Do not write the questions as text first — the tool renders an interactive UI. Any text you write before the tool call creates ugly duplication. Just call the tool.
-- When the user describes work, **always create draft tasks immediately** — don't ask for permission, just do it
+- When the user describes work, **create draft tasks as inline chat cards** — don't route draft-task creation through shelf staging.
 - **Always include a plan** with every draft task. Research first, then provide a high-level summary plan so users can understand the approach quickly.
+- If a user opens a draft into the New Task form, use \`manage_new_task\` to keep refining that form inline with the conversation.
 - Keep tasks small and focused — each should be completable in a single agent session
 - Write clear acceptance criteria that are specific and testable
+- Keep wording concise, easy to scan, and not wordy. Prefer short bullets over long paragraphs.
 - Plan steps should be concise and outcome-focused. Avoid line-level implementation details, exact file paths, and low-level function-by-function instructions.
+- For readability: keep goal to 1-2 short sentences, and keep each step/validation/cleanup item to one short sentence when possible.
 - When in doubt, ask the user for clarification using \`ask_questions\`
 - Be conversational and helpful — you're a collaborator, not just a task creator`;
 }
@@ -741,7 +873,7 @@ function extractPlanningToolResultDetails(result: unknown): Record<string, unkno
   return details as Record<string, unknown>;
 }
 
-function extractArtifactReferenceFromToolResult(toolName: string, result: unknown): { artifactId: string; artifactName: string } | undefined {
+function extractArtifactPayloadFromToolResult(toolName: string, result: unknown): Artifact | undefined {
   if (toolName !== 'create_artifact') return undefined;
 
   const details = extractPlanningToolResultDetails(result);
@@ -764,8 +896,34 @@ function extractArtifactReferenceFromToolResult(toolName: string, result: unknow
       ? artifactObject.name
       : undefined;
 
-  if (!artifactId || !artifactName) return undefined;
-  return { artifactId, artifactName };
+  const artifactHtml = typeof details.artifactHtml === 'string'
+    ? details.artifactHtml
+    : typeof artifactObject?.html === 'string'
+      ? artifactObject.html
+      : undefined;
+
+  if (!artifactId || !artifactName || !artifactHtml) return undefined;
+
+  return {
+    id: artifactId,
+    name: artifactName,
+    html: artifactHtml,
+    createdAt: typeof artifactObject?.createdAt === 'string'
+      ? artifactObject.createdAt
+      : new Date().toISOString(),
+  };
+}
+
+function extractDraftTaskPayloadFromToolResult(toolName: string, result: unknown): DraftTask | undefined {
+  if (toolName !== 'create_draft_task') return undefined;
+
+  const details = extractPlanningToolResultDetails(result);
+  if (!details) return undefined;
+
+  const draft = parseDraftTaskFromMetadata(details.draftTask);
+  if (draft) return draft;
+
+  return undefined;
 }
 
 // =============================================================================
@@ -881,7 +1039,15 @@ function handlePlanningEvent(
 
       // Get the args we stored at tool_start
       const toolInfo = session.toolCallArgs.get(event.toolCallId);
-      const artifactRef = extractArtifactReferenceFromToolResult(event.toolName, event.result);
+      const artifactPayload = event.isError ? undefined : extractArtifactPayloadFromToolResult(event.toolName, event.result);
+      const draftTaskPayload = event.isError ? undefined : extractDraftTaskPayloadFromToolResult(event.toolName, event.result);
+
+      if (artifactPayload) {
+        session.artifacts.set(artifactPayload.id, artifactPayload);
+      }
+      if (draftTaskPayload) {
+        session.draftTasks.set(draftTaskPayload.id, draftTaskPayload);
+      }
 
       broadcast({
         type: 'planning:tool_end',
@@ -903,8 +1069,10 @@ function handlePlanningEvent(
           toolName: event.toolName,
           args: toolInfo?.args || {},
           isError: event.isError,
-          artifactId: artifactRef?.artifactId,
-          artifactName: artifactRef?.artifactName,
+          artifactId: artifactPayload?.id,
+          artifactName: artifactPayload?.name,
+          artifactHtml: artifactPayload?.html,
+          draftTask: draftTaskPayload,
         },
       };
       session.messages.push(toolMsg);
@@ -998,6 +1166,17 @@ async function sendToAgent(
       broadcast({ type: 'planning:turn_end', workspaceId });
       return;
     } catch (err) {
+      if (session.abortRequested) {
+        session.abortRequested = false;
+        session.currentStreamText = '';
+        session.currentThinkingText = '';
+        session.toolCallArgs.clear();
+        session.status = 'idle';
+        broadcast({ type: 'planning:status', workspaceId, status: 'idle' });
+        broadcast({ type: 'planning:turn_end', workspaceId });
+        return;
+      }
+
       console.error(`[PlanningAgent] Attempt ${attempt + 1} failed:`, err);
 
       if (attempt < MAX_RETRIES) {
@@ -1031,7 +1210,7 @@ async function sendToAgent(
             resourceLoader: loader,
           });
           session.piSession = piSession;
-          registerShelfCallbacks(workspaceId, broadcast);
+          registerShelfCallbacks(workspaceId, broadcast, () => planningSessions.get(workspaceId));
           registerFactoryControlCallbacks(workspaceId, broadcast);
           registerQACallbacks(workspaceId, broadcast, () => planningSessions.get(workspaceId));
           session.unsubscribe = piSession.subscribe((event: AgentSessionEvent) => {
@@ -1088,6 +1267,7 @@ export async function sendPlanningMessage(
   images?: { type: 'image'; data: string; mimeType: string }[],
 ): Promise<void> {
   const session = await getOrCreateSession(workspaceId, broadcast);
+  session.abortRequested = false;
 
   // Record the user message
   const userMsg: PlanningMessage = {
@@ -1137,6 +1317,49 @@ export function getPlanningStatus(workspaceId: string): PlanningAgentStatus {
 }
 
 /**
+ * Abort the current planning turn without resetting conversation history.
+ * Returns true when a live planning session was stopped, false when no
+ * stoppable session is active.
+ */
+export async function stopPlanningExecution(
+  workspaceId: string,
+  broadcast?: (event: ServerEvent) => void,
+): Promise<boolean> {
+  const session = planningSessions.get(workspaceId);
+  if (!session?.piSession) {
+    return false;
+  }
+
+  const isStoppable = session.status === 'streaming'
+    || session.status === 'tool_use'
+    || session.status === 'thinking';
+
+  if (!isStoppable) {
+    return false;
+  }
+
+  session.abortRequested = true;
+
+  try {
+    await session.piSession.abort();
+  } catch (err) {
+    console.error('[PlanningAgent] Failed to abort planning execution:', err);
+  }
+
+  // Keep local state consistent even if no follow-up events arrive.
+  session.currentStreamText = '';
+  session.currentThinkingText = '';
+  session.toolCallArgs.clear();
+  session.status = 'idle';
+
+  const emit = broadcast || session.broadcast;
+  emit({ type: 'planning:status', workspaceId, status: 'idle' });
+  emit({ type: 'planning:turn_end', workspaceId });
+
+  return true;
+}
+
+/**
  * Reset the planning session (start fresh conversation).
  * Archives the old session messages and generates a new session ID.
  * Returns the new session ID.
@@ -1171,10 +1394,10 @@ export async function resetPlanningSession(
   // Clear the active messages file
   persistMessagesSync(workspaceId, []);
 
-  // Clear production queue drafts (keep artifacts and other non-draft shelf items)
-  const shelf = await clearDraftTasks(workspaceId);
+  // Clear legacy shelf data so prior-session outputs cannot bleed into the new session.
+  const shelf = await clearShelf(workspaceId);
 
-  // Broadcast the session reset and updated shelf so clients clear chat + queue
+  // Broadcast the session reset and updated shelf so clients clear chat + any legacy shelf UI.
   if (broadcast) {
     broadcast({ type: 'planning:session_reset', workspaceId, sessionId: newSessionId });
     broadcast({ type: 'shelf:updated', workspaceId, shelf });

@@ -383,7 +383,7 @@
 :root[data-theme='dark'] .bg-emerald-100 { background-color: #0b3324; }
 
 :root[data-theme='dark'] .bg-orange-50 { background-color: #2b1708; }
-:root[data-theme='dark'] .bg-orange-50\/30 { background-color: rgba(194, 65, 12, 0.24); }
+:root[data-theme='dark'] .bg-orange-50\/30 { background-color: rgba(15, 23, 42, 0.72); }
 :root[data-theme='dark'] .bg-orange-100 { background-color: #3f230a; }
 :root[data-theme='dark'] .bg-orange-400 { background-color: #ea580c; }
 :root[data-theme='dark'] .bg-orange-500 { background-color: #c2410c; }

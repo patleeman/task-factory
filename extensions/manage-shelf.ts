@@ -1,15 +1,16 @@
 /**
  * Manage Shelf Extension
  *
- * Registers a `manage_shelf` tool that lets the planning agent remove items,
- * update draft tasks, and list the current shelf contents.
+ * Registers a `manage_shelf` tool for session-scoped Foreman outputs.
+ * Despite the legacy tool name, this now manages inline session artifacts
+ * and draft-task payloads used by chat cards.
  */
 import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
 
 declare global {
   var __piFactoryShelfCallbacks: Map<string, {
-    createDraftTask: (args: any) => Promise<void>;
+    createDraftTask: (args: any) => Promise<any>;
     createArtifact: (args: any) => Promise<{ id: string; name: string }>;
     removeItem: (itemId: string) => Promise<string>;
     updateDraftTask: (draftId: string, updates: any) => Promise<string>;
@@ -20,11 +21,11 @@ declare global {
 export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: 'manage_shelf',
-    label: 'Manage Shelf',
+    label: 'Manage Session Outputs',
     description:
-      'Manage items on the shelf: list current contents, remove items, or update draft tasks. ' +
-      'Use action "list" to see what\'s on the shelf, "remove" to delete an item by ID, ' +
-      'or "update" to modify a draft task\'s title, content, or acceptance criteria.',
+      'Manage session-scoped Foreman outputs (inline artifacts and draft tasks). ' +
+      'Use action "list" to inspect current session outputs, "remove" to delete an output by ID, ' +
+      'or "update" to modify a draft-task payload before the user opens it in the New Task form.',
     parameters: Type.Object({
       action: Type.Union([
         Type.Literal('list'),
@@ -32,7 +33,7 @@ export default function (pi: ExtensionAPI) {
         Type.Literal('update'),
       ], { description: 'Action to perform' }),
       item_id: Type.Optional(Type.String({
-        description: 'ID of the shelf item (required for remove and update)',
+        description: 'ID of the session output item (required for remove and update)',
       })),
       updates: Type.Optional(Type.Object({
         title: Type.Optional(Type.String({ description: 'New title' })),
@@ -40,24 +41,6 @@ export default function (pi: ExtensionAPI) {
         acceptance_criteria: Type.Optional(Type.Array(Type.String(), {
           description: 'New acceptance criteria',
         })),
-        type: Type.Optional(Type.Union([
-          Type.Literal('feature'),
-          Type.Literal('bug'),
-          Type.Literal('refactor'),
-          Type.Literal('research'),
-          Type.Literal('spike'),
-        ])),
-        priority: Type.Optional(Type.Union([
-          Type.Literal('critical'),
-          Type.Literal('high'),
-          Type.Literal('medium'),
-          Type.Literal('low'),
-        ])),
-        complexity: Type.Optional(Type.Union([
-          Type.Literal('low'),
-          Type.Literal('medium'),
-          Type.Literal('high'),
-        ])),
       }, { description: 'Fields to update (for update action)' })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
@@ -66,7 +49,7 @@ export default function (pi: ExtensionAPI) {
       const callbacks = globalThis.__piFactoryShelfCallbacks;
       if (!callbacks || callbacks.size === 0) {
         return {
-          content: [{ type: 'text' as const, text: 'Shelf callbacks not available.' }],
+          content: [{ type: 'text' as const, text: 'Session output callbacks not available.' }],
           details: {} as Record<string, unknown>,
         };
       }
@@ -78,7 +61,7 @@ export default function (pi: ExtensionAPI) {
         const shelf = await cb.getShelf();
         if (!shelf.items || shelf.items.length === 0) {
           return {
-            content: [{ type: 'text' as const, text: 'The shelf is empty.' }],
+            content: [{ type: 'text' as const, text: 'No session outputs are currently registered.' }],
             details: {} as Record<string, unknown>,
           };
         }
@@ -86,15 +69,14 @@ export default function (pi: ExtensionAPI) {
         const lines = shelf.items.map((si: any) => {
           if (si.type === 'draft-task') {
             const d = si.item;
-            return `- [draft] ${d.id}: "${d.title}" (${d.type}, ${d.priority})`;
-          } else {
-            const a = si.item;
-            return `- [artifact] ${a.id}: "${a.name}"`;
+            return `- [draft-task] ${d.id}: "${d.title}"`;
           }
+          const a = si.item;
+          return `- [artifact] ${a.id}: "${a.name}"`;
         });
 
         return {
-          content: [{ type: 'text' as const, text: `Shelf contents (${shelf.items.length} items):\n${lines.join('\n')}` }],
+          content: [{ type: 'text' as const, text: `Session outputs (${shelf.items.length} items):\n${lines.join('\n')}` }],
           details: {} as Record<string, unknown>,
         };
       }

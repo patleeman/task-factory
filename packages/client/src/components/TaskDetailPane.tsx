@@ -293,17 +293,20 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
   const [planRegenerationError, setPlanRegenerationError] = useState<string | null>(null)
   const [isRegeneratingCriteria, setIsRegeneratingCriteria] = useState(false)
   const [criteriaRegenerationError, setCriteriaRegenerationError] = useState<string | null>(null)
+  const [isGeneratedSectionExpanded, setIsGeneratedSectionExpanded] = useState(() => !hasSummary)
   const [isPlanExpanded, setIsPlanExpanded] = useState(() => !hasSummary)
   const hadSummaryRef = useRef(hasSummary)
 
   useEffect(() => {
     const nextHasSummary = Boolean(task.frontmatter.postExecutionSummary)
     hadSummaryRef.current = nextHasSummary
+    setIsGeneratedSectionExpanded(!nextHasSummary)
     setIsPlanExpanded(!nextHasSummary)
   }, [task.id])
 
   useEffect(() => {
     if (hadSummaryRef.current !== hasSummary) {
+      setIsGeneratedSectionExpanded(!hasSummary)
       setIsPlanExpanded(!hasSummary)
       hadSummaryRef.current = hasSummary
     }
@@ -419,6 +422,7 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
 
   const handleSummaryGenerated = () => {
     hadSummaryRef.current = true
+    setIsGeneratedSectionExpanded(false)
     setIsPlanExpanded(false)
   }
 
@@ -566,9 +570,21 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
       {/* Section 2: Generated plan + acceptance criteria */}
       <section className="rounded-xl border border-blue-200 bg-blue-50/40 overflow-hidden">
         <div className="px-4 py-2.5 border-b border-blue-200 bg-blue-50/70">
-          <h2 className="text-xs font-semibold text-blue-700 uppercase tracking-wide">2. Generated Plan & Acceptance Criteria</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-xs font-semibold text-blue-700 uppercase tracking-wide">2. Generated Plan & Acceptance Criteria</h2>
+            <button
+              type="button"
+              onClick={() => setIsGeneratedSectionExpanded((prev) => !prev)}
+              className="ml-auto inline-flex items-center gap-1 rounded-md border border-blue-200 bg-white px-2 py-1 text-[11px] font-medium text-blue-700 hover:bg-blue-100"
+              aria-expanded={isGeneratedSectionExpanded}
+            >
+              <AppIcon icon={isGeneratedSectionExpanded ? ChevronDown : ChevronRight} size="xs" />
+              {isGeneratedSectionExpanded ? 'Collapse' : 'Expand'}
+            </button>
+          </div>
         </div>
-        <div className="p-4 space-y-5">
+        {isGeneratedSectionExpanded && (
+          <div className="p-4 space-y-5">
           {!frontmatter.plan && isPlanGenerating && (
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
               <div className="flex items-center gap-3">
@@ -804,7 +820,8 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
               <p className={`text-sm italic ${missingAcceptanceCriteria ? 'text-red-500 font-medium' : 'text-slate-400'}`}>No acceptance criteria defined</p>
             )}
           </div>
-        </div>
+          </div>
+        )}
       </section>
 
       {/* Section 3: Summary + diffs + verified criteria */}

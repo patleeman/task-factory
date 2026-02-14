@@ -34,12 +34,12 @@ export default function (pi: ExtensionAPI) {
     label: 'Save Execution Summary',
     description:
       'Save a post-execution summary after completing a task. ' +
-      'Provide a detailed description of the work done and validate each acceptance criterion. ' +
+      'Provide a concise, easy-to-scan summary of the work and validate each acceptance criterion. ' +
       'Call this exactly once when asked to summarize your work.',
     parameters: Type.Object({
       taskId: Type.String({ description: 'The task ID (e.g. "PIFA-3")' }),
       summary: Type.String({
-        description: 'Detailed description of the work that was done — what changed, why, and key decisions made',
+        description: 'Concise summary of the work done — quick to scan, outcome-first, and not overly wordy',
       }),
       criteriaValidation: Type.Array(
         Type.Object({
@@ -49,7 +49,7 @@ export default function (pi: ExtensionAPI) {
             Type.Literal('fail'),
             Type.Literal('pending'),
           ], { description: 'Whether this criterion was met: pass, fail, or pending' }),
-          evidence: Type.String({ description: 'Specific evidence — what was done to meet this criterion, or why it was not met' }),
+          evidence: Type.String({ description: 'Brief concrete evidence (one short sentence) — what was done, or why criterion was not met' }),
         }),
         { description: 'Validation status for each acceptance criterion' },
       ),

@@ -183,31 +183,33 @@ function parseWordDiffPorcelain(raw: string, maxLines: number): DiffHunk[] {
 /**
  * Build the prompt that asks the agent to summarize and validate criteria.
  */
-function buildSummaryPrompt(task: Task): string {
+export function buildSummaryPrompt(task: Task): string {
   let prompt = `# Post-Execution Summary\n\n`;
   prompt += `You just completed task **${task.id}**: "${task.frontmatter.title}"\n\n`;
   prompt += `Now provide a post-execution summary by calling the \`save_summary\` tool.\n\n`;
 
   prompt += `## Summary guidelines\n`;
-  prompt += `Write 2-4 sentences describing what was accomplished from a reviewer's perspective.\n`;
+  prompt += `Keep the summary concise, easy to read, and quick to scan.\n`;
+  prompt += `Write 2-3 short sentences (target under ~90 words total).\n`;
   prompt += `Focus on:\n`;
-  prompt += `- The outcome: what capability was added, what problem was fixed, what changed for the user\n`;
-  prompt += `- Key decisions: important trade-offs or design choices worth knowing\n`;
-  prompt += `- Anything surprising or incomplete\n\n`;
+  prompt += `- The main outcome for the user or system\n`;
+  prompt += `- The most important implementation decision\n`;
+  prompt += `- Any meaningful gap, risk, or follow-up\n\n`;
   prompt += `Do NOT write a changelog of files or types. Do NOT list every file touched.\n`;
-  prompt += `Write like you're explaining to a teammate what you did and why.\n\n`;
+  prompt += `Avoid long, dense paragraphs and avoid unnecessary detail.\n\n`;
 
   if (task.frontmatter.acceptanceCriteria.length > 0) {
     prompt += `## Acceptance Criteria to Validate\n`;
     prompt += `For each criterion below, evaluate whether it was met.\n`;
     prompt += `Set status to "pass" if met, "fail" if not, or "pending" if you can't determine.\n`;
-    prompt += `For evidence, write a brief sentence — not a code reference, just what you observed.\n\n`;
+    prompt += `For evidence, write one short sentence — not a code reference, just what you observed. Keep it concise and concrete.\n\n`;
     task.frontmatter.acceptanceCriteria.forEach((c, i) => {
       prompt += `${i + 1}. ${c}\n`;
     });
     prompt += `\nCopy each criterion text exactly into the criteriaValidation array.\n\n`;
   }
 
+  prompt += `Before calling \`save_summary\`, trim verbosity so a reviewer can understand the work in a quick glance.\n`;
   prompt += `Call \`save_summary\` with taskId "${task.id}" now.\n`;
 
   return prompt;
