@@ -275,7 +275,9 @@ export function PipelineBar({
         ref={scrollRef}
         className="flex-1 min-w-0 overflow-x-auto overflow-y-hidden pipeline-scroll"
       >
-        <div className="flex items-stretch justify-start min-h-[148px] h-full w-max">
+        <div className={`flex items-stretch min-h-[148px] h-full w-max min-w-full ${
+          hasOverflow ? 'justify-start' : 'justify-center'
+        }`}>
           {VISIBLE_PHASES.map(phase => {
             const phaseTasks = tasksByPhase[phase]
             const isEmpty = phaseTasks.length === 0
