@@ -161,7 +161,7 @@ export function WorkspacePage() {
       const next = new Set<string>()
       for (const taskId of prev) {
         const task = tasksById.get(taskId)
-        if (task && task.frontmatter.phase === 'executing') {
+        if (task) {
           next.add(taskId)
         } else {
           changed = true
@@ -184,7 +184,7 @@ export function WorkspacePage() {
       const next = new Set<string>()
       for (const trackedTaskId of prev) {
         const task = tasksById.get(trackedTaskId)
-        if (task && task.frontmatter.phase === 'executing') {
+        if (task) {
           next.add(trackedTaskId)
         } else {
           changed = true
@@ -205,7 +205,7 @@ export function WorkspacePage() {
 
     for (const trackedTaskId of stoppingTaskIdsRef.current) {
       const task = tasksById.get(trackedTaskId)
-      if (task && task.frontmatter.phase === 'executing') {
+      if (task) {
         filtered.add(trackedTaskId)
       }
     }
@@ -289,8 +289,7 @@ export function WorkspacePage() {
           activeExecutions
             .filter((session) => {
               if (!session.isRunning) return false
-              const task = tasksById.get(session.taskId)
-              return task?.frontmatter.phase === 'executing'
+              return tasksById.has(session.taskId)
             })
             .map((session) => session.taskId),
         ))
@@ -299,8 +298,7 @@ export function WorkspacePage() {
           activeExecutions
             .filter((session) => {
               if (!session.awaitingInput) return false
-              const task = tasksById.get(session.taskId)
-              return task?.frontmatter.phase === 'executing'
+              return tasksById.has(session.taskId)
             })
             .map((session) => session.taskId),
         ))
@@ -428,7 +426,7 @@ export function WorkspacePage() {
           setRunningExecutionTaskIds((prev) => {
             const next = new Set(prev)
 
-            if (!task || task.frontmatter.phase !== 'executing') {
+            if (!task) {
               next.delete(msg.taskId)
               return next
             }
@@ -444,7 +442,7 @@ export function WorkspacePage() {
           setAwaitingInputTaskIds((prev) => {
             const next = new Set(prev)
 
-            if (!task || task.frontmatter.phase !== 'executing') {
+            if (!task) {
               next.delete(msg.taskId)
               return next
             }
