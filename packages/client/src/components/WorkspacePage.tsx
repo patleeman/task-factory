@@ -642,7 +642,7 @@ export function WorkspacePage() {
             onClick={() => navigate('/')}
             className="flex items-center gap-2 hover:opacity-80 transition-opacity"
           >
-            <h1 className="text-lg font-bold tracking-tight">PI-FACTORY</h1>
+            <h1 className="text-lg font-bold tracking-tight">TASK FACTORY</h1>
           </button>
           <div className="h-6 w-px bg-slate-700" />
           <span className="text-sm font-medium text-slate-300">{workspaceName}</span>

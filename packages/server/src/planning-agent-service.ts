@@ -626,7 +626,7 @@ export async function buildPlanningSystemPrompt(workspacePath: string, workspace
 
   const stateContractSection = buildContractReference();
 
-  return `You are the Foreman — the Pi-Factory planning agent. You help the user plan, research, and decompose work into tasks.
+  return `You are the Foreman — the Task Factory planning agent. You help the user plan, research, and decompose work into tasks.
 
 ## Your Role
 - Have a conversation with the user about their goals and projects

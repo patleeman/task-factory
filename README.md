@@ -1,6 +1,6 @@
-# Pi-Factory
+# Task Factory
 
-A lean manufacturing-inspired task queue for AI coding agents. Pi-Factory gives you a two-mode UI: a **planning agent** for research and task decomposition, and a **task pipeline** that feeds work to [Pi](https://github.com/nicholasgasior/pi-coding-agent) agents one task at a time.
+A lean manufacturing-inspired task queue for AI coding agents. Task Factory gives you a two-mode UI: a **planning agent** for research and task decomposition, and a **task pipeline** that feeds work to [Pi](https://github.com/nicholasgasior/pi-coding-agent) agents one task at a time.
 
 ## How it works
 
@@ -52,7 +52,7 @@ The planning agent can create **draft tasks** and **HTML artifacts** on the shel
 
 ### Extensions
 
-Drop `.ts` files in the `extensions/` directory to add custom tools to the agents. Pi-Factory includes built-in extensions for `save_plan`, `task_complete`, `create_draft_task`, and `create_artifact`.
+Drop `.ts` files in the `extensions/` directory to add custom tools to the agents. Task Factory includes built-in extensions for `save_plan`, `task_complete`, `create_draft_task`, and `create_artifact`.
 
 ## Keyboard shortcuts
 

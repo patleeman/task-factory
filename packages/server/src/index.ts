@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // =============================================================================
-// Pi-Factory Server
+// Task Factory Server
 // =============================================================================
 // Express + WebSocket server for the TPS-inspired agent work queue
 
@@ -938,7 +938,7 @@ app.get('/api/pi/extensions', (_req, res) => {
   res.json(extensions);
 });
 
-// Get repo-local extensions (from pi-factory's own extensions/ dir)
+// Get repo-local extensions (from Task Factory's own extensions/ dir)
 app.get('/api/factory/extensions', (_req, res) => {
   const paths = getRepoExtensionPaths();
   const extensions = paths.map((p) => {
@@ -1197,7 +1197,7 @@ app.get('/api/pi/context', async (req, res) => {
 });
 
 // =============================================================================
-// Pi-Factory Specific API
+// Task Factory specific API
 // =============================================================================
 
 import {
@@ -1222,13 +1222,13 @@ import {
   loadAvailableModelsForDefaults,
 } from './task-defaults-service.js';
 
-// Get Pi-Factory settings
+// Get Task Factory settings
 app.get('/api/pi-factory/settings', (_req, res) => {
   const settings = loadPiFactorySettings();
   res.json(settings || {});
 });
 
-// Save Pi-Factory settings
+// Save Task Factory settings
 app.post('/api/pi-factory/settings', (req, res) => {
   try {
     const settings = req.body as PiFactorySettings;
@@ -2606,7 +2606,7 @@ async function main() {
   server.listen(PORT, HOST, () => {
     logger.info(`
 ╔══════════════════════════════════════════════════════════╗
-║  Pi-Factory Server                                       ║
+║  Task Factory Server                                     ║
 ║  TPS-inspired Agent Work Queue                           ║
 ╠══════════════════════════════════════════════════════════╣
 ║  Listening on http://${HOST}:${PORT}                    ║

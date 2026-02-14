@@ -1,7 +1,7 @@
 # Pi Integration Design
 
 ## Overview
-Integrate Pi settings, extensions, and skills into pi-factory so agents can use the full Pi ecosystem while working on tasks.
+Integrate Pi settings, extensions, and skills into Task Factory so agents can use the full Pi ecosystem while working on tasks.
 
 ## Pi Configuration Structure
 
@@ -32,7 +32,7 @@ Embed Pi settings in a settings panel accessible from the header:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│ PI-FACTORY                              [⚙️ Settings] [+ Task]  │
+│ TASK FACTORY                            [⚙️ Settings] [+ Task]  │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
 │  Settings Modal:                                                │
@@ -52,7 +52,7 @@ Embed Pi settings in a settings panel accessible from the header:
 ```
 
 ### 2. Extensions Integration
-Load Pi extensions as plugins in pi-factory:
+Load Pi extensions as plugins in Task Factory:
 
 - **context-bar-footer**: Add to activity log footer
 - **custom-status-bar**: Add to header status area

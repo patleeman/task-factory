@@ -1,8 +1,8 @@
-# Pi-Factory: Agent Work Queue System
+# Task Factory: Agent Work Queue System
 
 ## Vision
 
-Pi-Factory is a **lean manufacturing-inspired** task queue system for AI agents. It applies Toyota Production System (TPS) principles to software development workflows, creating a continuous flow of work where agents pull tasks, execute them, and move them to completion with minimal waste and maximum visibility.
+Task Factory is a **lean manufacturing-inspired** task queue system for AI agents. It applies Toyota Production System (TPS) principles to software development workflows, creating a continuous flow of work where agents pull tasks, execute them, and move them to completion with minimal waste and maximum visibility.
 
 The system has two modes of operation:
 
@@ -72,7 +72,7 @@ PLANNING MODE
 ┌───────────────────────┬──────────────────────────────┐
 │                       │                              │
 │  CHAT                 │  WORKSPACE / SHELF           │
-│  "Pi Factory Agent"   │                              │
+│  "Task Factory Agent" │                              │
 │                       │  ┌────────────────────────┐  │
 │  You: I want to add   │  │ Draft Task 1     [edit]│  │
 │  OAuth to the app     │  │ Set up OAuth provider  │  │
@@ -146,7 +146,7 @@ TASK MODE
 - **Pipeline bar** is the mode switch. Deselect all tasks → planning mode. Click a task → task mode.
 - **Conversation histories are independent.** Switching back to planning mode shows the planning conversation where you left off. Switching to a task shows that task's log.
 - **Visual differentiation:**
-  - Header context bar: "Pi Factory Agent" vs "TASK-042: Implement auth"
+  - Header context bar: "Task Factory Agent" vs "TASK-042: Implement auth"
   - Input placeholder: "Ask anything..." vs "Steer TASK-042..."
   - Subtle background tint difference between modes
 
@@ -248,7 +248,7 @@ Implement a secure user authentication system...
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                              PI-FACTORY                                      │
+│                             TASK FACTORY                                     │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐    │
 │  │   Web UI     │  │   API Server │  │  Job Engine  │  │   Agent SDK  │    │

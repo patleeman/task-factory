@@ -29,6 +29,7 @@ describe('planning prompt guidance', () => {
 
     expect(prompt).toContain('high-level summary plan');
     expect(prompt).toContain('Avoid line-level implementation details');
+    expect(prompt).toContain('Task Factory planning agent');
     expect(prompt).toContain('Agent Contract');
     expect(prompt).toContain('foreman');
     expect(prompt).not.toContain('reference specific files, functions, and components');

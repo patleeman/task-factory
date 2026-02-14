@@ -421,7 +421,7 @@ export function SettingsPage() {
             onClick={() => navigate(-1)}
             className="flex items-center gap-2 hover:opacity-80 transition-opacity"
           >
-            <h1 className="text-lg font-bold tracking-tight">PI-FACTORY</h1>
+            <h1 className="text-lg font-bold tracking-tight">TASK FACTORY</h1>
           </button>
           <div className="h-6 w-px bg-slate-700" />
           <span className="text-sm font-medium text-slate-300">Settings</span>
@@ -448,7 +448,7 @@ export function SettingsPage() {
           <section className="rounded-xl border border-slate-200 bg-white p-4 space-y-2">
             <h3 className="text-sm font-semibold text-slate-800">Appearance</h3>
             <p className="text-xs text-slate-500">
-              Choose how Pi-Factory should render. Preference is saved in Pi-Factory settings and restored on reload.
+              Choose how Task Factory should render. Preference is saved in Task Factory settings and restored on reload.
             </p>
             <div className="max-w-xs">
               <label className="block text-sm font-medium text-slate-700 mb-1">Theme</label>

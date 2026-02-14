@@ -1,10 +1,10 @@
-# Pi-Factory Configuration Architecture
+# Task Factory Configuration Architecture
 
 ## Directory Structure
 
 ```
-~/.pi/factory/                    # Pi-Factory specific config
-├── settings.json                 # Pi-Factory settings (extends Pi settings)
+~/.pi/factory/                    # Task Factory specific config
+├── settings.json                 # Task Factory settings (extends Pi settings)
 ├── workspaces/                   # Workspace-specific config
 │   ├── {workspace-id}/
 │   │   ├── settings.json        # Workspace overrides
@@ -15,7 +15,7 @@
     ├── skills/                   # Cached skill content
     └── extensions/               # Cached extension bundles
 
-~/.pi/agent/                      # Global Pi (read-only for pi-factory)
+~/.pi/agent/                      # Global Pi (read-only for Task Factory)
 ├── settings.json
 ├── skills/
 ├── extensions/
@@ -25,7 +25,7 @@
 ## Configuration Precedence
 
 1. **Workspace settings** (highest priority)
-2. **Pi-Factory global settings**
+2. **Task Factory global settings**
 3. **Pi global settings** (fallback)
 
 ## Skills Integration
@@ -65,7 +65,7 @@
 
 ## Extensions Integration
 
-### Extension Slots in Pi-Factory
+### Extension Slots in Task Factory
 
 1. **header-right** - Next to the "+ New Task" button
 2. **task-panel** - Inside task detail modal
@@ -93,9 +93,9 @@
 
 ## Implementation Plan
 
-### Phase 1: Pi-Factory Settings Directory
+### Phase 1: Task Factory Settings Directory
 - [ ] Create `~/.pi/factory/` structure
-- [ ] Move pi-factory settings from `~/.pi/agent/` to `~/.pi/factory/`
+- [ ] Move Task Factory settings from `~/.pi/agent/` to `~/.pi/factory/`
 - [ ] Update server to read from new location
 
 ### Phase 2: Workspace-Specific Configuration

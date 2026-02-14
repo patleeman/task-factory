@@ -2,7 +2,7 @@
 
 ## Overview
 
-Integrate [Gondolin](https://github.com/earendil-works/gondolin) as an **optional** sandboxing layer for pi-factory task execution. When enabled, each executing task runs inside a lightweight QEMU micro-VM with controlled network egress, secret injection, and filesystem isolation.
+Integrate [Gondolin](https://github.com/earendil-works/gondolin) as an **optional** sandboxing layer for Task Factory task execution. When enabled, each executing task runs inside a lightweight QEMU micro-VM with controlled network egress, secret injection, and filesystem isolation.
 
 **Status:** Planning (not yet implemented)
 **Dependency:** `@earendil-works/gondolin` (v0.2.1, experimental)
@@ -10,14 +10,14 @@ Integrate [Gondolin](https://github.com/earendil-works/gondolin) as an **optiona
 
 ## Why
 
-Today, pi-factory task agents run with full host access — they can read/write any file, execute any command, and reach any network endpoint. This is fine for trusted local use but becomes a problem when:
+Today, Task Factory task agents run with full host access — they can read/write any file, execute any command, and reach any network endpoint. This is fine for trusted local use but becomes a problem when:
 
 - Agents run untrusted or generated code that could damage the host
 - Tasks need API credentials (GitHub tokens, cloud keys) that shouldn't be visible to the agent
 - You want network egress control (only allow access to specific APIs)
 - You want per-task filesystem isolation (one task can't corrupt another's workspace)
 
-Gondolin solves all of these with a TypeScript-native approach that fits pi-factory's stack.
+Gondolin solves all of these with a TypeScript-native approach that fits Task Factory's stack.
 
 ## What Gondolin Provides
 
@@ -39,7 +39,7 @@ Sandboxing is off by default. Users enable it at the workspace or task level. Us
 ### Architecture
 
 ```
-pi-factory server
+Task Factory server
   └── agent-execution-service.ts
         └── createTaskConversationSession()
               └── DefaultResourceLoader({ additionalExtensionPaths })
@@ -51,7 +51,7 @@ pi-factory server
                           └── Tears down VM on session_shutdown
 ```
 
-The integration is a **Pi extension** in `extensions/gondolin-sandbox/`. This follows the existing pattern — pi-factory already discovers and loads repo extensions via `additionalExtensionPaths` in `agent-execution-service.ts`.
+The integration is a **Pi extension** in `extensions/gondolin-sandbox/`. This follows the existing pattern — Task Factory already discovers and loads repo extensions via `additionalExtensionPaths` in `agent-execution-service.ts`.
 
 ### Extension Behavior
 
@@ -330,5 +330,5 @@ Optimize startup time for tasks that need specific tooling.
 - [Gondolin SDK Docs](https://earendil-works.github.io/gondolin/sdk/)
 - [Gondolin Security Design](https://earendil-works.github.io/gondolin/security/)
 - [Pi + Gondolin Extension Example](https://github.com/earendil-works/gondolin/blob/main/host/examples/pi-gondolin.ts)
-- [Pi-Factory Agent Execution Service](../packages/server/src/agent-execution-service.ts)
-- [Pi-Factory Extension Discovery](../extensions/)
+- [Task Factory Agent Execution Service](../packages/server/src/agent-execution-service.ts)
+- [Task Factory Extension Discovery](../extensions/)

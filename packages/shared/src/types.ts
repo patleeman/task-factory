@@ -1,5 +1,5 @@
 // =============================================================================
-// Pi-Factory Shared Types
+// Task Factory Shared Types
 // =============================================================================
 // Core type definitions for the TPS-inspired agent work queue system
 

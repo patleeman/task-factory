@@ -198,7 +198,7 @@ export function WorkspaceConfigPage() {
             onClick={() => navigate(`/workspace/${workspaceId}`)}
             className="flex items-center gap-2 hover:opacity-80 transition-opacity"
           >
-            <h1 className="text-lg font-bold tracking-tight">PI-FACTORY</h1>
+            <h1 className="text-lg font-bold tracking-tight">TASK FACTORY</h1>
           </button>
           <div className="h-6 w-px bg-slate-700" />
           <span className="text-sm font-medium text-slate-300">Workspace Configuration</span>
@@ -416,7 +416,7 @@ export function WorkspaceConfigPage() {
                 <div>
                   <div className="font-medium text-slate-800">Delete this workspace</div>
                   <div className="text-sm text-slate-500 mt-0.5">
-                    Permanently remove this workspace and all its task data from Pi-Factory.
+                    Permanently remove this workspace and all its task data from Task Factory.
                   </div>
                 </div>
                 {!showDeleteConfirm && (
@@ -437,7 +437,7 @@ export function WorkspaceConfigPage() {
                       All tasks, activity logs, and workspace configuration will be permanently deleted.
                     </p>
                     <p className="text-sm text-slate-600 mb-3">
-                      Your project files will <strong>not</strong> be affected — only Pi-Factory data is removed.
+                      Your project files will <strong>not</strong> be affected — only Task Factory data is removed.
                     </p>
                     <label className="block text-sm font-medium text-slate-700 mb-1">
                       Type <span className="font-mono bg-slate-100 px-1.5 py-0.5 rounded text-red-600">{workspaceName}</span> to confirm:

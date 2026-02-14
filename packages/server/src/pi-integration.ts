@@ -17,17 +17,17 @@ import type { TaskDefaults, PlanningGuardrails } from '@pi-factory/shared';
 const PI_AGENT_DIR = join(homedir(), '.pi', 'agent');
 const PI_FACTORY_DIR = join(homedir(), '.pi', 'factory');
 
-// Ensure pi-factory directory exists
+// Ensure Task Factory directory exists
 if (!existsSync(PI_FACTORY_DIR)) {
   mkdirSync(PI_FACTORY_DIR, { recursive: true });
 }
 
 // =============================================================================
-// Pi-Factory Settings
+// Task Factory settings
 // =============================================================================
 
 export interface PiFactorySettings {
-  // Pi-Factory specific settings
+  // Task Factory specific settings
   defaultWorkspace?: string;
   theme?: string;
   // Task creation defaults
@@ -68,7 +68,7 @@ export function loadPiFactorySettings(): PiFactorySettings | null {
     const content = readFileSync(settingsPath, 'utf-8');
     return JSON.parse(content);
   } catch (err) {
-    console.error('Failed to load Pi-Factory settings:', err);
+    console.error('Failed to load Task Factory settings:', err);
     return null;
   }
 }

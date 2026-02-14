@@ -136,7 +136,7 @@ export function WelcomePage() {
       <div className="flex items-center justify-center h-screen bg-slate-50">
         <div className="text-center">
           <div className="w-12 h-12 border-4 border-slate-300 border-t-safety-orange rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-slate-600 font-medium">Loading Pi-Factory...</p>
+          <p className="text-slate-600 font-medium">Loading Task Factory...</p>
         </div>
       </div>
     )
@@ -146,7 +146,7 @@ export function WelcomePage() {
     <div className="min-h-screen bg-slate-50 flex flex-col">
       {/* Header */}
       <header className="flex items-center justify-between px-4 py-6 shrink-0">
-        <h1 className="text-2xl font-bold tracking-tight text-slate-800">PI-FACTORY</h1>
+        <h1 className="text-2xl font-bold tracking-tight text-slate-800">TASK FACTORY</h1>
         <ThemeToggle className="border-slate-300 bg-white text-slate-700 hover:bg-slate-100 hover:text-slate-900" />
       </header>
 
@@ -211,7 +211,7 @@ export function WelcomePage() {
           {/* Empty state hint */}
           {workspaces.length === 0 && !showBrowser && (
             <p className="text-center text-sm text-slate-400 mt-6">
-              Point Pi-Factory at a project folder to get started.
+              Point Task Factory at a project folder to get started.
             </p>
           )}
         </div>

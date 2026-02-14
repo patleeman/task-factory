@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // =============================================================================
-// Pi-Factory CLI
+// Task Factory CLI
 // =============================================================================
 
 import { spawn } from 'child_process';
@@ -22,7 +22,7 @@ const host = process.env.HOST || '0.0.0.0';
 function startServer() {
   const serverPath = join(__dirname, '..', 'dist', 'server.js');
 
-  console.log(`Starting Pi-Factory server on http://localhost:${port}...`);
+  console.log(`Starting Task Factory server on http://localhost:${port}...`);
 
   const proc = spawn('node', [serverPath], {
     stdio: 'inherit',
@@ -52,7 +52,7 @@ function startServer() {
 
 function showHelp() {
   console.log(`
-Pi-Factory - TPS-inspired Agent Work Queue
+Task Factory - TPS-inspired Agent Work Queue
 
 Usage:
   pi-factory [command] [options]

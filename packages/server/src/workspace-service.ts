@@ -227,7 +227,7 @@ export async function updateWorkspaceConfig(
 
 /**
  * Delete a workspace: remove from registry and clean up .pi/factory data.
- * Does NOT delete the user's project files — only Pi-Factory metadata.
+ * Does NOT delete the user's project files — only Task Factory metadata.
  */
 export async function deleteWorkspace(id: string): Promise<boolean> {
   const entries = await loadRegistry();
