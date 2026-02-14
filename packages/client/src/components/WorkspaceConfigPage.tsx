@@ -1,10 +1,13 @@
 import { useState, useEffect } from 'react'
 import { ArrowLeft, Check, CheckCircle2 } from 'lucide-react'
 import { useParams, useNavigate } from 'react-router-dom'
-import type { PiSkill, PiExtension } from '../types/pi'
+import { DEFAULT_PRE_EXECUTION_SKILLS, DEFAULT_POST_EXECUTION_SKILLS, type TaskDefaults, type ExecutionWrapper } from '@pi-factory/shared'
+import type { PiSkill, PiExtension, PostExecutionSkill } from '../types/pi'
 import { api } from '../api'
 import { AppIcon } from './AppIcon'
 import { ThemeToggle } from './ThemeToggle'
+import { ModelSelector } from './ModelSelector'
+import { ExecutionPipelineEditor } from './ExecutionPipelineEditor'
 
 interface WorkspaceConfig {
   skills: {
@@ -17,21 +20,34 @@ interface WorkspaceConfig {
   }
 }
 
+const EMPTY_TASK_DEFAULTS: TaskDefaults = {
+  planningModelConfig: undefined,
+  executionModelConfig: undefined,
+  modelConfig: undefined,
+  preExecutionSkills: [...DEFAULT_PRE_EXECUTION_SKILLS],
+  postExecutionSkills: [...DEFAULT_POST_EXECUTION_SKILLS],
+}
+
 export function WorkspaceConfigPage() {
   const { workspaceId } = useParams<{ workspaceId: string }>()
   const navigate = useNavigate()
   const [allSkills, setAllSkills] = useState<PiSkill[]>([])
   const [allExtensions, setAllExtensions] = useState<PiExtension[]>([])
+  const [taskSkills, setTaskSkills] = useState<PostExecutionSkill[]>([])
+  const [taskWrappers, setTaskWrappers] = useState<ExecutionWrapper[]>([])
+  const [taskDefaults, setTaskDefaults] = useState<TaskDefaults>({ ...EMPTY_TASK_DEFAULTS })
+  const [selectedWrapperId, setSelectedWrapperId] = useState('')
   const [config, setConfig] = useState<WorkspaceConfig>({
     skills: { enabled: [], config: {} },
     extensions: { enabled: [], config: {} },
   })
   const [sharedContext, setSharedContext] = useState('')
   const [sharedContextPath, setSharedContextPath] = useState('.pi/workspace-context.md')
-  const [activeTab, setActiveTab] = useState<'skills' | 'extensions' | 'shared-context'>('skills')
+  const [activeTab, setActiveTab] = useState<'skills' | 'extensions' | 'task-defaults' | 'shared-context'>('skills')
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'error'>('idle')
+  const [saveError, setSaveError] = useState('')
 
   // Workspace deletion state
   const [workspaceName, setWorkspaceName] = useState('')
@@ -43,26 +59,60 @@ export function WorkspaceConfigPage() {
   useEffect(() => {
     if (!workspaceId) return
 
+    let cancelled = false
+    setIsLoading(true)
+    setSaveError('')
+
     Promise.all([
       fetch('/api/pi/skills').then(r => r.json()),
       fetch('/api/pi/extensions').then(r => r.json()),
+      fetch('/api/factory/skills').then(r => r.json() as Promise<PostExecutionSkill[]>),
+      fetch('/api/wrappers').then(r => r.json() as Promise<ExecutionWrapper[]>),
       fetch(`/api/workspaces/${workspaceId}/pi-config`).then(r => r.json()),
       fetch(`/api/workspaces/${workspaceId}/shared-context`).then(r => r.json()),
       api.getWorkspace(workspaceId),
-    ]).then(([skillsData, extensionsData, configData, sharedContextData, workspace]) => {
-      setAllSkills(skillsData)
-      setAllExtensions(extensionsData)
-      setConfig({
-        skills: configData.skills || { enabled: [], config: {} },
-        extensions: configData.extensions || { enabled: [], config: {} },
+      api.getWorkspaceTaskDefaults(workspaceId),
+    ])
+      .then(([
+        skillsData,
+        extensionsData,
+        taskSkillsData,
+        wrapperData,
+        configData,
+        sharedContextData,
+        workspace,
+        workspaceTaskDefaults,
+      ]) => {
+        if (cancelled) return
+
+        setAllSkills(skillsData)
+        setAllExtensions(extensionsData)
+        setTaskSkills(taskSkillsData)
+        setTaskWrappers(wrapperData)
+        setTaskDefaults(workspaceTaskDefaults)
+        setSelectedWrapperId('')
+        setConfig({
+          skills: configData.skills || { enabled: [], config: {} },
+          extensions: configData.extensions || { enabled: [], config: {} },
+        })
+        setSharedContext(sharedContextData.content || '')
+        setSharedContextPath(sharedContextData.relativePath || '.pi/workspace-context.md')
+        // Use folder name from path as the display name
+        const folderName = workspace.path.split('/').filter(Boolean).pop() || workspace.name
+        setWorkspaceName(folderName)
+        setIsLoading(false)
       })
-      setSharedContext(sharedContextData.content || '')
-      setSharedContextPath(sharedContextData.relativePath || '.pi/workspace-context.md')
-      // Use folder name from path as the display name
-      const folderName = workspace.path.split('/').filter(Boolean).pop() || workspace.name
-      setWorkspaceName(folderName)
-      setIsLoading(false)
-    })
+      .catch((err) => {
+        if (cancelled) return
+        console.error('Failed to load workspace configuration:', err)
+        setSaveStatus('error')
+        setSaveError('Failed to load workspace configuration')
+        setIsLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
   }, [workspaceId])
 
   const toggleSkill = (skillId: string) => {
@@ -76,6 +126,7 @@ export function WorkspaceConfigPage() {
       },
     }))
     setSaveStatus('idle')
+    setSaveError('')
   }
 
   const toggleExtension = (extId: string) => {
@@ -89,6 +140,7 @@ export function WorkspaceConfigPage() {
       },
     }))
     setSaveStatus('idle')
+    setSaveError('')
   }
 
   const selectAllSkills = () => {
@@ -100,6 +152,7 @@ export function WorkspaceConfigPage() {
       },
     }))
     setSaveStatus('idle')
+    setSaveError('')
   }
 
   const deselectAllSkills = () => {
@@ -111,6 +164,7 @@ export function WorkspaceConfigPage() {
       },
     }))
     setSaveStatus('idle')
+    setSaveError('')
   }
 
   const selectAllExtensions = () => {
@@ -122,6 +176,7 @@ export function WorkspaceConfigPage() {
       },
     }))
     setSaveStatus('idle')
+    setSaveError('')
   }
 
   const deselectAllExtensions = () => {
@@ -133,11 +188,28 @@ export function WorkspaceConfigPage() {
       },
     }))
     setSaveStatus('idle')
+    setSaveError('')
+  }
+
+  const updateTaskDefaults = (
+    next: TaskDefaults | ((current: TaskDefaults) => TaskDefaults),
+  ) => {
+    setTaskDefaults((current) => {
+      if (typeof next === 'function') {
+        return next(current)
+      }
+      return next
+    })
+    setSaveStatus('idle')
+    setSaveError('')
   }
 
   const handleSave = async () => {
     if (!workspaceId) return
+
     setIsSaving(true)
+    setSaveError('')
+
     try {
       const [configRes, sharedContextRes] = await Promise.all([
         fetch(`/api/workspaces/${workspaceId}/pi-config`, {
@@ -150,6 +222,7 @@ export function WorkspaceConfigPage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ content: sharedContext }),
         }),
+        api.saveWorkspaceTaskDefaults(workspaceId, taskDefaults),
       ])
 
       if (!configRes.ok || !sharedContextRes.ok) {
@@ -160,6 +233,7 @@ export function WorkspaceConfigPage() {
     } catch (err) {
       console.error('Failed to save config:', err)
       setSaveStatus('error')
+      setSaveError(err instanceof Error ? err.message : 'Failed to save configuration')
     } finally {
       setIsSaving(false)
     }
@@ -222,7 +296,7 @@ export function WorkspaceConfigPage() {
           <div className="flex items-center gap-3 mb-6">
             <div>
               <h2 className="text-xl font-semibold text-slate-800">Workspace Configuration</h2>
-              <p className="text-sm text-slate-500">Configure skills and extensions for this workspace</p>
+              <p className="text-sm text-slate-500">Configure skills, extensions, and task defaults for this workspace</p>
             </div>
           </div>
 
@@ -247,6 +321,16 @@ export function WorkspaceConfigPage() {
               }`}
             >
               Extensions ({config.extensions.enabled.length}/{allExtensions.length})
+            </button>
+            <button
+              onClick={() => setActiveTab('task-defaults')}
+              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === 'task-defaults'
+                  ? 'border-safety-orange text-safety-orange'
+                  : 'border-transparent text-slate-600 hover:text-slate-800'
+              }`}
+            >
+              Task Defaults
             </button>
             <button
               onClick={() => setActiveTab('shared-context')}
@@ -383,6 +467,81 @@ export function WorkspaceConfigPage() {
             </div>
           )}
 
+          {activeTab === 'task-defaults' && (
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-800">Task Defaults</h3>
+                <p className="text-xs text-slate-500">Applied automatically when creating tasks in this workspace without explicit model/skill selections.</p>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Default Planning Model
+                  </label>
+                  <ModelSelector
+                    value={taskDefaults.planningModelConfig}
+                    onChange={(config) => {
+                      updateTaskDefaults((current) => ({
+                        ...current,
+                        planningModelConfig: config,
+                      }))
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Default Execution Model
+                  </label>
+                  <ModelSelector
+                    value={taskDefaults.executionModelConfig ?? taskDefaults.modelConfig}
+                    onChange={(config) => {
+                      updateTaskDefaults((current) => ({
+                        ...current,
+                        executionModelConfig: config,
+                        // Keep legacy alias aligned for backward compatibility.
+                        modelConfig: config,
+                      }))
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Execution Pipeline
+                </label>
+                <p className="text-xs text-slate-500 mb-2">Set workspace-specific default pre/post execution order.</p>
+                <ExecutionPipelineEditor
+                  availableSkills={taskSkills}
+                  availableWrappers={taskWrappers}
+                  selectedPreSkillIds={taskDefaults.preExecutionSkills}
+                  selectedSkillIds={taskDefaults.postExecutionSkills}
+                  selectedWrapperId={selectedWrapperId}
+                  onPreSkillsChange={(skillIds) => {
+                    updateTaskDefaults((current) => ({
+                      ...current,
+                      preExecutionSkills: skillIds,
+                    }))
+                  }}
+                  onPostSkillsChange={(skillIds) => {
+                    updateTaskDefaults((current) => ({
+                      ...current,
+                      postExecutionSkills: skillIds,
+                    }))
+                  }}
+                  onWrapperChange={(wrapperId) => {
+                    setSelectedWrapperId(wrapperId)
+                    setSaveStatus('idle')
+                    setSaveError('')
+                  }}
+                  showSkillConfigControls={false}
+                />
+              </div>
+            </div>
+          )}
+
           {activeTab === 'shared-context' && (
             <div className="space-y-3">
               <div className="rounded-lg border border-slate-200 bg-white p-4">
@@ -400,6 +559,7 @@ export function WorkspaceConfigPage() {
                 onChange={(e) => {
                   setSharedContext(e.target.value)
                   setSaveStatus('idle')
+                  setSaveError('')
                 }}
                 placeholder="Add persistent workspace notes, constraints, architecture decisions, or conventions..."
                 className="w-full min-h-[360px] p-3 text-sm border border-slate-300 bg-white text-slate-800 placeholder-slate-400 rounded-lg focus:outline-none focus:ring-2 focus:ring-safety-orange focus:border-safety-orange font-mono"
@@ -493,7 +653,7 @@ export function WorkspaceConfigPage() {
                 </span>
               )}
               {saveStatus === 'error' && (
-                <span className="text-red-600">Failed to save configuration</span>
+                <span className="text-red-600">{saveError || 'Failed to save configuration'}</span>
               )}
             </div>
             <div className="flex gap-3">

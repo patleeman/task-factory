@@ -6,6 +6,7 @@ import { AppIcon } from './AppIcon'
 import { MarkdownEditor } from './MarkdownEditor'
 import { ModelSelector } from './ModelSelector'
 import { ExecutionPipelineEditor } from './ExecutionPipelineEditor'
+import { buildCreateTaskFormDefaults } from './task-default-form'
 import { clearStoredWhiteboardScene, createWhiteboardAttachmentFilename, exportWhiteboardPngFile, hasWhiteboardContent, loadStoredWhiteboardScene, persistWhiteboardScene, type WhiteboardSceneSnapshot } from './whiteboard'
 import { InlineWhiteboardPanel } from './InlineWhiteboardPanel'
 import { useLocalStorageDraft } from '../hooks/useLocalStorageDraft'
@@ -94,7 +95,7 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
   }, [])
 
   useEffect(() => {
-    api.getTaskDefaults()
+    api.getWorkspaceTaskDefaults(workspaceId)
       .then((defaults) => {
         setTaskDefaults(defaults)
 
@@ -103,25 +104,16 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
           return
         }
 
-        setSelectedPreSkillIds([...defaults.preExecutionSkills])
-        setSelectedSkillIds([...defaults.postExecutionSkills])
-        setPlanningModelConfig(
-          defaults.planningModelConfig
-            ? { ...defaults.planningModelConfig }
-            : undefined
-        )
-        setExecutionModelConfig(
-          defaults.executionModelConfig
-            ? { ...defaults.executionModelConfig }
-            : defaults.modelConfig
-              ? { ...defaults.modelConfig }
-              : undefined
-        )
+        const formDefaults = buildCreateTaskFormDefaults(defaults)
+        setSelectedPreSkillIds(formDefaults.selectedPreSkillIds)
+        setSelectedSkillIds(formDefaults.selectedSkillIds)
+        setPlanningModelConfig(formDefaults.planningModelConfig)
+        setExecutionModelConfig(formDefaults.executionModelConfig)
       })
       .catch((err) => {
         console.error('Failed to load task defaults:', err)
       })
-  }, [hasRestoredDraftContent])
+  }, [workspaceId, hasRestoredDraftContent])
 
   // Register form with server when pane opens, unregister on close
   useEffect(() => {
@@ -220,20 +212,14 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
   }, [executionModelConfig, updateDraft])
 
   const handleClearForm = useCallback(() => {
+    const formDefaults = buildCreateTaskFormDefaults(taskDefaults)
+
     setContent('')
-    setSelectedPreSkillIds([...taskDefaults.preExecutionSkills])
-    setSelectedSkillIds([...taskDefaults.postExecutionSkills])
+    setSelectedPreSkillIds(formDefaults.selectedPreSkillIds)
+    setSelectedSkillIds(formDefaults.selectedSkillIds)
     setSkillConfigs({})
-    setPlanningModelConfig(
-      taskDefaults.planningModelConfig ? { ...taskDefaults.planningModelConfig } : undefined
-    )
-    setExecutionModelConfig(
-      taskDefaults.executionModelConfig
-        ? { ...taskDefaults.executionModelConfig }
-        : taskDefaults.modelConfig
-          ? { ...taskDefaults.modelConfig }
-          : undefined
-    )
+    setPlanningModelConfig(formDefaults.planningModelConfig)
+    setExecutionModelConfig(formDefaults.executionModelConfig)
     setSelectedWrapperId('')
     setPendingFiles([])
     setIsWhiteboardModalOpen(false)
@@ -339,7 +325,7 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
       <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2 shrink-0">
         Task Description
       </label>
-      <div className={isWide ? 'flex-1 min-h-0' : 'h-80 min-h-[220px] max-h-[75vh] resize-y overflow-auto'}>
+      <div className={isWide ? 'flex flex-1 min-h-0' : 'h-80 min-h-[220px] max-h-[75vh] resize-y overflow-auto'}>
         <MarkdownEditor
           value={content}
           onChange={setContent}

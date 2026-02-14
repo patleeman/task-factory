@@ -20,6 +20,7 @@ import type {
   UpdateTaskRequest,
   ServerEvent,
   ClientEvent,
+  TaskDefaults,
 } from '@pi-factory/shared';
 import { PHASES, DEFAULT_WIP_LIMITS, getWorkspaceAutomationSettings } from '@pi-factory/shared';
 
@@ -1237,7 +1238,9 @@ import {
 } from './pi-integration.js';
 import {
   loadTaskDefaults,
+  loadTaskDefaultsForWorkspace,
   saveTaskDefaults,
+  saveWorkspaceTaskDefaults,
   parseTaskDefaultsPayload,
   validateTaskDefaults,
   loadAvailableModelsForDefaults,
@@ -1265,7 +1268,11 @@ app.get('/api/task-defaults', (_req, res) => {
   res.json(loadTaskDefaults());
 });
 
-async function handleSaveTaskDefaults(req: express.Request, res: express.Response): Promise<void> {
+async function handleSaveTaskDefaults(
+  req: express.Request,
+  res: express.Response,
+  saveDefaults: (defaults: TaskDefaults) => TaskDefaults = saveTaskDefaults,
+): Promise<void> {
   const parsed = parseTaskDefaultsPayload(req.body);
   if (!parsed.ok) {
     res.status(400).json({ error: parsed.error });
@@ -1289,7 +1296,7 @@ async function handleSaveTaskDefaults(req: express.Request, res: express.Respons
       return;
     }
 
-    const saved = saveTaskDefaults(parsed.value);
+    const saved = saveDefaults(parsed.value);
     res.json(saved);
   } catch (err) {
     res.status(500).json({ error: String(err) });
@@ -1305,6 +1312,47 @@ app.post('/api/task-defaults', (req, res) => {
 
 app.put('/api/task-defaults', (req, res) => {
   handleSaveTaskDefaults(req, res).catch((err) => {
+    res.status(500).json({ error: String(err) });
+  });
+});
+
+// Get workspace task creation defaults
+app.get('/api/workspaces/:workspaceId/task-defaults', async (req, res) => {
+  const workspaceId = Array.isArray(req.params.workspaceId)
+    ? req.params.workspaceId[0]
+    : req.params.workspaceId;
+
+  const workspace = workspaceId ? await getWorkspaceById(workspaceId) : null;
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return;
+  }
+
+  res.json(loadTaskDefaultsForWorkspace(workspace.id));
+});
+
+async function handleSaveWorkspaceTaskDefaults(req: express.Request, res: express.Response): Promise<void> {
+  const workspaceId = Array.isArray(req.params.workspaceId)
+    ? req.params.workspaceId[0]
+    : req.params.workspaceId;
+
+  const workspace = workspaceId ? await getWorkspaceById(workspaceId) : null;
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return;
+  }
+
+  await handleSaveTaskDefaults(req, res, (defaults) => saveWorkspaceTaskDefaults(workspace.id, defaults));
+}
+
+app.post('/api/workspaces/:workspaceId/task-defaults', (req, res) => {
+  handleSaveWorkspaceTaskDefaults(req, res).catch((err) => {
+    res.status(500).json({ error: String(err) });
+  });
+});
+
+app.put('/api/workspaces/:workspaceId/task-defaults', (req, res) => {
+  handleSaveWorkspaceTaskDefaults(req, res).catch((err) => {
     res.status(500).json({ error: String(err) });
   });
 });

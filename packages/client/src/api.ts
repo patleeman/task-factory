@@ -381,6 +381,28 @@ export const api = {
     return res.json()
   },
 
+  async getWorkspaceTaskDefaults(workspaceId: string): Promise<TaskDefaults> {
+    const res = await fetch(`/api/workspaces/${workspaceId}/task-defaults`)
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to load workspace task defaults' }))
+      throw new Error(err.error || `Failed to load workspace task defaults (${res.status})`)
+    }
+    return res.json()
+  },
+
+  async saveWorkspaceTaskDefaults(workspaceId: string, defaults: TaskDefaults): Promise<TaskDefaults> {
+    const res = await fetch(`/api/workspaces/${workspaceId}/task-defaults`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(defaults),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to save workspace task defaults' }))
+      throw new Error(err.error || `Failed to save workspace task defaults (${res.status})`)
+    }
+    return res.json()
+  },
+
   async getWorkflowAutomation(workspaceId: string): Promise<WorkflowAutomationResponse> {
     const res = await fetch(`/api/workspaces/${workspaceId}/automation`)
     if (!res.ok) {

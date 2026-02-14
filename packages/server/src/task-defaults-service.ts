@@ -1,3 +1,6 @@
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { homedir } from 'os';
+import { dirname, join } from 'path';
 import {
   DEFAULT_PRE_EXECUTION_SKILLS,
   DEFAULT_POST_EXECUTION_SKILLS,
@@ -36,6 +39,18 @@ const BUILT_IN_TASK_DEFAULTS: TaskDefaults = {
   postExecutionSkills: [...DEFAULT_POST_EXECUTION_SKILLS],
 };
 
+const PI_FACTORY_DIR = join(homedir(), '.pi', 'factory');
+const WORKSPACE_REGISTRY_PATH = join(PI_FACTORY_DIR, 'workspaces.json');
+const WORKSPACE_DEFAULTS_FILE_NAME = 'task-defaults.json';
+
+interface TaskDefaultsOverride {
+  planningModelConfig?: ModelConfig;
+  executionModelConfig?: ModelConfig;
+  modelConfig?: ModelConfig;
+  preExecutionSkills?: string[];
+  postExecutionSkills?: string[];
+}
+
 function cloneModelConfig(modelConfig: ModelConfig | undefined): ModelConfig | undefined {
   if (!modelConfig) return undefined;
   return {
@@ -51,6 +66,19 @@ function cloneTaskDefaults(defaults: TaskDefaults): TaskDefaults {
 
   return {
     planningModelConfig,
+    executionModelConfig,
+    // Keep legacy field aligned for backward compatibility.
+    modelConfig: cloneModelConfig(executionModelConfig),
+    preExecutionSkills: [...defaults.preExecutionSkills],
+    postExecutionSkills: [...defaults.postExecutionSkills],
+  };
+}
+
+function normalizeTaskDefaults(defaults: TaskDefaults): TaskDefaults {
+  const executionModelConfig = cloneModelConfig(defaults.executionModelConfig ?? defaults.modelConfig);
+
+  return {
+    planningModelConfig: cloneModelConfig(defaults.planningModelConfig),
     executionModelConfig,
     // Keep legacy field aligned for backward compatibility.
     modelConfig: cloneModelConfig(executionModelConfig),
@@ -104,6 +132,185 @@ function sanitizePreSkillIds(raw: unknown): string[] {
   return raw.filter((skillId): skillId is string => typeof skillId === 'string');
 }
 
+function sanitizeOptionalSkillIds(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) {
+    return undefined;
+  }
+
+  return raw.filter((skillId): skillId is string => typeof skillId === 'string');
+}
+
+function areModelConfigsEqual(left: ModelConfig | undefined, right: ModelConfig | undefined): boolean {
+  if (!left && !right) {
+    return true;
+  }
+
+  if (!left || !right) {
+    return false;
+  }
+
+  return left.provider === right.provider
+    && left.modelId === right.modelId
+    && left.thinkingLevel === right.thinkingLevel;
+}
+
+function areSkillIdListsEqual(left: string[], right: string[]): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  for (let i = 0; i < left.length; i += 1) {
+    if (left[i] !== right[i]) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function buildWorkspaceTaskDefaultsOverride(
+  defaults: TaskDefaults,
+  globalDefaults: TaskDefaults,
+): TaskDefaultsOverride | null {
+  const normalizedDefaults = normalizeTaskDefaults(defaults);
+  const normalizedGlobalDefaults = normalizeTaskDefaults(globalDefaults);
+
+  const override: TaskDefaultsOverride = {};
+
+  if (!areModelConfigsEqual(normalizedDefaults.planningModelConfig, normalizedGlobalDefaults.planningModelConfig)) {
+    override.planningModelConfig = cloneModelConfig(normalizedDefaults.planningModelConfig);
+  }
+
+  const normalizedExecutionModel = normalizedDefaults.executionModelConfig ?? normalizedDefaults.modelConfig;
+  const normalizedGlobalExecutionModel = normalizedGlobalDefaults.executionModelConfig ?? normalizedGlobalDefaults.modelConfig;
+
+  if (!areModelConfigsEqual(normalizedExecutionModel, normalizedGlobalExecutionModel)) {
+    override.executionModelConfig = cloneModelConfig(normalizedExecutionModel);
+    // Keep legacy field aligned for backward compatibility.
+    override.modelConfig = cloneModelConfig(normalizedExecutionModel);
+  }
+
+  if (!areSkillIdListsEqual(normalizedDefaults.preExecutionSkills, normalizedGlobalDefaults.preExecutionSkills)) {
+    override.preExecutionSkills = [...normalizedDefaults.preExecutionSkills];
+  }
+
+  if (!areSkillIdListsEqual(normalizedDefaults.postExecutionSkills, normalizedGlobalDefaults.postExecutionSkills)) {
+    override.postExecutionSkills = [...normalizedDefaults.postExecutionSkills];
+  }
+
+  const hasOverrides =
+    override.planningModelConfig !== undefined
+    || override.executionModelConfig !== undefined
+    || override.modelConfig !== undefined
+    || override.preExecutionSkills !== undefined
+    || override.postExecutionSkills !== undefined;
+
+  return hasOverrides ? override : null;
+}
+
+function resolveTaskDefaultsOverride(raw: unknown): TaskDefaultsOverride | null {
+  if (!raw || typeof raw !== 'object') {
+    return null;
+  }
+
+  const defaults = raw as {
+    planningModelConfig?: unknown;
+    executionModelConfig?: unknown;
+    modelConfig?: unknown;
+    preExecutionSkills?: unknown;
+    postExecutionSkills?: unknown;
+  };
+
+  const override: TaskDefaultsOverride = {
+    planningModelConfig: sanitizeModelConfig(defaults.planningModelConfig),
+    executionModelConfig: sanitizeModelConfig(defaults.executionModelConfig),
+    modelConfig: sanitizeModelConfig(defaults.modelConfig),
+    preExecutionSkills: sanitizeOptionalSkillIds(defaults.preExecutionSkills),
+    postExecutionSkills: sanitizeOptionalSkillIds(defaults.postExecutionSkills),
+  };
+
+  const hasOverrides =
+    override.planningModelConfig !== undefined
+    || override.executionModelConfig !== undefined
+    || override.modelConfig !== undefined
+    || override.preExecutionSkills !== undefined
+    || override.postExecutionSkills !== undefined;
+
+  return hasOverrides ? override : null;
+}
+
+function mergeTaskDefaults(base: TaskDefaults, workspaceOverride: TaskDefaultsOverride | null): TaskDefaults {
+  if (!workspaceOverride) {
+    return cloneTaskDefaults(base);
+  }
+
+  const resolvedExecutionOverride = workspaceOverride.executionModelConfig ?? workspaceOverride.modelConfig;
+  const executionModelConfig = resolvedExecutionOverride !== undefined
+    ? cloneModelConfig(resolvedExecutionOverride)
+    : cloneModelConfig(base.executionModelConfig ?? base.modelConfig);
+
+  return {
+    planningModelConfig: workspaceOverride.planningModelConfig !== undefined
+      ? cloneModelConfig(workspaceOverride.planningModelConfig)
+      : cloneModelConfig(base.planningModelConfig),
+    executionModelConfig,
+    // Keep legacy field aligned for backward compatibility.
+    modelConfig: cloneModelConfig(executionModelConfig),
+    preExecutionSkills: workspaceOverride.preExecutionSkills !== undefined
+      ? [...workspaceOverride.preExecutionSkills]
+      : [...base.preExecutionSkills],
+    postExecutionSkills: workspaceOverride.postExecutionSkills !== undefined
+      ? [...workspaceOverride.postExecutionSkills]
+      : [...base.postExecutionSkills],
+  };
+}
+
+function getWorkspaceTaskDefaultsPath(workspaceId: string): string {
+  return join(PI_FACTORY_DIR, 'workspaces', workspaceId, WORKSPACE_DEFAULTS_FILE_NAME);
+}
+
+function findWorkspaceIdByPath(workspacePath: string): string | undefined {
+  if (!existsSync(WORKSPACE_REGISTRY_PATH)) {
+    return undefined;
+  }
+
+  try {
+    const raw = readFileSync(WORKSPACE_REGISTRY_PATH, 'utf-8');
+    const entries = JSON.parse(raw) as Array<{ id?: unknown; path?: unknown }>;
+
+    for (const entry of entries) {
+      if (typeof entry.id === 'string' && entry.path === workspacePath) {
+        return entry.id;
+      }
+    }
+  } catch (err) {
+    console.warn(
+      `[TaskDefaults] Failed to parse workspace registry at ${WORKSPACE_REGISTRY_PATH}: ${String(err)}`,
+    );
+  }
+
+  return undefined;
+}
+
+function loadWorkspaceTaskDefaultsOverride(workspaceId: string): TaskDefaultsOverride | null {
+  const workspaceDefaultsPath = getWorkspaceTaskDefaultsPath(workspaceId);
+
+  if (!existsSync(workspaceDefaultsPath)) {
+    return null;
+  }
+
+  try {
+    const raw = readFileSync(workspaceDefaultsPath, 'utf-8');
+    const parsed = JSON.parse(raw) as unknown;
+    return resolveTaskDefaultsOverride(parsed);
+  } catch (err) {
+    console.warn(
+      `[TaskDefaults] Failed to load workspace task defaults at ${workspaceDefaultsPath}: ${String(err)}`,
+    );
+    return null;
+  }
+}
+
 export function getBuiltInTaskDefaults(): TaskDefaults {
   return cloneTaskDefaults(BUILT_IN_TASK_DEFAULTS);
 }
@@ -135,18 +342,24 @@ export function loadTaskDefaults(): TaskDefaults {
   return resolveTaskDefaults(settings);
 }
 
+export function loadTaskDefaultsForWorkspace(workspaceId: string): TaskDefaults {
+  const globalDefaults = loadTaskDefaults();
+  const workspaceOverride = loadWorkspaceTaskDefaultsOverride(workspaceId);
+  return mergeTaskDefaults(globalDefaults, workspaceOverride);
+}
+
+export function loadTaskDefaultsForWorkspacePath(workspacePath: string): TaskDefaults {
+  const workspaceId = findWorkspaceIdByPath(workspacePath);
+  if (!workspaceId) {
+    return loadTaskDefaults();
+  }
+
+  return loadTaskDefaultsForWorkspace(workspaceId);
+}
+
 export function saveTaskDefaults(defaults: TaskDefaults): TaskDefaults {
   const current = loadPiFactorySettings() || {};
-  const executionModelConfig = cloneModelConfig(defaults.executionModelConfig ?? defaults.modelConfig);
-
-  const normalized: TaskDefaults = {
-    planningModelConfig: cloneModelConfig(defaults.planningModelConfig),
-    executionModelConfig,
-    // Keep legacy field aligned for backward compatibility.
-    modelConfig: cloneModelConfig(executionModelConfig),
-    preExecutionSkills: [...defaults.preExecutionSkills],
-    postExecutionSkills: [...defaults.postExecutionSkills],
-  };
+  const normalized = normalizeTaskDefaults(defaults);
 
   savePiFactorySettings({
     ...current,
@@ -154,6 +367,29 @@ export function saveTaskDefaults(defaults: TaskDefaults): TaskDefaults {
   });
 
   return cloneTaskDefaults(normalized);
+}
+
+export function saveWorkspaceTaskDefaults(workspaceId: string, defaults: TaskDefaults): TaskDefaults {
+  const normalized = normalizeTaskDefaults(defaults);
+  const globalDefaults = loadTaskDefaults();
+  const workspaceOverride = buildWorkspaceTaskDefaultsOverride(normalized, globalDefaults);
+
+  const workspaceDefaultsPath = getWorkspaceTaskDefaultsPath(workspaceId);
+  const workspaceDefaultsDir = dirname(workspaceDefaultsPath);
+
+  if (!existsSync(workspaceDefaultsDir)) {
+    mkdirSync(workspaceDefaultsDir, { recursive: true });
+  }
+
+  if (!workspaceOverride) {
+    // Persist an empty object so workspace defaults continue falling back to globals.
+    writeFileSync(workspaceDefaultsPath, JSON.stringify({}, null, 2), 'utf-8');
+    return loadTaskDefaultsForWorkspace(workspaceId);
+  }
+
+  writeFileSync(workspaceDefaultsPath, JSON.stringify(workspaceOverride, null, 2), 'utf-8');
+
+  return loadTaskDefaultsForWorkspace(workspaceId);
 }
 
 export function applyTaskDefaultsToRequest(request: CreateTaskRequest, defaults: TaskDefaults): {

@@ -17,7 +17,7 @@ import type {
   Attachment,
   ReorderTasksRequest,
 } from '@pi-factory/shared';
-import { applyTaskDefaultsToRequest, loadTaskDefaults } from './task-defaults-service.js';
+import { applyTaskDefaultsToRequest, loadTaskDefaultsForWorkspacePath } from './task-defaults-service.js';
 
 
 // =============================================================================
@@ -298,7 +298,7 @@ export function createTask(
   );
   const nextOrder = Number.isFinite(maxOrder) ? maxOrder + 1 : 0;
 
-  const taskDefaults = loadTaskDefaults();
+  const taskDefaults = loadTaskDefaultsForWorkspacePath(workspacePath);
   const resolvedDefaults = applyTaskDefaultsToRequest(request, taskDefaults);
 
   const frontmatter: TaskFrontmatter = {
