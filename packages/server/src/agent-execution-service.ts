@@ -1751,6 +1751,48 @@ export function loadPlanningGuardrails(): PlanningGuardrails {
   return resolvePlanningGuardrails(settings?.planningGuardrails);
 }
 
+const PLANNING_TURN_LIMIT_ERROR_PATTERN = /(turn[\s_-]*limit(?:\b|[_-])|\bmax(?:imum)?(?:[\s_-]+number[\s_-]+of)?[\s_-]*turns?(?:\b|[_-])|\btoo[\s_-]+many[\s_-]+turns?(?:\b|[_-]))/i;
+
+function isPlanningTurnLimitError(errorMessage: unknown): boolean {
+  if (typeof errorMessage !== 'string') {
+    return false;
+  }
+
+  return PLANNING_TURN_LIMIT_ERROR_PATTERN.test(errorMessage);
+}
+
+function detectPlanningTurnLimitReason(event: AgentSessionEvent): string | null {
+  if (event.type !== 'turn_end') {
+    return null;
+  }
+
+  const message = (event as any).message;
+  if (!message || message.role !== 'assistant') {
+    return null;
+  }
+
+  if (message.stopReason === 'length') {
+    return 'assistant output limit reached (stopReason=length)';
+  }
+
+  if (message.stopReason !== 'error' || !isPlanningTurnLimitError(message.errorMessage)) {
+    return null;
+  }
+
+  const normalizedError = String(message.errorMessage).replace(/\s+/g, ' ').trim();
+  return normalizedError
+    ? `planning turn limit reached (${normalizedError})`
+    : 'planning turn limit reached';
+}
+
+function buildPlanningGraceTurnPrompt(taskId: string, reason: string): string {
+  return (
+    `Your planning run ended because ${reason}. You must call \`save_plan\` NOW with taskId "${taskId}" `
+    + 'using the research you have gathered so far. Do not call any other tools — only `save_plan`. '
+    + 'Produce your best plan from the information already collected.'
+  );
+}
+
 export function buildPlanningPrompt(
   task: Task,
   attachmentSection: string,
@@ -2109,6 +2151,7 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
   let planningToolCallCount = 0;
   let planningReadBytes = 0;
   let planningGuardrailAbortMessage: string | null = null;
+  let planningTurnLimitMessage: string | null = null;
   let graceTurnActive = false;
 
   try {
@@ -2182,6 +2225,10 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
         return;
       }
 
+      if (!planningGuardrailAbortMessage && !planningTurnLimitMessage) {
+        planningTurnLimitMessage = detectPlanningTurnLimitReason(event);
+      }
+
       if (planningGuardrailAbortMessage) {
         return;
       }
@@ -2233,10 +2280,15 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
         }, { once: true });
         await piSession.prompt(prompt, planPromptOpts);
 
-        // Grace turn: if a guardrail aborted planning but no plan was saved,
-        // give the agent one final turn to call save_plan with what it gathered.
-        if (planningGuardrailAbortMessage && !savedPlan && !hasPersistedPlan) {
+        // Grace turn: if planning ended due to a budget/turn/output limit and no plan
+        // was saved, give the agent one final turn to call save_plan.
+        const graceTurnReason = planningGuardrailAbortMessage ?? planningTurnLimitMessage;
+        if (graceTurnReason && !savedPlan && !hasPersistedPlan) {
           graceTurnActive = true;
+
+          const graceTurnEventMessage = planningGuardrailAbortMessage
+            ? 'Budget exceeded — giving agent one final turn to save a plan.'
+            : 'Turn/output limit reached — giving agent one final turn to save a plan.';
 
           broadcastActivityEntry(
             broadcastToWorkspace,
@@ -2244,15 +2296,18 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
               workspaceId,
               task.id,
               'phase-change',
-              'Budget exceeded — giving agent one final turn to save a plan.',
+              graceTurnEventMessage,
             ),
             'planning grace turn event',
           );
 
-          const graceTurnPrompt =
-            `Your planning tool budget has been reached. You must call \`save_plan\` NOW with taskId "${task.id}" ` +
-            'using the research you have gathered so far. Do not call any other tools — only `save_plan`. ' +
-            'Produce your best plan from the information already collected.';
+          const graceTurnPrompt = planningGuardrailAbortMessage
+            ? (
+                `Your planning tool budget has been reached. You must call \`save_plan\` NOW with taskId "${task.id}" `
+                + 'using the research you have gathered so far. Do not call any other tools — only `save_plan`. '
+                + 'Produce your best plan from the information already collected.'
+              )
+            : buildPlanningGraceTurnPrompt(task.id, graceTurnReason);
 
           await piSession.prompt(graceTurnPrompt);
         }
@@ -2263,6 +2318,10 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
 
     if (!savedPlan && planningGuardrailAbortMessage) {
       throw new Error(planningGuardrailAbortMessage);
+    }
+
+    if (!savedPlan && planningTurnLimitMessage) {
+      throw new Error(`${planningTurnLimitMessage}. Grace turn ended without save_plan.`);
     }
 
     if (savedPlan) {

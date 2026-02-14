@@ -753,6 +753,169 @@ describe('planTask', () => {
     expect(persistedTask.frontmatter.planningStatus).toBe('completed');
   });
 
+  it('gives the agent a grace turn to call save_plan when planning ends due output length', async () => {
+    const workspacePath = mkdtempSync(join(tmpdir(), 'pi-factory-plan-task-'));
+    tempDirs.push(workspacePath);
+
+    const tasksDir = join(workspacePath, '.pi', 'tasks');
+    mkdirSync(tasksDir, { recursive: true });
+
+    const { createTask, parseTaskFile } = await import('../src/task-service.js');
+    const { planTask } = await import('../src/agent-execution-service.js');
+
+    const task = createTask(workspacePath, tasksDir, {
+      content: 'Test grace turn when model hits output length limit',
+      acceptanceCriteria: [],
+    });
+
+    const subscribers: Array<(event: any) => void> = [];
+    let promptCount = 0;
+
+    createAgentSessionMock.mockResolvedValue({
+      session: {
+        subscribe: (listener: (event: any) => void) => {
+          subscribers.push(listener);
+          return () => {
+            const idx = subscribers.indexOf(listener);
+            if (idx >= 0) subscribers.splice(idx, 1);
+          };
+        },
+        prompt: vi.fn(async (prompt: string) => {
+          promptCount++;
+          if (promptCount === 1) {
+            for (const sub of [...subscribers]) {
+              sub({
+                type: 'turn_end',
+                message: {
+                  role: 'assistant',
+                  stopReason: 'length',
+                },
+                toolResults: [],
+              });
+            }
+            return;
+          }
+
+          expect(prompt).toContain('save_plan');
+          const callback = (globalThis as any).__piFactoryPlanCallbacks?.get(task.id);
+          if (!callback) throw new Error('save_plan callback not registered');
+          callback({
+            acceptanceCriteria: ['Length grace turn criterion'],
+            plan: {
+              goal: 'Plan from length grace turn',
+              steps: ['Step one'],
+              validation: ['Validate one'],
+              cleanup: [],
+              generatedAt: new Date().toISOString(),
+            },
+          });
+        }),
+        abort: vi.fn(async () => {}),
+      },
+    });
+
+    const broadcasts: any[] = [];
+    const result = await planTask({
+      task,
+      workspaceId: 'workspace-test',
+      workspacePath,
+      broadcastToWorkspace: (event: any) => broadcasts.push(event),
+    });
+
+    expect(result).not.toBeNull();
+    expect(result?.goal).toBe('Plan from length grace turn');
+    expect(promptCount).toBe(2);
+
+    const persistedTask = parseTaskFile(task.filePath);
+    expect(persistedTask.frontmatter.plan).toBeDefined();
+    expect(persistedTask.frontmatter.planningStatus).toBe('completed');
+
+    const statusEvents = broadcasts.filter((event) => event.type === 'agent:execution_status');
+    expect(statusEvents.at(-1)).toMatchObject({
+      taskId: task.id,
+      status: 'completed',
+    });
+  });
+
+  it('still errors when the turn-limit grace turn fails to produce a plan', async () => {
+    const workspacePath = mkdtempSync(join(tmpdir(), 'pi-factory-plan-task-'));
+    tempDirs.push(workspacePath);
+
+    const tasksDir = join(workspacePath, '.pi', 'tasks');
+    mkdirSync(tasksDir, { recursive: true });
+
+    const { createTask, parseTaskFile } = await import('../src/task-service.js');
+    const { planTask } = await import('../src/agent-execution-service.js');
+
+    const task = createTask(workspacePath, tasksDir, {
+      content: 'Test turn-limit grace turn that fails',
+      acceptanceCriteria: [],
+    });
+
+    const subscribers: Array<(event: any) => void> = [];
+    let promptCount = 0;
+
+    createAgentSessionMock.mockResolvedValue({
+      session: {
+        subscribe: (listener: (event: any) => void) => {
+          subscribers.push(listener);
+          return () => {
+            const idx = subscribers.indexOf(listener);
+            if (idx >= 0) subscribers.splice(idx, 1);
+          };
+        },
+        prompt: vi.fn(async () => {
+          promptCount++;
+          if (promptCount === 1) {
+            for (const sub of [...subscribers]) {
+              sub({
+                type: 'turn_end',
+                message: {
+                  role: 'assistant',
+                  stopReason: 'error',
+                  errorMessage: 'max_turns_exceeded: planning run hit max_turns.',
+                },
+                toolResults: [],
+              });
+            }
+          }
+          // promptCount === 2: grace turn — agent does NOT call save_plan
+        }),
+        abort: vi.fn(async () => {}),
+      },
+    });
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const broadcasts: any[] = [];
+    const result = await planTask({
+      task,
+      workspaceId: 'workspace-test',
+      workspacePath,
+      broadcastToWorkspace: (event: any) => broadcasts.push(event),
+    });
+
+    expect(result).toBeNull();
+    expect(promptCount).toBe(2);
+    expect(task.frontmatter.planningStatus).toBe('error');
+
+    const persistedTask = parseTaskFile(task.filePath);
+    expect(persistedTask.frontmatter.plan).toBeUndefined();
+    expect(persistedTask.frontmatter.planningStatus).toBe('error');
+
+    const statusEvents = broadcasts.filter((event) => event.type === 'agent:execution_status');
+    expect(statusEvents.at(-1)).toMatchObject({
+      taskId: task.id,
+      status: 'error',
+    });
+
+    const loggedTurnLimitFailure = errorSpy.mock.calls.some((call) =>
+      call.some((arg) => String(arg).includes('Grace turn ended without save_plan')),
+    );
+    expect(loggedTurnLimitFailure).toBe(true);
+
+    errorSpy.mockRestore();
+  });
+
   it('still errors when the grace turn fails to produce a plan', async () => {
     const workspacePath = mkdtempSync(join(tmpdir(), 'pi-factory-plan-task-'));
     tempDirs.push(workspacePath);
