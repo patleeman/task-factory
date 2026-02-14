@@ -63,6 +63,8 @@ export function WorkspacePage() {
   const [planningMessages, setPlanningMessages] = useState<PlanningMessage[]>([])
   const [runningExecutionTaskIds, setRunningExecutionTaskIds] = useState<Set<string>>(new Set())
   const [awaitingInputTaskIds, setAwaitingInputTaskIds] = useState<Set<string>>(new Set())
+  const [stoppingTaskIds, setStoppingTaskIds] = useState<Set<string>>(new Set())
+  const stoppingTaskIdsRef = useRef<Set<string>>(new Set())
   const tasksByIdRef = useRef<Map<string, Task>>(new Map())
 
   const selectedTask = taskId ? tasks.find((t) => t.id === taskId) || null : null
@@ -160,6 +162,25 @@ export function WorkspacePage() {
     })
   }, [tasks])
 
+  useEffect(() => {
+    const tasksById = new Map(tasks.map((task) => [task.id, task]))
+    const filtered = new Set<string>()
+
+    for (const trackedTaskId of stoppingTaskIdsRef.current) {
+      const task = tasksById.get(trackedTaskId)
+      if (task && task.frontmatter.phase === 'executing') {
+        filtered.add(trackedTaskId)
+      }
+    }
+
+    if (filtered.size === stoppingTaskIdsRef.current.size) {
+      return
+    }
+
+    stoppingTaskIdsRef.current = filtered
+    setStoppingTaskIds(filtered)
+  }, [tasks])
+
   // Load workspace data
   useEffect(() => {
     if (!workspaceId) return
@@ -170,6 +191,8 @@ export function WorkspacePage() {
     setSelectedArtifactId(null)
     setRunningExecutionTaskIds(new Set())
     setAwaitingInputTaskIds(new Set())
+    stoppingTaskIdsRef.current = new Set()
+    setStoppingTaskIds(new Set())
     setBacklogAutomationToggling(false)
     setReadyAutomationToggling(false)
     setAutomationSettings({ backlogToReady: false, readyToExecuting: false })
@@ -436,6 +459,23 @@ export function WorkspacePage() {
     toastTimerRef.current = setTimeout(() => setToast(null), 5000)
   }, [])
 
+  const markTaskStopping = useCallback((id: string): boolean => {
+    if (stoppingTaskIdsRef.current.has(id)) return false
+    const next = new Set(stoppingTaskIdsRef.current)
+    next.add(id)
+    stoppingTaskIdsRef.current = next
+    setStoppingTaskIds(next)
+    return true
+  }, [])
+
+  const clearTaskStopping = useCallback((id: string) => {
+    if (!stoppingTaskIdsRef.current.has(id)) return
+    const next = new Set(stoppingTaskIdsRef.current)
+    next.delete(id)
+    stoppingTaskIdsRef.current = next
+    setStoppingTaskIds(next)
+  }, [])
+
   // Move task
   const handleMoveTask = async (task: Task, toPhase: Phase) => {
     if (!workspaceId) return
@@ -532,6 +572,23 @@ export function WorkspacePage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content, attachmentIds }),
     })
+  }
+
+  const handleStopTaskExecution = async (taskId: string) => {
+    if (!workspaceId) return
+    if (!markTaskStopping(taskId)) return
+
+    try {
+      const result = await api.stopTaskExecution(workspaceId, taskId)
+      if (!result.stopped) {
+        showToast('Agent is no longer running')
+      }
+    } catch (err) {
+      console.error('Failed to stop task execution:', err)
+      showToast('Failed to stop agent')
+    } finally {
+      clearTaskStopping(taskId)
+    }
   }
 
   // Planning agent handlers
@@ -875,6 +932,8 @@ export function WorkspacePage() {
                       onSendMessage={(content, attachmentIds) => handleSendMessage(selectedTask.id, content, attachmentIds)}
                       onSteer={(content, attachmentIds) => handleSteer(selectedTask.id, content, attachmentIds)}
                       onFollowUp={(content, attachmentIds) => handleFollowUp(selectedTask.id, content, attachmentIds)}
+                      onStop={() => handleStopTaskExecution(selectedTask.id)}
+                      isStopping={stoppingTaskIds.has(selectedTask.id)}
                     />
                   ) : (
                     <TaskRouteMissingState onBack={() => navigate(workspaceRootPath)} />

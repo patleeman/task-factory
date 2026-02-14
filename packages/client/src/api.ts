@@ -177,6 +177,22 @@ export const api = {
     }
     return res.json()
   },
+
+  async stopTaskExecution(workspaceId: string, taskId: string): Promise<{ stopped: boolean }> {
+    const res = await fetch(`/api/workspaces/${workspaceId}/tasks/${taskId}/stop`, {
+      method: 'POST',
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => null)
+      const message = err && typeof err.error === 'string' && err.error.trim().length > 0
+        ? err.error
+        : `Stop failed (${res.status})`
+      throw new Error(message)
+    }
+    const data = await res.json().catch(() => ({ stopped: false }))
+    return { stopped: !!data.stopped }
+  },
+
   async sendMessage(workspaceId: string, taskId: string, content: string, role: 'user' | 'agent', attachmentIds?: string[]): Promise<ActivityEntry> {
     const metadata = attachmentIds && attachmentIds.length > 0 ? { attachmentIds } : undefined
     const res = await fetch(`/api/workspaces/${workspaceId}/activity`, {

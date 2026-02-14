@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, memo, useMemo, useCallback } from 'react'
 import { CornerUpLeft, Loader2, Paperclip, PencilLine, SendHorizontal, X, Zap } from 'lucide-react'
-import type { ActivityEntry, Attachment, Phase } from '@pi-factory/shared'
+import type { ActivityEntry, Attachment, Phase, AgentExecutionStatus } from '@pi-factory/shared'
 import type { AgentStreamState, ToolCallState } from '../hooks/useAgentStreaming'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -24,6 +24,8 @@ interface TaskChatProps {
   onSendMessage: (content: string, attachmentIds?: string[]) => void
   onSteer?: (content: string, attachmentIds?: string[]) => void
   onFollowUp?: (content: string, attachmentIds?: string[]) => void
+  onStop?: () => Promise<void> | void
+  isStopping?: boolean
 
   onReset?: () => void
   onUploadFiles?: (files: File[]) => Promise<Attachment[]>
@@ -49,6 +51,13 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; pulse?: bool
   'post-hooks': { label: 'Running post-execution skills', color: 'bg-orange-500', pulse: true },
   awaiting_qa: { label: 'Waiting for your answers', color: 'bg-amber-500' },
 }
+
+const STOPPABLE_STATUSES = new Set<AgentExecutionStatus>([
+  'streaming',
+  'tool_use',
+  'thinking',
+  'post-hooks',
+])
 
 const TOOL_PREVIEW_LINES = 2
 const MAX_LINES = 100
@@ -442,6 +451,8 @@ export function TaskChat({
   onSendMessage,
   onSteer,
   onFollowUp,
+  onStop,
+  isStopping,
   onReset,
   onUploadFiles,
   getAttachmentUrl: getAttachmentUrlProp,
@@ -476,6 +487,7 @@ export function TaskChat({
   const hasSteerHandler = !!onSteer
   const hasFollowUpHandler = !!onFollowUp
   const showSteerControls = isAgentActive && hasSteerHandler
+  const showStopControl = !!onStop && STOPPABLE_STATUSES.has(agentStream.status)
 
   const isWaitingForInput = taskPhase === 'executing'
     ? Boolean(isAwaitingInput) || (!agentStream.isActive && agentStream.status === 'awaiting_input')
@@ -612,6 +624,13 @@ export function TaskChat({
     setPendingFiles([])
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
   }
+
+  const handleStopClick = useCallback(() => {
+    if (!onStop || isStopping) return
+    Promise.resolve(onStop()).catch((err) => {
+      console.error('Failed to stop task execution:', err)
+    })
+  }, [onStop, isStopping])
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault()
@@ -890,35 +909,64 @@ export function TaskChat({
 
       {/* Input */}
       <div className="shrink-0 border-t border-slate-200 bg-white">
-        {showSteerControls && (
+        {(showSteerControls || showStopControl) && (
           <div className="flex items-center gap-1 px-3 pt-2 pb-0">
-            <button
-              onClick={() => setSendMode('steer')}
-              className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded transition-colors inline-flex items-center gap-1 ${
-                sendMode === 'steer'
-                  ? 'bg-amber-100 text-amber-700'
-                  : 'text-slate-400 hover:text-slate-600'
-              }`}
-            >
-              <AppIcon icon={Zap} size="xs" />
-              steer
-            </button>
-            {hasFollowUpHandler && (
+            {showSteerControls && (
+              <>
+                <button
+                  onClick={() => setSendMode('steer')}
+                  className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded transition-colors inline-flex items-center gap-1 ${
+                    sendMode === 'steer'
+                      ? 'bg-amber-100 text-amber-700'
+                      : 'text-slate-400 hover:text-slate-600'
+                  }`}
+                >
+                  <AppIcon icon={Zap} size="xs" />
+                  steer
+                </button>
+                {hasFollowUpHandler && (
+                  <button
+                    onClick={() => setSendMode('followUp')}
+                    className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded transition-colors inline-flex items-center gap-1 ${
+                      sendMode === 'followUp'
+                        ? 'bg-blue-100 text-blue-700'
+                        : 'text-slate-400 hover:text-slate-600'
+                    }`}
+                  >
+                    <AppIcon icon={CornerUpLeft} size="xs" />
+                    follow-up
+                  </button>
+                )}
+              </>
+            )}
+
+            {showStopControl && (
               <button
-                onClick={() => setSendMode('followUp')}
+                type="button"
+                onClick={handleStopClick}
+                disabled={!!isStopping}
                 className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded transition-colors inline-flex items-center gap-1 ${
-                  sendMode === 'followUp'
-                    ? 'bg-blue-100 text-blue-700'
-                    : 'text-slate-400 hover:text-slate-600'
+                  isStopping
+                    ? 'bg-red-100 text-red-500 cursor-not-allowed'
+                    : 'bg-red-100 text-red-700 hover:bg-red-200'
                 }`}
+                title={isStopping ? 'Stopping agent…' : 'Stop agent execution'}
+                aria-label={isStopping ? 'Stopping agent execution' : 'Stop agent execution'}
               >
-                <AppIcon icon={CornerUpLeft} size="xs" />
-                follow-up
+                {isStopping ? (
+                  <AppIcon icon={Loader2} size="xs" className="animate-spin" />
+                ) : (
+                  <AppIcon icon={X} size="xs" />
+                )}
+                stop
               </button>
             )}
-            <span className="text-[10px] text-slate-400 font-mono ml-auto">
-              {sendMode === 'steer' ? 'interrupts after current tool' : 'queued for when agent finishes'}
-            </span>
+
+            {showSteerControls && (
+              <span className="text-[10px] text-slate-400 font-mono ml-auto">
+                {sendMode === 'steer' ? 'interrupts after current tool' : 'queued for when agent finishes'}
+              </span>
+            )}
           </div>
         )}
 
