@@ -543,7 +543,7 @@ export function ExecutionPipelineEditor({
       <div className="space-y-3">
         {renderLane('pre')}
 
-        <div className="rounded-xl border-2 border-dashed border-slate-300 bg-white px-3 py-6 text-center text-sm font-medium text-slate-500">
+        <div className="execution-core-divider rounded-xl border-2 border-dashed border-slate-300 px-3 text-center text-sm font-medium text-slate-500">
           Task Execution
         </div>
 

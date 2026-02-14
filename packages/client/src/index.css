@@ -78,6 +78,10 @@
   --color-focus-ring: rgba(100, 116, 139, 0.45);
   --color-focus-offset: var(--color-app-bg);
 
+  --execution-core-divider-bg: #f8fafc;
+  --execution-core-divider-line-strong: rgba(148, 163, 184, 0.24);
+  --execution-core-divider-line-soft: rgba(148, 163, 184, 0.14);
+
   color-scheme: light;
 }
 
@@ -130,6 +134,10 @@
 
   --color-focus-ring: rgba(147, 197, 253, 0.5);
   --color-focus-offset: #020617;
+
+  --execution-core-divider-bg: #0b1220;
+  --execution-core-divider-line-strong: rgba(148, 163, 184, 0.24);
+  --execution-core-divider-line-soft: rgba(100, 116, 139, 0.2);
 }
 
 :root[data-theme='dark'] .bg-white { background-color: var(--color-surface-primary); }
@@ -700,6 +708,29 @@ body {
 /* Active task separator — bottom-most task = currently being worked on */
 .task-separator--active {
   @apply bg-orange-50 border-l-4 border-l-safety-orange;
+}
+
+.execution-core-divider {
+  min-height: 2.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--execution-core-divider-bg);
+  background-image:
+    repeating-linear-gradient(
+      135deg,
+      transparent 0,
+      transparent 8px,
+      var(--execution-core-divider-line-strong) 8px,
+      var(--execution-core-divider-line-strong) 9px
+    ),
+    repeating-linear-gradient(
+      -135deg,
+      transparent 0,
+      transparent 8px,
+      var(--execution-core-divider-line-soft) 8px,
+      var(--execution-core-divider-line-soft) 9px
+    );
 }
 
 /* Chat prose — markdown rendering in chat messages */
