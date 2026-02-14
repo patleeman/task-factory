@@ -3,6 +3,14 @@ import { GripVertical, Settings2, X } from 'lucide-react'
 import type { ExecutionWrapper } from '@pi-factory/shared'
 import type { PostExecutionSkill } from '../types/pi'
 import { AppIcon } from './AppIcon'
+import {
+  buildLaneItems,
+  buildLaneTokens,
+  clampIndex,
+  findDisplayIndexForSkill,
+  parseLaneTokens,
+  type SkillDragPosition,
+} from './execution-pipeline-lane-model'
 import { SkillConfigModal } from './SkillConfigModal'
 
 type Lane = 'pre' | 'post'
@@ -21,15 +29,13 @@ interface ExecutionPipelineEditorProps {
   showSkillConfigControls?: boolean
 }
 
-interface DragPayload {
-  skillId: string
+interface DragPayload extends SkillDragPosition {
   fromLane: Lane
-  fromIndex: number
 }
 
 interface DropTarget {
   lane: Lane
-  index: number
+  displayIndex: number
 }
 
 const DRAG_MIME = 'application/pi-factory-execution-pipeline-skill'
@@ -57,7 +63,8 @@ function parseDragPayload(raw: string): DragPayload | null {
     if (!parsed || typeof parsed !== 'object') return null
     if (typeof parsed.skillId !== 'string') return null
     if (parsed.fromLane !== 'pre' && parsed.fromLane !== 'post') return null
-    if (typeof parsed.fromIndex !== 'number') return null
+    if (typeof parsed.fromSkillIndex !== 'number') return null
+    if (typeof parsed.fromDisplayIndex !== 'number') return null
     return parsed
   } catch {
     return null
@@ -81,8 +88,11 @@ export function ExecutionPipelineEditor({
   const [dragSource, setDragSource] = useState<DragPayload | null>(null)
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null)
   const [configSkillId, setConfigSkillId] = useState<string | null>(null)
+  const [preMarkerIndex, setPreMarkerIndex] = useState(0)
+  const [postMarkerIndex, setPostMarkerIndex] = useState(selectedSkillIds.length)
   const dragSourceRef = useRef<DragPayload | null>(null)
   const dragNodeRef = useRef<HTMLDivElement | null>(null)
+  const previousWrapperIdRef = useRef(selectedWrapperId)
 
   const skillById = useMemo(() => {
     const map = new Map<string, PostExecutionSkill>()
@@ -116,17 +126,29 @@ export function ExecutionPipelineEditor({
     ? skillById.get(configSkillId) ?? null
     : null
 
+  const hasWrapper = Boolean(selectedWrapper)
+
   useEffect(() => {
     if (configSkillId && !selectedSkillIds.includes(configSkillId)) {
       setConfigSkillId(null)
     }
   }, [configSkillId, selectedSkillIds])
 
-  const clearWrapperIfNeeded = useCallback(() => {
-    if (selectedWrapperId) {
-      onWrapperChange('')
+  useEffect(() => {
+    const previousWrapperId = previousWrapperIdRef.current
+    if (selectedWrapperId && selectedWrapperId !== previousWrapperId) {
+      setPreMarkerIndex(0)
+      setPostMarkerIndex(selectedSkillIds.length)
     }
-  }, [onWrapperChange, selectedWrapperId])
+    previousWrapperIdRef.current = selectedWrapperId
+  }, [selectedSkillIds.length, selectedWrapperId])
+
+  useEffect(() => {
+    if (!hasWrapper) return
+
+    setPreMarkerIndex((previous) => clampIndex(previous, selectedPreSkillIds.length))
+    setPostMarkerIndex((previous) => clampIndex(previous, selectedSkillIds.length))
+  }, [hasWrapper, selectedPreSkillIds.length, selectedSkillIds.length])
 
   const resetDragState = useCallback(() => {
     if (dragNodeRef.current) {
@@ -138,51 +160,64 @@ export function ExecutionPipelineEditor({
     setDropTarget(null)
   }, [])
 
-  const moveSkill = useCallback((payload: DragPayload, toLane: Lane, toIndex: number) => {
-    const fromSkills = payload.fromLane === 'pre' ? selectedPreSkillIds : selectedSkillIds
-    const targetSkills = toLane === 'pre' ? selectedPreSkillIds : selectedSkillIds
+  const getLaneTokens = useCallback((lane: Lane) => {
+    if (lane === 'pre') {
+      return buildLaneTokens(selectedPreSkillIds, preMarkerIndex, hasWrapper)
+    }
+    return buildLaneTokens(selectedSkillIds, postMarkerIndex, hasWrapper)
+  }, [hasWrapper, postMarkerIndex, preMarkerIndex, selectedPreSkillIds, selectedSkillIds])
 
-    const sourceIndex = fromSkills[payload.fromIndex] === payload.skillId
-      ? payload.fromIndex
-      : fromSkills.indexOf(payload.skillId)
+  const applyLaneTokens = useCallback((lane: Lane, tokens: string[]) => {
+    const parsed = parseLaneTokens(tokens, hasWrapper)
 
-    if (sourceIndex === -1) return
-
-    if (payload.fromLane === toLane) {
-      const reordered = [...fromSkills]
-      const [movedSkillId] = reordered.splice(sourceIndex, 1)
-
-      let insertAt = sourceIndex < toIndex ? toIndex - 1 : toIndex
-      insertAt = Math.max(0, Math.min(insertAt, reordered.length))
-
-      if (insertAt === sourceIndex) return
-      reordered.splice(insertAt, 0, movedSkillId)
-      clearWrapperIfNeeded()
-
-      if (toLane === 'pre') {
-        onPreSkillsChange(reordered)
-      } else {
-        onPostSkillsChange(reordered)
+    if (lane === 'pre') {
+      onPreSkillsChange(parsed.skillIds)
+      if (hasWrapper) {
+        setPreMarkerIndex(parsed.markerIndex)
       }
+    } else {
+      onPostSkillsChange(parsed.skillIds)
+      if (hasWrapper) {
+        setPostMarkerIndex(parsed.markerIndex)
+      }
+    }
+  }, [hasWrapper, onPostSkillsChange, onPreSkillsChange])
+
+  const moveSkill = useCallback((payload: DragPayload, toLane: Lane, toDisplayIndex: number) => {
+    if (payload.fromLane === toLane) {
+      const laneTokens = getLaneTokens(toLane)
+      const sourceDisplayIndex = findDisplayIndexForSkill(laneTokens, payload)
+      if (sourceDisplayIndex === -1) return
+
+      const reordered = [...laneTokens]
+      reordered.splice(sourceDisplayIndex, 1)
+
+      let insertAt = toDisplayIndex
+      if (sourceDisplayIndex < toDisplayIndex) {
+        insertAt -= 1
+      }
+
+      insertAt = clampIndex(insertAt, reordered.length)
+      reordered.splice(insertAt, 0, payload.skillId)
+      applyLaneTokens(toLane, reordered)
       return
     }
 
-    const sourceAfterRemoval = [...fromSkills]
-    sourceAfterRemoval.splice(sourceIndex, 1)
+    const sourceTokens = getLaneTokens(payload.fromLane)
+    const sourceDisplayIndex = findDisplayIndexForSkill(sourceTokens, payload)
+    if (sourceDisplayIndex === -1) return
 
-    const targetAfterInsert = [...targetSkills]
-    const insertAt = Math.max(0, Math.min(toIndex, targetAfterInsert.length))
+    const sourceAfterRemoval = [...sourceTokens]
+    sourceAfterRemoval.splice(sourceDisplayIndex, 1)
+
+    const targetTokens = getLaneTokens(toLane)
+    const targetAfterInsert = [...targetTokens]
+    const insertAt = clampIndex(toDisplayIndex, targetAfterInsert.length)
     targetAfterInsert.splice(insertAt, 0, payload.skillId)
-    clearWrapperIfNeeded()
 
-    if (payload.fromLane === 'pre') {
-      onPreSkillsChange(sourceAfterRemoval)
-      onPostSkillsChange(targetAfterInsert)
-    } else {
-      onPostSkillsChange(sourceAfterRemoval)
-      onPreSkillsChange(targetAfterInsert)
-    }
-  }, [clearWrapperIfNeeded, onPostSkillsChange, onPreSkillsChange, selectedPreSkillIds, selectedSkillIds])
+    applyLaneTokens(payload.fromLane, sourceAfterRemoval)
+    applyLaneTokens(toLane, targetAfterInsert)
+  }, [applyLaneTokens, getLaneTokens])
 
   const readDragPayload = useCallback((e: React.DragEvent): DragPayload | null => {
     const raw = e.dataTransfer.getData(DRAG_MIME)
@@ -208,57 +243,58 @@ export function ExecutionPipelineEditor({
     })
   }, [])
 
-  const handleSlotDragOver = useCallback((e: React.DragEvent<HTMLDivElement>, lane: Lane, index: number) => {
+  const handleSlotDragOver = useCallback((e: React.DragEvent<HTMLDivElement>, lane: Lane, displayIndex: number) => {
     e.preventDefault()
     e.dataTransfer.dropEffect = 'move'
-    setDropTarget((prev) => {
-      if (prev?.lane === lane && prev.index === index) return prev
-      return { lane, index }
+    setDropTarget((previous) => {
+      if (previous?.lane === lane && previous.displayIndex === displayIndex) return previous
+      return { lane, displayIndex }
     })
   }, [])
 
-  const handleSlotDrop = useCallback((e: React.DragEvent<HTMLDivElement>, lane: Lane, index: number) => {
+  const handleSlotDrop = useCallback((e: React.DragEvent<HTMLDivElement>, lane: Lane, displayIndex: number) => {
     e.preventDefault()
     const payload = readDragPayload(e)
     if (payload) {
-      moveSkill(payload, lane, index)
+      moveSkill(payload, lane, displayIndex)
     }
     resetDragState()
   }, [moveSkill, readDragPayload, resetDragState])
 
-  const getCardDropIndex = useCallback((e: React.DragEvent<HTMLDivElement>, index: number) => {
+  const getCardDropIndex = useCallback((e: React.DragEvent<HTMLDivElement>, displayIndex: number) => {
     const rect = e.currentTarget.getBoundingClientRect()
     const midpoint = rect.top + rect.height / 2
-    return e.clientY < midpoint ? index : index + 1
+    return e.clientY < midpoint ? displayIndex : displayIndex + 1
   }, [])
 
-  const handleCardDragOver = useCallback((e: React.DragEvent<HTMLDivElement>, lane: Lane, index: number) => {
+  const handleCardDragOver = useCallback((e: React.DragEvent<HTMLDivElement>, lane: Lane, displayIndex: number) => {
     e.preventDefault()
     e.dataTransfer.dropEffect = 'move'
-    const dropIndex = getCardDropIndex(e, index)
-    setDropTarget((prev) => {
-      if (prev?.lane === lane && prev.index === dropIndex) return prev
-      return { lane, index: dropIndex }
+    const dropDisplayIndex = getCardDropIndex(e, displayIndex)
+    setDropTarget((previous) => {
+      if (previous?.lane === lane && previous.displayIndex === dropDisplayIndex) return previous
+      return { lane, displayIndex: dropDisplayIndex }
     })
   }, [getCardDropIndex])
 
-  const handleCardDrop = useCallback((e: React.DragEvent<HTMLDivElement>, lane: Lane, index: number) => {
+  const handleCardDrop = useCallback((e: React.DragEvent<HTMLDivElement>, lane: Lane, displayIndex: number) => {
     e.preventDefault()
     const payload = readDragPayload(e)
     if (payload) {
-      moveSkill(payload, lane, getCardDropIndex(e, index))
+      moveSkill(payload, lane, getCardDropIndex(e, displayIndex))
     }
     resetDragState()
   }, [getCardDropIndex, moveSkill, readDragPayload, resetDragState])
 
-  const handleRemoveSkill = useCallback((lane: Lane, index: number) => {
-    clearWrapperIfNeeded()
-    if (lane === 'pre') {
-      onPreSkillsChange(selectedPreSkillIds.filter((_, i) => i !== index))
-    } else {
-      onPostSkillsChange(selectedSkillIds.filter((_, i) => i !== index))
-    }
-  }, [clearWrapperIfNeeded, onPostSkillsChange, onPreSkillsChange, selectedPreSkillIds, selectedSkillIds])
+  const handleRemoveSkill = useCallback((lane: Lane, payload: DragPayload) => {
+    const laneTokens = getLaneTokens(lane)
+    const sourceDisplayIndex = findDisplayIndexForSkill(laneTokens, payload)
+    if (sourceDisplayIndex === -1) return
+
+    const nextTokens = [...laneTokens]
+    nextTokens.splice(sourceDisplayIndex, 1)
+    applyLaneTokens(lane, nextTokens)
+  }, [applyLaneTokens, getLaneTokens])
 
   const handleAddSelection = useCallback(() => {
     const parsed = parseSelection(selection)
@@ -266,7 +302,6 @@ export function ExecutionPipelineEditor({
 
     if (parsed.type === 'skill') {
       if (!selectedSkillSet.has(parsed.id)) {
-        clearWrapperIfNeeded()
         onPostSkillsChange([...selectedSkillIds, parsed.id])
       }
       setSelection('')
@@ -276,11 +311,16 @@ export function ExecutionPipelineEditor({
     const wrapper = wrapperById.get(parsed.id)
     if (!wrapper) return
 
+    const nextPreSkills = dedupeSkillIds(wrapper.preExecutionSkills)
+    const nextPostSkills = dedupeSkillIds(wrapper.postExecutionSkills)
+
     onWrapperChange(wrapper.id)
-    onPreSkillsChange(dedupeSkillIds(wrapper.preExecutionSkills))
-    onPostSkillsChange(dedupeSkillIds(wrapper.postExecutionSkills))
+    onPreSkillsChange(nextPreSkills)
+    onPostSkillsChange(nextPostSkills)
+    setPreMarkerIndex(0)
+    setPostMarkerIndex(nextPostSkills.length)
     setSelection('')
-  }, [clearWrapperIfNeeded, onPostSkillsChange, onPreSkillsChange, onWrapperChange, selection, selectedSkillIds, selectedSkillSet, wrapperById])
+  }, [onPostSkillsChange, onPreSkillsChange, onWrapperChange, selection, selectedSkillIds, selectedSkillSet, wrapperById])
 
   const handleConfigSave = useCallback((values: Record<string, string>) => {
     if (!configSkillId || !onSkillConfigChange) return
@@ -296,13 +336,13 @@ export function ExecutionPipelineEditor({
     setConfigSkillId(null)
   }, [configSkillId, onSkillConfigChange, skillConfigs])
 
-  const renderDropSlot = (lane: Lane, index: number) => {
-    const isActive = dropTarget?.lane === lane && dropTarget.index === index
+  const renderDropSlot = (lane: Lane, displayIndex: number) => {
+    const isActive = dropTarget?.lane === lane && dropTarget.displayIndex === displayIndex
     return (
       <div
-        key={`slot-${lane}-${index}`}
-        onDragOver={(e) => handleSlotDragOver(e, lane, index)}
-        onDrop={(e) => handleSlotDrop(e, lane, index)}
+        key={`slot-${lane}-${displayIndex}`}
+        onDragOver={(e) => handleSlotDragOver(e, lane, displayIndex)}
+        onDrop={(e) => handleSlotDrop(e, lane, displayIndex)}
         className="h-2 flex items-center"
       >
         <div className={`w-full border-t-2 rounded-full transition-colors ${
@@ -312,7 +352,7 @@ export function ExecutionPipelineEditor({
     )
   }
 
-  const renderSkillCard = (lane: Lane, skillId: string, index: number) => {
+  const renderSkillCard = (lane: Lane, skillId: string, skillIndex: number, displayIndex: number) => {
     const skill = skillById.get(skillId)
     const isPostLane = lane === 'post'
     const hasConfig = Boolean(
@@ -323,16 +363,23 @@ export function ExecutionPipelineEditor({
       && skill.configSchema.length > 0,
     )
     const isConfigured = Boolean(skillConfigs[skillId] && Object.keys(skillConfigs[skillId]).length > 0)
-    const isDragging = dragSource?.fromLane === lane && dragSource.fromIndex === index
+    const isDragging = dragSource?.fromLane === lane && dragSource.fromDisplayIndex === displayIndex
+
+    const dragPayload: DragPayload = {
+      skillId,
+      fromLane: lane,
+      fromSkillIndex: skillIndex,
+      fromDisplayIndex: displayIndex,
+    }
 
     return (
       <div
-        key={`${lane}-${skillId}-${index}`}
+        key={`${lane}-${skillId}-${displayIndex}`}
         draggable
-        onDragStart={(e) => handleDragStart(e, { skillId, fromLane: lane, fromIndex: index })}
+        onDragStart={(e) => handleDragStart(e, dragPayload)}
         onDragEnd={resetDragState}
-        onDragOver={(e) => handleCardDragOver(e, lane, index)}
-        onDrop={(e) => handleCardDrop(e, lane, index)}
+        onDragOver={(e) => handleCardDragOver(e, lane, displayIndex)}
+        onDrop={(e) => handleCardDrop(e, lane, displayIndex)}
         className={`flex items-center gap-2 rounded-lg border p-2.5 cursor-grab active:cursor-grabbing transition-colors ${
           lane === 'pre'
             ? 'border-blue-200 bg-blue-50'
@@ -349,7 +396,7 @@ export function ExecutionPipelineEditor({
         <span className={`w-5 h-5 rounded-full text-[10px] font-bold text-white flex items-center justify-center ${
           lane === 'pre' ? 'bg-blue-500' : 'bg-orange-500'
         }`}>
-          {index + 1}
+          {skillIndex + 1}
         </span>
 
         <span className="text-[10px] font-mono text-slate-400 shrink-0">
@@ -388,7 +435,7 @@ export function ExecutionPipelineEditor({
           type="button"
           onClick={(e) => {
             e.stopPropagation()
-            handleRemoveSkill(lane, index)
+            handleRemoveSkill(lane, dragPayload)
           }}
           className={`w-5 h-5 rounded-full text-xs flex items-center justify-center transition-colors ${
             lane === 'pre'
@@ -404,8 +451,47 @@ export function ExecutionPipelineEditor({
     )
   }
 
+  const renderWrapperMarker = (lane: Lane, displayIndex: number) => {
+    if (!selectedWrapper) return null
+
+    const isPreLane = lane === 'pre'
+    return (
+      <div
+        key={`${lane}-wrapper-marker`}
+        onDragOver={(e) => handleCardDragOver(e, lane, displayIndex)}
+        onDrop={(e) => handleCardDrop(e, lane, displayIndex)}
+        className="flex items-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2"
+      >
+        <div className="min-w-0 flex-1">
+          <div className="text-xs font-semibold text-violet-700">
+            {isPreLane ? 'Wrapper Start' : 'Wrapper End'} · {selectedWrapper.name}
+          </div>
+          {isPreLane && (
+            <div className="text-[11px] text-violet-600 truncate">
+              {selectedWrapper.description}
+            </div>
+          )}
+        </div>
+
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation()
+            onWrapperChange('')
+          }}
+          className="text-[11px] text-violet-500 hover:text-violet-700"
+          title="Remove wrapper markers"
+        >
+          Remove
+        </button>
+      </div>
+    )
+  }
+
   const renderLane = (lane: Lane) => {
     const skillIds = lane === 'pre' ? selectedPreSkillIds : selectedSkillIds
+    const markerIndex = lane === 'pre' ? preMarkerIndex : postMarkerIndex
+    const items = buildLaneItems(skillIds, markerIndex, hasWrapper)
 
     return (
       <div className="rounded-xl border border-slate-200 bg-white p-3">
@@ -419,7 +505,7 @@ export function ExecutionPipelineEditor({
         </div>
 
         <div className="mt-2">
-          {skillIds.length === 0 && (
+          {items.length === 0 && (
             <div
               onDragOver={(e) => handleSlotDragOver(e, lane, 0)}
               onDrop={(e) => handleSlotDrop(e, lane, 0)}
@@ -429,15 +515,17 @@ export function ExecutionPipelineEditor({
             </div>
           )}
 
-          {skillIds.length > 0 && (
+          {items.length > 0 && (
             <div className="space-y-1">
-              {skillIds.map((skillId, index) => (
-                <Fragment key={`${lane}-${skillId}-${index}`}>
-                  {renderDropSlot(lane, index)}
-                  {renderSkillCard(lane, skillId, index)}
+              {items.map((item, displayIndex) => (
+                <Fragment key={`${lane}-${item.type === 'marker' ? `marker-${displayIndex}` : `${item.skillId}-${displayIndex}`}`}>
+                  {renderDropSlot(lane, displayIndex)}
+                  {item.type === 'marker'
+                    ? renderWrapperMarker(lane, displayIndex)
+                    : renderSkillCard(lane, item.skillId, item.skillIndex, displayIndex)}
                 </Fragment>
               ))}
-              {renderDropSlot(lane, skillIds.length)}
+              {renderDropSlot(lane, items.length)}
             </div>
           )}
         </div>
@@ -514,32 +602,7 @@ export function ExecutionPipelineEditor({
         </p>
       )}
 
-      {selectedWrapper && (
-        <div className="rounded-lg border border-violet-200 bg-violet-50 px-3 py-2">
-          <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <div className="text-xs font-semibold text-violet-700">Wrapper Start · {selectedWrapper.name}</div>
-              <div className="text-[11px] text-violet-600 truncate">{selectedWrapper.description}</div>
-            </div>
-            <button
-              type="button"
-              onClick={() => onWrapperChange('')}
-              className="text-[11px] text-violet-500 hover:text-violet-700"
-              title="Remove wrapper markers"
-            >
-              Remove
-            </button>
-          </div>
-        </div>
-      )}
-
       {executionCore}
-
-      {selectedWrapper && (
-        <div className="rounded-lg border border-violet-200 bg-violet-50 px-3 py-2">
-          <div className="text-xs font-semibold text-violet-700">Wrapper End · {selectedWrapper.name}</div>
-        </div>
-      )}
 
       {configSkill && showSkillConfigControls && onSkillConfigChange && (
         <SkillConfigModal
