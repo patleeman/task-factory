@@ -563,7 +563,7 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
             )}
           </div>
 
-          <AttachmentsSection task={task} workspaceId={workspaceId} />
+          <AttachmentsSection task={task} workspaceId={workspaceId} isEditing={isEditing} />
         </div>
       </section>
 
@@ -922,7 +922,7 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-function AttachmentsSection({ task, workspaceId }: { task: Task; workspaceId: string }) {
+export function AttachmentsSection({ task, workspaceId, isEditing }: { task: Task; workspaceId: string; isEditing: boolean }) {
   const [isUploading, setIsUploading] = useState(false)
   const [isDragOver, setIsDragOver] = useState(false)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
@@ -933,7 +933,15 @@ function AttachmentsSection({ task, workspaceId }: { task: Task; workspaceId: st
   const [initialWhiteboardScene, setInitialWhiteboardScene] = useState<WhiteboardSceneSnapshot | null>(null)
   const attachments = task.frontmatter.attachments || []
 
+  useEffect(() => {
+    if (isEditing) return
+    setIsDragOver(false)
+    setIsWhiteboardModalOpen(false)
+  }, [isEditing])
+
   const handleUpload = useCallback(async (files: FileList | File[]) => {
+    if (!isEditing) return
+
     const fileArray = Array.from(files)
     if (fileArray.length === 0) return
 
@@ -945,13 +953,15 @@ function AttachmentsSection({ task, workspaceId }: { task: Task; workspaceId: st
     } finally {
       setIsUploading(false)
     }
-  }, [workspaceId, task.id])
+  }, [workspaceId, task.id, isEditing])
 
   const handleWhiteboardSceneChange = useCallback((scene: WhiteboardSceneSnapshot) => {
     whiteboardSceneRef.current = scene
   }, [])
 
   const attachWhiteboard = useCallback(async () => {
+    if (!isEditing) return
+
     const scene = whiteboardSceneRef.current
     if (!scene || !hasWhiteboardContent(scene)) return
     setIsAttachingWhiteboard(true)
@@ -966,10 +976,12 @@ function AttachmentsSection({ task, workspaceId }: { task: Task; workspaceId: st
     } finally {
       setIsAttachingWhiteboard(false)
     }
-  }, [workspaceId, task.id])
+  }, [workspaceId, task.id, isEditing])
 
   const handleDelete = async (attachmentId: string) => {
+    if (!isEditing) return
     if (!confirm('Delete this attachment?')) return
+
     try {
       await api.deleteAttachment(workspaceId, task.id, attachmentId)
     } catch (err) {
@@ -978,24 +990,31 @@ function AttachmentsSection({ task, workspaceId }: { task: Task; workspaceId: st
   }
 
   const handleDragOver = (e: React.DragEvent) => {
+    if (!isEditing) return
     e.preventDefault()
     e.stopPropagation()
     setIsDragOver(true)
   }
 
   const handleDragLeave = (e: React.DragEvent) => {
+    if (!isEditing) return
     e.preventDefault()
     e.stopPropagation()
     setIsDragOver(false)
   }
 
   const handleDrop = (e: React.DragEvent) => {
+    if (!isEditing) return
     e.preventDefault()
     e.stopPropagation()
     setIsDragOver(false)
     if (e.dataTransfer.files.length > 0) {
       void handleUpload(e.dataTransfer.files)
     }
+  }
+
+  if (!isEditing && attachments.length === 0) {
+    return null
   }
 
   return (
@@ -1007,40 +1026,42 @@ function AttachmentsSection({ task, workspaceId }: { task: Task; workspaceId: st
             <span className="ml-1.5 text-slate-400 font-normal">({attachments.length})</span>
           )}
         </h3>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => { setInitialWhiteboardScene(whiteboardSceneRef.current); setIsWhiteboardModalOpen(true) }}
-            className="text-xs text-violet-600 hover:text-violet-800 font-medium"
-          >
-            + Add Excalidraw
-          </button>
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isUploading}
-            className="text-xs text-blue-600 hover:text-blue-800 font-medium disabled:opacity-50"
-          >
-            {isUploading ? 'Uploading...' : '+ Add Files'}
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            accept="image/*,.pdf,.txt,.md,.json,.csv,.log"
-            className="hidden"
-            onChange={(e) => {
-              if (e.target.files) {
-                void handleUpload(e.target.files)
-              }
-              e.target.value = ''
-            }}
-          />
-        </div>
+        {isEditing && (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => { setInitialWhiteboardScene(whiteboardSceneRef.current); setIsWhiteboardModalOpen(true) }}
+              className="text-xs text-violet-600 hover:text-violet-800 font-medium"
+            >
+              + Add Excalidraw
+            </button>
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isUploading}
+              className="text-xs text-blue-600 hover:text-blue-800 font-medium disabled:opacity-50"
+            >
+              {isUploading ? 'Uploading...' : '+ Add Files'}
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept="image/*,.pdf,.txt,.md,.json,.csv,.log"
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files) {
+                  void handleUpload(e.target.files)
+                }
+                e.target.value = ''
+              }}
+            />
+          </div>
+        )}
       </div>
 
       {/* Drop zone (shown when no attachments or dragging) */}
-      {(attachments.length === 0 || isDragOver) && (
+      {isEditing && (attachments.length === 0 || isDragOver) && (
         <div
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
@@ -1066,9 +1087,9 @@ function AttachmentsSection({ task, workspaceId }: { task: Task; workspaceId: st
       {attachments.length > 0 && (
         <div
           className="grid grid-cols-3 gap-2"
-          onDragOver={handleDragOver}
-          onDragLeave={handleDragLeave}
-          onDrop={handleDrop}
+          onDragOver={isEditing ? handleDragOver : undefined}
+          onDragLeave={isEditing ? handleDragLeave : undefined}
+          onDrop={isEditing ? handleDrop : undefined}
         >
           {attachments.map((att) => {
             const url = api.getAttachmentUrl(workspaceId, task.id, att.storedName)
@@ -1111,15 +1132,16 @@ function AttachmentsSection({ task, workspaceId }: { task: Task; workspaceId: st
                   <p className="text-[10px] text-white/70">{formatFileSize(att.size)}</p>
                 </div>
 
-                {/* Delete button */}
-                <button
-                  onClick={() => handleDelete(att.id)}
-                  className="absolute top-1 right-1 w-5 h-5 rounded-full bg-red-500 text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600"
-                  title="Delete attachment"
-                  aria-label="Delete attachment"
-                >
-                  <AppIcon icon={X} size="xs" />
-                </button>
+                {isEditing && (
+                  <button
+                    onClick={() => handleDelete(att.id)}
+                    className="absolute top-1 right-1 w-5 h-5 rounded-full bg-red-500 text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600"
+                    title="Delete attachment"
+                    aria-label="Delete attachment"
+                  >
+                    <AppIcon icon={X} size="xs" />
+                  </button>
+                )}
               </div>
             )
           })}
@@ -1150,7 +1172,7 @@ function AttachmentsSection({ task, workspaceId }: { task: Task; workspaceId: st
       )}
 
       {/* Excalidraw modal */}
-      {isWhiteboardModalOpen && (
+      {isEditing && isWhiteboardModalOpen && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
           onClick={() => setIsWhiteboardModalOpen(false)}
