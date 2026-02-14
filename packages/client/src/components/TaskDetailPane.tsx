@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { ArrowLeft, ArrowRight, Check, ChevronDown, ChevronRight, ExternalLink, RotateCcw, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Check, ChevronDown, ChevronRight, ExternalLink, Plus, RotateCcw, Trash2, X } from 'lucide-react'
 import type { Task, Phase, ModelConfig, ExecutionWrapper, PostExecutionSummary as PostExecutionSummaryType } from '@pi-factory/shared'
 import { PHASES, PHASE_DISPLAY_NAMES, getPromotePhase, getDemotePhase } from '@pi-factory/shared'
 import { AppIcon } from './AppIcon'
@@ -282,7 +282,13 @@ export function TaskDetailPane({
 function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditing, editedTitle, setEditedTitle, editedContent, setEditedContent, editedCriteria, setEditedCriteria, editedPlanningModelConfig, setEditedPlanningModelConfig, editedExecutionModelConfig, setEditedExecutionModelConfig, selectedPreSkillIds, setSelectedPreSkillIds, selectedSkillIds, setSelectedSkillIds, editedSkillConfigs, setEditedSkillConfigs, availableSkills, availableWrappers, selectedWrapperId, setSelectedWrapperId, missingAcceptanceCriteria, isPlanGenerating, onSaveEdit, onDelete }: any) {
   const isCompleted = frontmatter.phase === 'complete' || frontmatter.phase === 'archived'
   const hasSummary = Boolean(task.frontmatter.postExecutionSummary)
-  const displayAcceptanceCriteria = normalizeAcceptanceCriteria(frontmatter.acceptanceCriteria)
+  const normalizedFrontmatterCriteria = normalizeAcceptanceCriteria(frontmatter.acceptanceCriteria)
+  const frontmatterCriteriaSignature = JSON.stringify(normalizedFrontmatterCriteria)
+  const [criteriaDraftItems, setCriteriaDraftItems] = useState<string[]>(() => normalizedFrontmatterCriteria)
+  const displayAcceptanceCriteria = isEditing ? normalizedFrontmatterCriteria : criteriaDraftItems
+  const [isCriteriaEditing, setIsCriteriaEditing] = useState(false)
+  const [isSavingCriteria, setIsSavingCriteria] = useState(false)
+  const [criteriaEditError, setCriteriaEditError] = useState<string | null>(null)
   const [isRegeneratingPlan, setIsRegeneratingPlan] = useState(false)
   const [planRegenerationError, setPlanRegenerationError] = useState<string | null>(null)
   const [isRegeneratingCriteria, setIsRegeneratingCriteria] = useState(false)
@@ -308,7 +314,79 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
     setIsRegeneratingPlan(false)
     setCriteriaRegenerationError(null)
     setIsRegeneratingCriteria(false)
-  }, [task.id, frontmatter.plan?.generatedAt, frontmatter.planningStatus, frontmatter.acceptanceCriteria])
+  }, [task.id, frontmatter.plan?.generatedAt, frontmatter.planningStatus, frontmatterCriteriaSignature])
+
+  useEffect(() => {
+    setCriteriaDraftItems(normalizedFrontmatterCriteria)
+    setIsCriteriaEditing(false)
+    setCriteriaEditError(null)
+    setIsSavingCriteria(false)
+  }, [task.id, frontmatterCriteriaSignature])
+
+  useEffect(() => {
+    if (!isEditing) return
+    setIsCriteriaEditing(false)
+    setCriteriaEditError(null)
+  }, [isEditing])
+
+  const handleStartCriteriaEdit = () => {
+    setCriteriaRegenerationError(null)
+    setCriteriaEditError(null)
+    setCriteriaDraftItems(normalizedFrontmatterCriteria)
+    setIsCriteriaEditing(true)
+  }
+
+  const handleCriteriaItemChange = (index: number, value: string) => {
+    setCriteriaDraftItems((previous) => previous.map((item, itemIndex) => (
+      itemIndex === index ? value : item
+    )))
+  }
+
+  const handleAddCriteriaItem = () => {
+    setCriteriaDraftItems((previous) => [...previous, ''])
+  }
+
+  const handleDeleteCriteriaItem = (index: number) => {
+    setCriteriaDraftItems((previous) => previous.filter((_, itemIndex) => itemIndex !== index))
+  }
+
+  const handleCancelCriteriaEdit = () => {
+    setCriteriaDraftItems(normalizedFrontmatterCriteria)
+    setCriteriaEditError(null)
+    setIsCriteriaEditing(false)
+  }
+
+  const handleSaveCriteriaEdit = async () => {
+    setCriteriaEditError(null)
+    setIsSavingCriteria(true)
+
+    const sanitizedCriteria = normalizeCriteriaDraftItems(criteriaDraftItems)
+
+    try {
+      const response = await fetch(`/api/workspaces/${workspaceId}/tasks/${task.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ acceptanceCriteria: sanitizedCriteria }),
+      })
+
+      if (!response.ok) {
+        throw new Error(await parseResponseError(response, 'Failed to save acceptance criteria'))
+      }
+
+      const updatedTask = await response.json().catch(() => null)
+      const updatedCriteria = normalizeAcceptanceCriteria(
+        updatedTask?.frontmatter?.acceptanceCriteria ?? sanitizedCriteria,
+      )
+
+      setCriteriaDraftItems(updatedCriteria)
+      setEditedCriteria(formatAcceptanceCriteriaForEditor(updatedCriteria))
+      setIsCriteriaEditing(false)
+    } catch (err) {
+      setCriteriaEditError(err instanceof Error ? err.message : 'Failed to save acceptance criteria')
+    } finally {
+      setIsSavingCriteria(false)
+    }
+  }
 
   const handleRegeneratePlan = async () => {
     setPlanRegenerationError(null)
@@ -612,32 +690,107 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
           )}
 
           <div className={missingAcceptanceCriteria ? 'rounded-lg border-2 border-red-300 bg-red-50 p-3 -mx-1' : ''}>
-            <div className="mb-2 flex items-center justify-between gap-3">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
               <h3 className={`text-xs font-semibold uppercase tracking-wide ${missingAcceptanceCriteria ? 'text-red-600' : 'text-slate-500'}`}>
                 {missingAcceptanceCriteria && <span className="mr-1 text-red-500">!</span>}Acceptance Criteria
               </h3>
               {!isEditing && (
-                <button
-                  onClick={handleRegenerateAcceptanceCriteria}
-                  disabled={isRegeneratingCriteria}
-                  className="btn text-xs py-1 px-2.5 bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1"
-                >
-                  {isRegeneratingCriteria ? (
-                    'Regenerating…'
+                <div className="flex flex-wrap items-center gap-2">
+                  {isCriteriaEditing ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={handleAddCriteriaItem}
+                        disabled={isSavingCriteria}
+                        className="btn text-xs py-1 px-2.5 bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 inline-flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <AppIcon icon={Plus} size="xs" />
+                        Add Item
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleCancelCriteriaEdit}
+                        disabled={isSavingCriteria}
+                        className="btn text-xs py-1 px-2.5 bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleSaveCriteriaEdit()}
+                        disabled={isSavingCriteria}
+                        className="btn text-xs py-1 px-2.5 bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {isSavingCriteria ? 'Saving…' : 'Save Criteria'}
+                      </button>
+                    </>
                   ) : (
                     <>
-                      <AppIcon icon={RotateCcw} size="xs" />
-                      Regenerate Criteria
+                      <button
+                        type="button"
+                        onClick={handleStartCriteriaEdit}
+                        className="btn text-xs py-1 px-2.5 bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"
+                      >
+                        Edit Criteria
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleRegenerateAcceptanceCriteria}
+                        disabled={isRegeneratingCriteria}
+                        className="btn text-xs py-1 px-2.5 bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1"
+                      >
+                        {isRegeneratingCriteria ? (
+                          'Regenerating…'
+                        ) : (
+                          <>
+                            <AppIcon icon={RotateCcw} size="xs" />
+                            Regenerate Criteria
+                          </>
+                        )}
+                      </button>
                     </>
                   )}
-                </button>
+                </div>
               )}
             </div>
-            {criteriaRegenerationError && !isEditing && (
+            {criteriaRegenerationError && !isEditing && !isCriteriaEditing && (
               <p className="text-xs text-red-600 mb-2">{criteriaRegenerationError}</p>
+            )}
+            {criteriaEditError && !isEditing && isCriteriaEditing && (
+              <p className="text-xs text-red-600 mb-2">{criteriaEditError}</p>
             )}
             {isEditing ? (
               <MarkdownEditor value={editedCriteria} onChange={setEditedCriteria} placeholder="One criterion per line" minHeight="160px" />
+            ) : isCriteriaEditing ? (
+              <div className="space-y-2">
+                {criteriaDraftItems.length === 0 && (
+                  <p className="text-sm italic text-slate-400">No criteria yet. Add an item to get started.</p>
+                )}
+                {criteriaDraftItems.map((criteria: string, i: number) => (
+                  <div key={`criteria-edit-${i}`} className="flex items-start gap-2">
+                    <span className="w-5 h-5 rounded border border-slate-300 flex items-center justify-center text-[10px] text-slate-400 shrink-0 mt-2">{i + 1}</span>
+                    <textarea
+                      value={criteria}
+                      onChange={(event) => handleCriteriaItemChange(i, event.target.value)}
+                      rows={2}
+                      disabled={isSavingCriteria}
+                      className="flex-1 rounded-md border border-slate-300 bg-white px-2.5 py-2 text-sm text-slate-700 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
+                      placeholder={`Criterion ${i + 1}`}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteCriteriaItem(i)}
+                      disabled={isSavingCriteria}
+                      className="mt-1 inline-flex items-center gap-1 rounded-md border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-medium text-red-600 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                      title={`Delete criterion ${i + 1}`}
+                      aria-label={`Delete criterion ${i + 1}`}
+                    >
+                      <AppIcon icon={Trash2} size="xs" />
+                      Delete
+                    </button>
+                  </div>
+                ))}
+              </div>
             ) : displayAcceptanceCriteria.length > 0 ? (
               <ul className="space-y-1.5">
                 {displayAcceptanceCriteria.map((criteria: string, i: number) => (
@@ -1158,6 +1311,25 @@ function formatCriterionValue(value: unknown): string {
 
 function formatAcceptanceCriteriaForEditor(criteria: unknown): string {
   return normalizeAcceptanceCriteria(criteria).join('\n')
+}
+
+function normalizeCriteriaDraftItems(criteriaItems: string[]): string[] {
+  return criteriaItems
+    .map((criterion) => criterion.trim())
+    .filter(Boolean)
+}
+
+async function parseResponseError(response: Response, fallback: string): Promise<string> {
+  try {
+    const body = await response.json() as { error?: unknown }
+    if (typeof body.error === 'string' && body.error.trim()) {
+      return body.error
+    }
+  } catch {
+    // ignore JSON parse errors and use fallback below
+  }
+
+  return `${fallback} (${response.status})`
 }
 
 function formatDuration(seconds: number): string {

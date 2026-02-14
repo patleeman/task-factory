@@ -240,6 +240,32 @@ describe('acceptance criteria normalization', () => {
     expect(persisted.frontmatter.acceptanceCriteria).toEqual(['keep me']);
   });
 
+  it('supports criteria-only updates without changing title or content', () => {
+    const { workspacePath, tasksDir } = createTempWorkspace();
+
+    const created = createTaskFile(workspacePath, tasksDir, {
+      title: 'Keep title stable',
+      content: 'keep this body',
+      acceptanceCriteria: ['existing criterion'],
+    });
+
+    const originalTitle = created.frontmatter.title;
+    const originalContent = created.content;
+
+    const updated = updateTask(created, {
+      acceptanceCriteria: ['  first item  ', '', 'second item'],
+    });
+
+    expect(updated.frontmatter.title).toBe(originalTitle);
+    expect(updated.content).toBe(originalContent);
+    expect(updated.frontmatter.acceptanceCriteria).toEqual(['first item', 'second item']);
+
+    const persisted = discoverTasks(tasksDir).find((task) => task.id === created.id)!;
+    expect(persisted.frontmatter.title).toBe(originalTitle);
+    expect(persisted.content).toBe(originalContent);
+    expect(persisted.frontmatter.acceptanceCriteria).toEqual(['first item', 'second item']);
+  });
+
   it('strips empty acceptance criteria when parsing task files', () => {
     const now = new Date().toISOString();
     const rawTask = `---
