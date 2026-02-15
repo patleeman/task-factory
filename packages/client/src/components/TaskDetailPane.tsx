@@ -200,20 +200,6 @@ export function TaskDetailPane({
               </button>
             );
           })()}
-          {/* Promote button */}
-          {(() => {
-            const promoteTo = getPromotePhase(frontmatter.phase);
-            return (
-              <button
-                onClick={() => promoteTo && onMove(promoteTo)}
-                disabled={!promoteTo}
-                className="btn text-xs py-1 px-2.5 bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1"
-              >
-                {promoteTo ? PHASE_DISPLAY_NAMES[promoteTo] : 'None'}
-                <AppIcon icon={ArrowRight} size="xs" />
-              </button>
-            );
-          })()}
           <div className="relative">
             <button
               onClick={() => setShowMoveMenu(!showMoveMenu)}
@@ -241,6 +227,20 @@ export function TaskDetailPane({
               </div>
             )}
           </div>
+          {/* Promote button */}
+          {(() => {
+            const promoteTo = getPromotePhase(frontmatter.phase);
+            return (
+              <button
+                onClick={() => promoteTo && onMove(promoteTo)}
+                disabled={!promoteTo}
+                className="btn text-xs py-1 px-2.5 bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1"
+              >
+                {promoteTo ? PHASE_DISPLAY_NAMES[promoteTo] : 'None'}
+                <AppIcon icon={ArrowRight} size="xs" />
+              </button>
+            );
+          })()}
         </div>
       </div>
 
