@@ -153,6 +153,7 @@ export function PipelineBar({
   const getAdvanceAction = (task: Task): { label: string; toPhase: Phase } | null => {
     switch (task.frontmatter.phase) {
       case 'backlog': return { label: 'Ready', toPhase: 'ready' }
+      case 'complete': return { label: 'Archive', toPhase: 'archived' }
       default: return null
     }
   }
