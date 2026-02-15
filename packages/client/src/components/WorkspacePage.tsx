@@ -581,9 +581,16 @@ export function WorkspacePage() {
         }))
       }
 
+      setTasks((prev) => {
+        if (prev.some((existingTask) => existingTask.id === task.id)) {
+          return prev
+        }
+        return [task, ...prev]
+      })
+
       setNewTaskPrefill(null)
       setAgentTaskFormUpdates(null)
-      navigate(`${workspaceRootPath}/tasks/${task.id}`)
+      navigate(workspaceRootPath)
     } catch (err) {
       console.error('Failed to create task:', err)
       alert('Failed to create task: ' + String(err))
