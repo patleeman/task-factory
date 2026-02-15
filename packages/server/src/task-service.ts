@@ -273,6 +273,19 @@ export function saveTaskFile(task: Task): void {
 // Task CRUD Operations
 // =============================================================================
 
+function getLeftInsertOrder(tasks: Task[], phase: Phase, excludeTaskId?: string): number {
+  const tasksInPhase = tasks.filter((candidate) => (
+    candidate.frontmatter.phase === phase && candidate.id !== excludeTaskId
+  ));
+
+  const minOrder = tasksInPhase.reduce(
+    (min, candidate) => Math.min(min, candidate.frontmatter.order ?? 0),
+    Number.POSITIVE_INFINITY,
+  );
+
+  return Number.isFinite(minOrder) ? minOrder - 1 : 0;
+}
+
 export function createTask(
   workspacePath: string,
   tasksDir: string,
@@ -292,14 +305,9 @@ export function createTask(
   // Create task directory
   mkdirSync(taskDir, { recursive: true });
 
-  // Assign order at the END of backlog (rightmost card in the UI).
+  // Insert new backlog tasks at the START (left edge in the UI).
   const existingTasks = discoverTasks(tasksDir);
-  const backlogTasks = existingTasks.filter((t) => t.frontmatter.phase === 'backlog');
-  const maxOrder = backlogTasks.reduce(
-    (max, t) => Math.max(max, t.frontmatter.order ?? 0),
-    Number.NEGATIVE_INFINITY,
-  );
-  const nextOrder = Number.isFinite(maxOrder) ? maxOrder + 1 : 0;
+  const nextOrder = getLeftInsertOrder(existingTasks, 'backlog');
 
   const taskDefaults = loadTaskDefaultsForWorkspacePath(workspacePath);
   const resolvedDefaults = applyTaskDefaultsToRequest(request, taskDefaults);
@@ -430,16 +438,9 @@ export function moveTaskToPhase(
   const oldPhase = task.frontmatter.phase;
   const now = new Date().toISOString();
 
-  // Insert at the START of the target phase (leftmost card in the UI).
+  // Insert at the START of the target phase (left edge in the UI).
   if (allTasks) {
-    const tasksInTarget = allTasks.filter(
-      t => t.frontmatter.phase === newPhase && t.id !== task.id
-    );
-    const minOrder = tasksInTarget.reduce(
-      (min, t) => Math.min(min, t.frontmatter.order ?? 0),
-      Number.POSITIVE_INFINITY,
-    );
-    task.frontmatter.order = Number.isFinite(minOrder) ? minOrder - 1 : 0;
+    task.frontmatter.order = getLeftInsertOrder(allTasks, newPhase, task.id);
   }
 
   if (newPhase === 'executing' && !task.frontmatter.started) {

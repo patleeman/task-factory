@@ -126,7 +126,7 @@ describe('shouldResumeInterruptedPlanning', () => {
 });
 
 describe('task ordering', () => {
-  it('creates new backlog tasks at the end (right)', () => {
+  it('creates new backlog tasks at the start (left)', () => {
     const { workspacePath, tasksDir } = createTempWorkspace();
 
     const first = createTaskFile(workspacePath, tasksDir, {
@@ -141,14 +141,21 @@ describe('task ordering', () => {
       acceptanceCriteria: ['done'],
     });
 
+    const third = createTaskFile(workspacePath, tasksDir, {
+      title: 'Third task',
+      content: 'third',
+      acceptanceCriteria: ['done'],
+    });
+
     expect(first.frontmatter.order).toBe(0);
-    expect(second.frontmatter.order).toBe(first.frontmatter.order + 1);
+    expect(second.frontmatter.order).toBe(first.frontmatter.order - 1);
+    expect(third.frontmatter.order).toBe(second.frontmatter.order - 1);
 
     const backlogIds = discoverTasks(tasksDir)
       .filter((task) => task.frontmatter.phase === 'backlog')
       .map((task) => task.id);
 
-    expect(backlogIds).toEqual([first.id, second.id]);
+    expect(backlogIds).toEqual([third.id, second.id, first.id]);
   });
 
   it('inserts moved tasks at the start of ready', () => {
@@ -250,6 +257,33 @@ describe('task ordering', () => {
 
     expect(completeTasks.map((task) => task.id)).toEqual([second.id, first.id]);
     expect(completeTasks[0].frontmatter.order).toBeLessThan(completeTasks[1].frontmatter.order);
+  });
+
+  it('inserts moved tasks at the start of archived', () => {
+    const { workspacePath, tasksDir } = createTempWorkspace();
+
+    const first = createTaskFile(workspacePath, tasksDir, {
+      title: 'First task',
+      content: 'first',
+      acceptanceCriteria: ['done'],
+    });
+
+    const second = createTaskFile(workspacePath, tasksDir, {
+      title: 'Second task',
+      content: 'second',
+      acceptanceCriteria: ['done'],
+    });
+
+    let tasks = discoverTasks(tasksDir);
+    moveTaskToPhase(tasks.find((task) => task.id === first.id)!, 'archived', 'user', 'archive first', tasks);
+
+    tasks = discoverTasks(tasksDir);
+    moveTaskToPhase(tasks.find((task) => task.id === second.id)!, 'archived', 'user', 'archive second', tasks);
+
+    const archivedTasks = discoverTasks(tasksDir).filter((task) => task.frontmatter.phase === 'archived');
+
+    expect(archivedTasks.map((task) => task.id)).toEqual([second.id, first.id]);
+    expect(archivedTasks[0].frontmatter.order).toBeLessThan(archivedTasks[1].frontmatter.order);
   });
 
   it('inserts complete -> ready rework moves at the start of ready', () => {
