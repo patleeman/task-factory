@@ -1233,8 +1233,7 @@ app.post('/api/pi-factory/settings', async (req, res) => {
     const nextGlobalDefaults = loadGlobalWorkflowSettings();
 
     const globalDefaultsChanged = (
-      previousGlobalDefaults.readyLimit !== nextGlobalDefaults.readyLimit
-      || previousGlobalDefaults.executingLimit !== nextGlobalDefaults.executingLimit
+      previousGlobalDefaults.executingLimit !== nextGlobalDefaults.executingLimit
       || previousGlobalDefaults.backlogToReady !== nextGlobalDefaults.backlogToReady
       || previousGlobalDefaults.readyToExecuting !== nextGlobalDefaults.readyToExecuting
     );

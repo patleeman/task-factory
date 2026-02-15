@@ -31,15 +31,12 @@ const EMPTY_TASK_DEFAULTS: TaskDefaults = {
 type OverrideMode = 'inherit' | 'override'
 
 interface WorkflowOverridesForm {
-  readyLimitMode: OverrideMode
-  readyLimit: number
   executingLimitMode: OverrideMode
   executingLimit: number
   backlogToReadyMode: OverrideMode
   backlogToReady: boolean
   readyToExecutingMode: OverrideMode
   readyToExecuting: boolean
-  globalReadyLimit: number
   globalExecutingLimit: number
   globalBacklogToReady: boolean
   globalReadyToExecuting: boolean
@@ -55,15 +52,12 @@ function sanitizeSlotLimitInput(value: number): number {
 
 function buildWorkflowOverridesForm(settings: WorkflowAutomationResponse): WorkflowOverridesForm {
   return {
-    readyLimitMode: settings.overrides.readyLimit !== undefined ? 'override' : 'inherit',
-    readyLimit: settings.overrides.readyLimit ?? settings.effective.readyLimit,
     executingLimitMode: settings.overrides.executingLimit !== undefined ? 'override' : 'inherit',
     executingLimit: settings.overrides.executingLimit ?? settings.effective.executingLimit,
     backlogToReadyMode: settings.overrides.backlogToReady !== undefined ? 'override' : 'inherit',
     backlogToReady: settings.overrides.backlogToReady ?? settings.effective.backlogToReady,
     readyToExecutingMode: settings.overrides.readyToExecuting !== undefined ? 'override' : 'inherit',
     readyToExecuting: settings.overrides.readyToExecuting ?? settings.effective.readyToExecuting,
-    globalReadyLimit: settings.globalDefaults.readyLimit,
     globalExecutingLimit: settings.globalDefaults.executingLimit,
     globalBacklogToReady: settings.globalDefaults.backlogToReady,
     globalReadyToExecuting: settings.globalDefaults.readyToExecuting,
@@ -72,7 +66,6 @@ function buildWorkflowOverridesForm(settings: WorkflowAutomationResponse): Workf
 
 function buildWorkflowUpdateFromForm(form: WorkflowOverridesForm): WorkflowAutomationUpdate {
   return {
-    readyLimit: form.readyLimitMode === 'override' ? sanitizeSlotLimitInput(form.readyLimit) : null,
     executingLimit: form.executingLimitMode === 'override' ? sanitizeSlotLimitInput(form.executingLimit) : null,
     backlogToReady: form.backlogToReadyMode === 'override' ? form.backlogToReady : null,
     readyToExecuting: form.readyToExecutingMode === 'override' ? form.readyToExecuting : null,
@@ -628,62 +621,11 @@ export function WorkspaceConfigPage() {
               </div>
 
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
-                <div>Global defaults → Ready slots: <span className="font-mono">{workflowForm.globalReadyLimit}</span>, Executing slots: <span className="font-mono">{workflowForm.globalExecutingLimit}</span></div>
+                <div>Global defaults → Executing slots: <span className="font-mono">{workflowForm.globalExecutingLimit}</span></div>
                 <div className="mt-1">Global automation → Backlog→Ready: <span className="font-mono">{workflowForm.globalBacklogToReady ? 'on' : 'off'}</span>, Ready→Exec: <span className="font-mono">{workflowForm.globalReadyToExecuting ? 'on' : 'off'}</span></div>
               </div>
 
               <div className="rounded-lg border border-slate-200 bg-white p-4 space-y-4">
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <label className="text-sm font-medium text-slate-700">Ready WIP slots</label>
-                    <label className="text-xs text-slate-600 inline-flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={workflowForm.readyLimitMode === 'override'}
-                        onChange={(event) => {
-                          const checked = event.target.checked
-                          setWorkflowForm((current) => {
-                            if (!current) return current
-                            return {
-                              ...current,
-                              readyLimitMode: checked ? 'override' : 'inherit',
-                              readyLimit: checked ? current.readyLimit : current.globalReadyLimit,
-                            }
-                          })
-                          setSaveStatus('idle')
-                          setSaveError('')
-                        }}
-                      />
-                      Override for workspace
-                    </label>
-                  </div>
-                  <input
-                    type="number"
-                    min={1}
-                    max={100}
-                    value={workflowForm.readyLimit}
-                    disabled={workflowForm.readyLimitMode !== 'override'}
-                    onChange={(event) => {
-                      const value = Number.parseInt(event.target.value, 10)
-                      setWorkflowForm((current) => {
-                        if (!current) return current
-                        return {
-                          ...current,
-                          readyLimit: Number.isFinite(value)
-                            ? sanitizeSlotLimitInput(value)
-                            : current.readyLimit,
-                        }
-                      })
-                      setSaveStatus('idle')
-                      setSaveError('')
-                    }}
-                    className="w-40 text-sm border border-slate-300 bg-white text-slate-800 rounded px-2 py-1.5 disabled:bg-slate-100 disabled:text-slate-500"
-                  />
-                  {workflowForm.readyLimitMode !== 'override' && (
-                    <p className="text-xs text-slate-500">Inherited from global default: {workflowForm.globalReadyLimit}</p>
-                  )}
-                </div>
-
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <label className="text-sm font-medium text-slate-700">Executing slots</label>

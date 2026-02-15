@@ -2568,14 +2568,6 @@ function maybeAutoPromoteBacklogTaskAfterPlanning(
     return latestTask;
   }
 
-  const wipLimit = workflowSettings.readyLimit;
-  if (wipLimit !== null && wipLimit !== undefined) {
-    const tasksInReady = tasks.filter((candidate) => candidate.frontmatter.phase === 'ready');
-    if (tasksInReady.length >= wipLimit && latestTask.frontmatter.phase !== 'ready') {
-      return latestTask;
-    }
-  }
-
   const fromPhase = latestTask.frontmatter.phase;
   const fromState = buildTaskStateSnapshot(latestTask.frontmatter);
 

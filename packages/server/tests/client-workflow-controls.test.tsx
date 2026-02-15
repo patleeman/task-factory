@@ -60,7 +60,6 @@ describe('workflow automation controls UI', () => {
   it('syncs ready→executing toggle state from live queue status', () => {
     const settings = syncAutomationSettingsWithQueue(
       {
-        readyLimit: 5,
         executingLimit: 2,
         backlogToReady: true,
         readyToExecuting: false,
@@ -75,7 +74,6 @@ describe('workflow automation controls UI', () => {
     );
 
     expect(settings).toEqual({
-      readyLimit: 5,
       executingLimit: 2,
       backlogToReady: true,
       readyToExecuting: true,

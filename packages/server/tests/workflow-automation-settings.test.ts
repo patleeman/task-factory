@@ -26,14 +26,12 @@ describe('workflow settings resolution', () => {
 
   it('resolves global workflow defaults from settings payload values', () => {
     const defaults = resolveGlobalWorkflowSettings({
-      readyLimit: 9,
       executingLimit: 3,
       backlogToReady: true,
       readyToExecuting: false,
     });
 
     expect(defaults).toEqual({
-      readyLimit: 9,
       executingLimit: 3,
       backlogToReady: true,
       readyToExecuting: false,
@@ -44,7 +42,6 @@ describe('workflow settings resolution', () => {
     const settings = resolveWorkspaceWorkflowSettings(
       createBaseConfig(),
       {
-        readyLimit: 7,
         executingLimit: 2,
         backlogToReady: true,
         readyToExecuting: false,
@@ -52,7 +49,6 @@ describe('workflow settings resolution', () => {
     );
 
     expect(settings).toEqual({
-      readyLimit: 7,
       executingLimit: 2,
       backlogToReady: true,
       readyToExecuting: false,
@@ -63,7 +59,6 @@ describe('workflow settings resolution', () => {
     const settings = resolveWorkspaceWorkflowSettings(
       createBaseConfig({
         wipLimits: {
-          ready: 4,
           executing: 1,
         },
         workflowAutomation: {
@@ -72,7 +67,6 @@ describe('workflow settings resolution', () => {
         },
       }),
       {
-        readyLimit: 9,
         executingLimit: 3,
         backlogToReady: true,
         readyToExecuting: false,
@@ -80,7 +74,6 @@ describe('workflow settings resolution', () => {
     );
 
     expect(settings).toEqual({
-      readyLimit: 4,
       executingLimit: 1,
       backlogToReady: false,
       readyToExecuting: true,
@@ -93,7 +86,6 @@ describe('workflow settings resolution', () => {
     }));
 
     expect(overrides).toEqual({
-      readyLimit: undefined,
       executingLimit: undefined,
       backlogToReady: undefined,
       readyToExecuting: false,
@@ -107,21 +99,21 @@ describe('workflow settings resolution', () => {
     });
   });
 
-  it('uses resolved ready/executing slot limits for WIP checks and preserves other phases', () => {
+  it('treats ready as unlimited and still resolves executing + other phase limits', () => {
     const config = createBaseConfig({
       wipLimits: {
+        ready: 1,
         complete: null,
       },
     });
 
     const globalDefaults = {
-      readyLimit: 8,
       executingLimit: 2,
       backlogToReady: false,
       readyToExecuting: true,
     };
 
-    expect(resolveWorkspaceWipLimit(config, 'ready', globalDefaults)).toBe(8);
+    expect(resolveWorkspaceWipLimit(config, 'ready', globalDefaults)).toBeNull();
     expect(resolveWorkspaceWipLimit(config, 'executing', globalDefaults)).toBe(2);
     expect(resolveWorkspaceWipLimit(config, 'complete', globalDefaults)).toBeNull();
   });

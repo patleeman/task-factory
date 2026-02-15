@@ -7,7 +7,6 @@ const moveTaskToPhaseMock = vi.fn();
 const executeTaskMock = vi.fn();
 const hasRunningSessionMock = vi.fn(() => false);
 const loadGlobalWorkflowSettingsMock = vi.fn(() => ({
-  readyLimit: 5,
   executingLimit: 1,
   backlogToReady: false,
   readyToExecuting: true,
@@ -107,7 +106,6 @@ describe('queue manager ordering', () => {
 
     hasRunningSessionMock.mockImplementation(() => false);
     loadGlobalWorkflowSettingsMock.mockImplementation(() => ({
-      readyLimit: 5,
       executingLimit: 1,
       backlogToReady: false,
       readyToExecuting: true,

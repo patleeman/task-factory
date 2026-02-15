@@ -17,7 +17,6 @@ const SLOT_LIMIT_MIN = 1;
 const SLOT_LIMIT_MAX = 100;
 
 export interface WorkflowSettingsPatch {
-  readyLimit?: number | null;
   executingLimit?: number | null;
   backlogToReady?: boolean | null;
   readyToExecuting?: boolean | null;
@@ -102,15 +101,6 @@ export function normalizePiFactorySettingsPayload(
     return { ok: false, error: 'workflowDefaults must be an object when provided' };
   }
 
-  const readyLimitResult = parseSlotLimit(
-    (rawDefaults as { readyLimit?: unknown }).readyLimit,
-    'workflowDefaults.readyLimit',
-    true,
-  );
-  if (!readyLimitResult.ok) {
-    return readyLimitResult;
-  }
-
   const executingLimitResult = parseSlotLimit(
     (rawDefaults as { executingLimit?: unknown }).executingLimit,
     'workflowDefaults.executingLimit',
@@ -137,10 +127,6 @@ export function normalizePiFactorySettingsPayload(
   }
 
   const normalizedDefaults: WorkflowDefaultsConfig = {};
-
-  if (readyLimitResult.value !== undefined && readyLimitResult.value !== null) {
-    normalizedDefaults.readyLimit = readyLimitResult.value;
-  }
 
   if (executingLimitResult.value !== undefined && executingLimitResult.value !== null) {
     normalizedDefaults.executingLimit = executingLimitResult.value;
@@ -195,27 +181,20 @@ export function parseWorkspaceWorkflowPatch(
   }
 
   const payload = raw as {
-    readyLimit?: unknown;
     executingLimit?: unknown;
     backlogToReady?: unknown;
     readyToExecuting?: unknown;
   };
 
-  const includesReadyLimit = hasOwn(payload, 'readyLimit');
   const includesExecutingLimit = hasOwn(payload, 'executingLimit');
   const includesBacklogToReady = hasOwn(payload, 'backlogToReady');
   const includesReadyToExecuting = hasOwn(payload, 'readyToExecuting');
 
-  if (!includesReadyLimit && !includesExecutingLimit && !includesBacklogToReady && !includesReadyToExecuting) {
+  if (!includesExecutingLimit && !includesBacklogToReady && !includesReadyToExecuting) {
     return {
       ok: false,
       error: 'At least one workflow setting must be provided',
     };
-  }
-
-  const readyLimitResult = parseSlotLimit(payload.readyLimit, 'readyLimit', true);
-  if (!readyLimitResult.ok) {
-    return readyLimitResult;
   }
 
   const executingLimitResult = parseSlotLimit(payload.executingLimit, 'executingLimit', true);
@@ -234,10 +213,6 @@ export function parseWorkspaceWorkflowPatch(
   }
 
   const patch: WorkflowSettingsPatch = {};
-
-  if (includesReadyLimit) {
-    patch.readyLimit = readyLimitResult.value ?? null;
-  }
 
   if (includesExecutingLimit) {
     patch.executingLimit = executingLimitResult.value ?? null;
@@ -269,13 +244,8 @@ export function applyWorkflowPatchToWorkspaceConfig(
     ? { ...workspaceConfig.queueProcessing }
     : undefined;
 
-  if (patch.readyLimit !== undefined) {
-    if (patch.readyLimit === null) {
-      delete nextWipLimits.ready;
-    } else {
-      nextWipLimits.ready = patch.readyLimit;
-    }
-  }
+  // Ready has no WIP limit anymore. Drop any legacy ready override.
+  delete nextWipLimits.ready;
 
   if (patch.executingLimit !== undefined) {
     if (patch.executingLimit === null) {

@@ -115,7 +115,6 @@ function normalizeWorkflowDefaultsForUi(settings: PiFactorySettings | null | und
   }
 
   return {
-    readyLimit: coerceLimit(candidate?.readyLimit, DEFAULT_WORKFLOW_SETTINGS.readyLimit),
     executingLimit: coerceLimit(candidate?.executingLimit, DEFAULT_WORKFLOW_SETTINGS.executingLimit),
     backlogToReady: typeof candidate?.backlogToReady === 'boolean'
       ? candidate.backlogToReady
@@ -346,7 +345,6 @@ export function SettingsPage() {
 
       const currentSettings = await api.getPiFactorySettings()
       const workflowDefaults: WorkflowDefaultsConfig = {
-        readyLimit: workflowDefaultsForm.readyLimit,
         executingLimit: workflowDefaultsForm.executingLimit,
         backlogToReady: workflowDefaultsForm.backlogToReady,
         readyToExecuting: workflowDefaultsForm.readyToExecuting,
@@ -850,28 +848,7 @@ export function SettingsPage() {
                   <p className="text-xs text-slate-500 mt-0.5">Default slot limits and automation for workspaces that do not set overrides.</p>
                 </div>
 
-                <div className="grid gap-3 md:grid-cols-2">
-                  <label className="block text-xs font-medium text-slate-600">
-                    Ready WIP slots
-                    <input
-                      type="number"
-                      min={1}
-                      max={100}
-                      step={1}
-                      value={workflowDefaultsForm.readyLimit}
-                      onChange={(event) => {
-                        const value = Number.parseInt(event.target.value, 10)
-                        setWorkflowDefaultsForm((current) => ({
-                          ...current,
-                          readyLimit: Number.isFinite(value)
-                            ? Math.max(1, Math.min(100, value))
-                            : current.readyLimit,
-                        }))
-                      }}
-                      className="mt-1 w-full text-sm border border-slate-200 rounded-lg px-2.5 py-2 bg-white"
-                    />
-                  </label>
-
+                <div className="grid gap-3">
                   <label className="block text-xs font-medium text-slate-600">
                     Executing slots
                     <input

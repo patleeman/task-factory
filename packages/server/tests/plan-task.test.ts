@@ -480,7 +480,6 @@ describe('planTask', () => {
   it('auto-promotes backlog tasks using global workflow defaults when workspace overrides are unset', async () => {
     mockedFactorySettings = {
       workflowDefaults: {
-        readyLimit: 5,
         executingLimit: 1,
         backlogToReady: true,
         readyToExecuting: false,
@@ -548,10 +547,9 @@ describe('planTask', () => {
     expect(persistedTask.frontmatter.phase).toBe('ready');
   });
 
-  it('respects global ready WIP limit when workspace ready limit override is unset', async () => {
+  it('auto-promotes even when Ready already has tasks under global defaults', async () => {
     mockedFactorySettings = {
       workflowDefaults: {
-        readyLimit: 1,
         executingLimit: 1,
         backlogToReady: true,
         readyToExecuting: false,
@@ -586,10 +584,10 @@ describe('planTask', () => {
     if (!existingReadyLive) {
       throw new Error('Failed to seed ready task');
     }
-    moveTaskToPhase(existingReadyLive, 'ready', 'user', 'seed ready WIP', liveTasks);
+    moveTaskToPhase(existingReadyLive, 'ready', 'user', 'seed ready lane', liveTasks);
 
     const task = createTask(workspacePath, tasksDir, {
-      content: 'Should stay backlog due to global ready WIP limit',
+      content: 'Should still auto-promote with ready tasks present',
       acceptanceCriteria: [],
     });
 
@@ -627,10 +625,10 @@ describe('planTask', () => {
     expect(result).not.toBeNull();
 
     const persistedTask = parseTaskFile(task.filePath);
-    expect(persistedTask.frontmatter.phase).toBe('backlog');
+    expect(persistedTask.frontmatter.phase).toBe('ready');
   });
 
-  it('does not auto-promote when ready WIP limit would be breached', async () => {
+  it('ignores legacy ready WIP overrides when auto-promoting after planning', async () => {
     const workspacePath = mkdtempSync(join(tmpdir(), 'pi-factory-plan-task-'));
     tempDirs.push(workspacePath);
 
@@ -665,10 +663,10 @@ describe('planTask', () => {
     if (!existingReadyLive) {
       throw new Error('Failed to set up existing ready task');
     }
-    moveTaskToPhase(existingReadyLive, 'ready', 'user', 'seed ready WIP', liveTasks);
+    moveTaskToPhase(existingReadyLive, 'ready', 'user', 'seed ready lane', liveTasks);
 
     const task = createTask(workspacePath, tasksDir, {
-      content: 'Should stay backlog because ready WIP is full',
+      content: 'Should auto-promote even with legacy ready limit present',
       acceptanceCriteria: [],
     });
 
@@ -707,14 +705,14 @@ describe('planTask', () => {
     expect(result).not.toBeNull();
 
     const persistedTask = parseTaskFile(task.filePath);
-    expect(persistedTask.frontmatter.phase).toBe('backlog');
+    expect(persistedTask.frontmatter.phase).toBe('ready');
 
     expect(
       broadcasts.some((event) => (
         event.type === 'task:moved'
         && event.task?.id === task.id
       )),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it('does not auto-promote when planning saves no acceptance criteria', async () => {
