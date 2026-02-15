@@ -758,6 +758,15 @@ export interface ClaimTaskRequest {
 // WebSocket Events
 // =============================================================================
 
+export interface ContextUsageSnapshot {
+  /** Estimated tokens in current session context; null when unknown post-compaction. */
+  tokens: number | null;
+  /** Active model context window size in tokens. */
+  contextWindow: number;
+  /** Context usage percent of contextWindow; null when tokens are unknown. */
+  percent: number | null;
+}
+
 export type ServerEvent =
   | { type: 'task:created'; task: Task }
   | { type: 'task:updated'; task: Task; changes: Partial<Task> }
@@ -778,7 +787,8 @@ export type ServerEvent =
   | { type: 'agent:tool_update'; taskId: string; toolCallId: string; delta: string }
   | { type: 'agent:tool_end'; taskId: string; toolCallId: string; toolName: string; isError: boolean; result?: string }
   | { type: 'agent:turn_end'; taskId: string }
-  | { type: 'agent:execution_status'; taskId: string; status: AgentExecutionStatus }
+  | { type: 'agent:execution_status'; taskId: string; status: AgentExecutionStatus; contextUsage?: ContextUsageSnapshot }
+  | { type: 'agent:context_usage'; taskId: string; usage: ContextUsageSnapshot | null }
   | { type: 'task:plan_generated'; taskId: string; plan: TaskPlan }
   | { type: 'queue:status'; status: QueueStatus }
   | {
@@ -878,7 +888,7 @@ export interface IdeaBacklog {
 // Planning agent chat message
 export interface PlanningMessage {
   id: string;
-  role: 'user' | 'assistant' | 'tool' | 'qa';
+  role: 'user' | 'assistant' | 'tool' | 'qa' | 'system';
   content: string;
   timestamp: string;       // ISO 8601
   sessionId?: string;      // UUID of the planning session this message belongs to
@@ -895,6 +905,7 @@ export interface PlanningMessage {
     draftTask?: DraftTask;
     qaRequest?: QARequest;
     qaResponse?: QAResponse;
+    [key: string]: unknown;
   };
 }
 
@@ -909,7 +920,8 @@ export type PlanningEvent =
   | { type: 'planning:thinking_delta'; workspaceId: string; delta: string }
   | { type: 'planning:thinking_end'; workspaceId: string }
   | { type: 'planning:turn_end'; workspaceId: string }
-  | { type: 'planning:status'; workspaceId: string; status: PlanningAgentStatus }
+  | { type: 'planning:status'; workspaceId: string; status: PlanningAgentStatus; contextUsage?: ContextUsageSnapshot }
+  | { type: 'planning:context_usage'; workspaceId: string; usage: ContextUsageSnapshot | null }
   | { type: 'planning:session_reset'; workspaceId: string; sessionId: string }
   | { type: 'shelf:updated'; workspaceId: string; shelf: Shelf }
   | { type: 'planning:task_form_updated'; workspaceId: string; formState: Partial<NewTaskFormState> }

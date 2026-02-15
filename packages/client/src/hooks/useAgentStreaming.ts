@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import type { ServerEvent, AgentExecutionStatus } from '@pi-factory/shared'
+import type { ServerEvent, AgentExecutionStatus, ContextUsageSnapshot } from '@pi-factory/shared'
 
 export interface ToolCallState {
   toolCallId: string
@@ -20,6 +20,8 @@ export interface AgentStreamState {
   thinkingText: string
   /** Active tool calls (in progress or recent) */
   toolCalls: ToolCallState[]
+  /** Latest context-window usage snapshot for this session */
+  contextUsage: ContextUsageSnapshot | null
   /** Whether the agent is actively producing output */
   isActive: boolean
 }
@@ -29,6 +31,7 @@ const INITIAL_STATE: AgentStreamState = {
   streamingText: '',
   thinkingText: '',
   toolCalls: [],
+  contextUsage: null,
   isActive: false,
 }
 
@@ -63,11 +66,19 @@ export function useAgentStreaming(
           setState((prev) => ({
             ...prev,
             status: msg.status,
+            contextUsage: msg.contextUsage !== undefined ? msg.contextUsage : prev.contextUsage,
             isActive:
               msg.status !== 'idle'
               && msg.status !== 'awaiting_input'
               && msg.status !== 'completed'
               && msg.status !== 'error',
+          }))
+          break
+
+        case 'agent:context_usage':
+          setState((prev) => ({
+            ...prev,
+            contextUsage: msg.usage,
           }))
           break
 

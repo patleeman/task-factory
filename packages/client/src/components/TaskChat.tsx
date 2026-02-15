@@ -159,6 +159,12 @@ function getOutputPreview(text: string, previewLines: number): { preview: string
   return { preview, lineCount, hasMore, hiddenCount: lineCount - previewLines }
 }
 
+function formatContextUsageLabel(percent: number | null | undefined): string {
+  if (percent == null) return 'ctx ?'
+  const rounded = percent >= 10 ? Math.round(percent) : Math.round(percent * 10) / 10
+  return `ctx ${rounded}%`
+}
+
 // Try to guess tool name + detail from content when metadata is missing (old entries)
 function guessToolInfo(content: string): { prefix: string; detail: string } | null {
   const first = content.trimStart()
@@ -731,7 +737,12 @@ export function TaskChat({
     [agentStream.toolCalls],
   )
   const statusConfig = STATUS_CONFIG[agentStream.status]
-  const showStatusBar = isAgentActive || (agentStream.status as string) === 'awaiting_qa'
+  const showStatusBar = isAgentActive
+    || (agentStream.status as string) === 'awaiting_qa'
+    || agentStream.status === 'awaiting_input'
+  const contextUsageLabel = agentStream.contextUsage
+    ? formatContextUsageLabel(agentStream.contextUsage.percent)
+    : null
   const showControlRow = showSteerControls || showStopControl
   const hasBottomSlot = !!bottomSlot
 
@@ -1090,6 +1101,9 @@ export function TaskChat({
             <span className="text-xs text-slate-400 font-mono">
               {agentStream.toolCalls[agentStream.toolCalls.length - 1].toolName}
             </span>
+          )}
+          {contextUsageLabel && (
+            <span className="ml-auto text-xs text-slate-400 font-mono">{contextUsageLabel}</span>
           )}
 
         </div>

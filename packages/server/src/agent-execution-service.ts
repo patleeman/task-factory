@@ -27,6 +27,7 @@ import {
   type ModelConfig,
   type PlanningGuardrails,
   type WorkspaceConfig,
+  type ContextUsageSnapshot,
 } from '@pi-factory/shared';
 import { createTaskSeparator, createChatMessage, createSystemEvent } from './activity-service.js';
 import {
@@ -310,6 +311,20 @@ interface TaskSession {
 
 const activeSessions = new Map<string, TaskSession>();
 
+function registerActiveSession(session: TaskSession): void {
+  activeSessions.set(session.taskId, session);
+}
+
+function clearActiveSessionIfOwned(taskId: string, session: TaskSession): boolean {
+  const current = activeSessions.get(taskId);
+  if (current !== session) {
+    return false;
+  }
+
+  activeSessions.delete(taskId);
+  return true;
+}
+
 export function getActiveSession(taskId: string): TaskSession | undefined {
   return activeSessions.get(taskId);
 }
@@ -455,6 +470,66 @@ function broadcastActivityEntry(
     .catch((err) => {
       console.error(`[AgentExecution] Failed to create activity entry (${context}):`, err);
     });
+}
+
+function getContextUsageSnapshot(session: TaskSession): ContextUsageSnapshot | null {
+  try {
+    const usage = session.piSession?.getContextUsage?.();
+    if (!usage) return null;
+
+    return {
+      tokens: usage.tokens ?? null,
+      contextWindow: usage.contextWindow,
+      percent: usage.percent ?? null,
+    };
+  } catch (err) {
+    console.warn(`[AgentExecution] Failed to read context usage for ${session.taskId}:`, err);
+    return null;
+  }
+}
+
+function broadcastTaskContextUsage(session: TaskSession, taskId: string): void {
+  const usage = getContextUsageSnapshot(session);
+  session.broadcastToWorkspace?.({
+    type: 'agent:context_usage',
+    taskId,
+    usage,
+  });
+}
+
+type AutoCompactionEndEvent = Extract<AgentSessionEvent, { type: 'auto_compaction_end' }>;
+
+function buildCompactionStartNotice(reason: 'threshold' | 'overflow'): string {
+  if (reason === 'overflow') {
+    return 'Context window full — compacting conversation';
+  }
+
+  return 'Compacting conversation to reduce context usage';
+}
+
+function buildCompactionEndNotice(event: AutoCompactionEndEvent): {
+  message: string;
+  outcome: 'success' | 'aborted' | 'failed';
+} {
+  if (!event.aborted) {
+    return { message: 'Conversation compacted successfully', outcome: 'success' };
+  }
+
+  const hasError = typeof event.errorMessage === 'string' && event.errorMessage.trim().length > 0;
+  if (hasError) {
+    const retrySuffix = event.willRetry ? ' Retrying automatically.' : '';
+    return {
+      message: `Compaction failed: ${event.errorMessage}${retrySuffix}`,
+      outcome: 'failed',
+    };
+  }
+
+  return {
+    message: event.willRetry
+      ? 'Compaction aborted. Retrying automatically.'
+      : 'Compaction aborted.',
+    outcome: 'aborted',
+  };
 }
 
 // =============================================================================
@@ -640,7 +715,7 @@ export async function executeTask(options: ExecuteTaskOptions): Promise<TaskSess
     awaitingUserInput: false,
   };
 
-  activeSessions.set(task.id, session);
+  registerActiveSession(session);
 
   // Create task separator in activity log
   broadcastActivityEntry(
@@ -686,6 +761,7 @@ export async function executeTask(options: ExecuteTaskOptions): Promise<TaskSess
     session.unsubscribe = piSession.subscribe((event: AgentSessionEvent) => {
       handlePiEvent(event, session, workspaceId, task.id, onOutput);
     });
+    broadcastTaskContextUsage(session, task.id);
 
     // Register completion callback so the task_complete extension tool
     // can signal that the agent is actually done (vs. asking a question).
@@ -697,6 +773,11 @@ export async function executeTask(options: ExecuteTaskOptions): Promise<TaskSess
     const completeRegistry = ensureCompleteCallbackRegistry();
 
     completeRegistry.set(task.id, (summary: string) => {
+      if (getActiveSession(task.id) !== session) {
+        console.warn(`[AgentExecution] Ignoring completion signal for stale session on task ${task.id}`);
+        return;
+      }
+
       session.agentSignaledComplete = true;
       session.completionSummary = summary;
 
@@ -712,6 +793,10 @@ export async function executeTask(options: ExecuteTaskOptions): Promise<TaskSess
 
     const attachFileRegistry = ensureAttachFileCallbackRegistry();
     attachFileRegistry.set(task.id, async (request: AttachTaskFileRequest) => {
+      if (getActiveSession(task.id) !== session) {
+        throw new Error(`Attach file callback is stale for task ${task.id}`);
+      }
+
       const { attachment } = await attachTaskFileAndBroadcast(
         workspacePath,
         task.id,
@@ -856,6 +941,11 @@ async function handleAgentTurnEnd(
   workspaceId: string,
   task: Task,
 ): Promise<void> {
+  if (getActiveSession(task.id) !== session) {
+    console.warn(`[AgentExecution] Ignoring turn-end for stale session on task ${task.id}`);
+    return;
+  }
+
   if (!session.agentSignaledComplete) {
     const latestTask = refreshSessionTaskSnapshot(session) ?? task;
     const isExecutingTask = latestTask.frontmatter.phase === 'executing';
@@ -999,7 +1089,7 @@ async function handleAgentTurnEnd(
   // so future chat messages can trigger resumeChat() instead of
   // falling through all branches in the activity handler.
   session.unsubscribe?.();
-  activeSessions.delete(task.id);
+  clearActiveSessionIfOwned(task.id, session);
 
   session.onComplete?.(wasSuccess);
 }
@@ -1040,7 +1130,7 @@ function handleAgentError(
   // Clean up: unsubscribe and remove from active sessions so future
   // chat messages can trigger resumeChat() instead of being silently dropped.
   session.unsubscribe?.();
-  activeSessions.delete(task.id);
+  clearActiveSessionIfOwned(task.id, session);
 
   session.onComplete?.(false);
 }
@@ -1132,6 +1222,7 @@ function handlePiEvent(
         taskId,
         status: 'streaming',
       });
+      broadcastTaskContextUsage(session, taskId);
       break;
     }
 
@@ -1227,6 +1318,7 @@ function handlePiEvent(
 
       session.currentStreamText = '';
       session.currentThinkingText = '';
+      broadcastTaskContextUsage(session, taskId);
       break;
     }
 
@@ -1243,6 +1335,7 @@ function handlePiEvent(
         taskId,
         status: 'tool_use',
       });
+      broadcastTaskContextUsage(session, taskId);
       broadcast?.({
         type: 'agent:tool_start',
         taskId,
@@ -1313,6 +1406,7 @@ function handlePiEvent(
         taskId,
         status: 'streaming',
       });
+      broadcastTaskContextUsage(session, taskId);
 
       session.lastToolResultText = finalResultText;
       session.lastToolResultAt = Date.now();
@@ -1323,16 +1417,47 @@ function handlePiEvent(
 
     case 'turn_end' as any: {
       broadcast?.({ type: 'agent:turn_end', taskId });
+      broadcastTaskContextUsage(session, taskId);
       break;
     }
 
     case 'auto_compaction_start': {
-      createSystemEvent(workspaceId, taskId, 'phase-change', 'Compacting conversation...', {});
+      broadcastActivityEntry(
+        broadcast,
+        createSystemEvent(
+          workspaceId,
+          taskId,
+          'phase-change',
+          buildCompactionStartNotice(event.reason),
+          { kind: 'compaction', phase: 'start', reason: event.reason },
+        ),
+        'auto compaction start event',
+      );
+      broadcastTaskContextUsage(session, taskId);
       break;
     }
 
     case 'auto_compaction_end': {
-      createSystemEvent(workspaceId, taskId, 'phase-change', 'Conversation compacted', {});
+      const notice = buildCompactionEndNotice(event);
+      broadcastActivityEntry(
+        broadcast,
+        createSystemEvent(
+          workspaceId,
+          taskId,
+          'phase-change',
+          notice.message,
+          {
+            kind: 'compaction',
+            phase: 'end',
+            outcome: notice.outcome,
+            aborted: event.aborted,
+            willRetry: event.willRetry,
+            errorMessage: event.errorMessage,
+          },
+        ),
+        'auto compaction end event',
+      );
+      broadcastTaskContextUsage(session, taskId);
       break;
     }
 
@@ -1498,7 +1623,7 @@ export async function resumeChat(
     awaitingUserInput: false,
   };
 
-  activeSessions.set(task.id, session);
+  registerActiveSession(session);
 
   session.awaitingUserInput = false;
   broadcastToWorkspace?.({
@@ -1520,6 +1645,7 @@ export async function resumeChat(
     session.unsubscribe = piSession.subscribe((event: AgentSessionEvent) => {
       handlePiEvent(event, session, workspaceId, task.id);
     });
+    broadcastTaskContextUsage(session, task.id);
 
     // Send the user's message as a new prompt (not followUp — there's no
     // active agent turn to follow up on since we just reopened the session).
@@ -1558,7 +1684,7 @@ export async function resumeChat(
   } catch (err) {
     console.error(`[resumeChat] Failed to resume chat for task ${task.id}:`, err);
     session.status = 'error';
-    activeSessions.delete(task.id);
+    clearActiveSessionIfOwned(task.id, session);
 
     broadcastToWorkspace?.({
       type: 'agent:execution_status',
@@ -1605,7 +1731,7 @@ export async function startChat(
     awaitingUserInput: false,
   };
 
-  activeSessions.set(task.id, session);
+  registerActiveSession(session);
 
   session.awaitingUserInput = false;
   broadcastToWorkspace?.({
@@ -1627,6 +1753,7 @@ export async function startChat(
     session.unsubscribe = piSession.subscribe((event: AgentSessionEvent) => {
       handlePiEvent(event, session, workspaceId, task.id);
     });
+    broadcastTaskContextUsage(session, task.id);
 
     // Build context about the task for the initial prompt
     const workspaceSharedContext = loadWorkspaceSharedContext(workspacePath);
@@ -1669,7 +1796,7 @@ export async function startChat(
   } catch (err) {
     console.error(`[startChat] Failed to start chat for task ${task.id}:`, err);
     session.status = 'error';
-    activeSessions.delete(task.id);
+    clearActiveSessionIfOwned(task.id, session);
 
     broadcastToWorkspace?.({
       type: 'agent:execution_status',
@@ -1721,7 +1848,7 @@ export async function stopTaskExecution(taskId: string): Promise<boolean> {
   });
 
   // Remove from active sessions so hasRunningSession returns false
-  activeSessions.delete(taskId);
+  clearActiveSessionIfOwned(taskId, session);
 
   return true;
 }
@@ -2157,7 +2284,7 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
     awaitingUserInput: false,
   };
 
-  activeSessions.set(task.id, session);
+  registerActiveSession(session);
 
   broadcastToWorkspace?.({
     type: 'agent:execution_status',
@@ -2266,6 +2393,7 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
       }
 
     });
+    broadcastTaskContextUsage(session, task.id);
 
     // Load task attachments for the planning prompt
     const { images: planImages, promptSection: planAttachmentSection } = loadAttachments(
@@ -2340,7 +2468,7 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
     session.unsubscribe?.();
     session.status = 'completed';
     session.endTime = new Date().toISOString();
-    activeSessions.delete(task.id);
+    clearActiveSessionIfOwned(task.id, session);
     registry.delete(task.id);
 
     if (!savedPlan) {
@@ -2407,7 +2535,7 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
       session.unsubscribe?.();
       session.status = 'completed';
       session.endTime = new Date().toISOString();
-      activeSessions.delete(task.id);
+      clearActiveSessionIfOwned(task.id, session);
       registry.delete(task.id);
 
       broadcastToWorkspace?.({
@@ -2431,7 +2559,7 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
 
     session.status = 'error';
     session.endTime = new Date().toISOString();
-    activeSessions.delete(task.id);
+    clearActiveSessionIfOwned(task.id, session);
     registry.delete(task.id);
 
     const beforeErrorState = buildTaskStateSnapshot(task.frontmatter);

@@ -30,6 +30,7 @@ import type {
   QARequest,
   QAAnswer,
   QAResponse,
+  ContextUsageSnapshot,
 } from '@pi-factory/shared';
 import {
   clearShelf,
@@ -667,6 +668,7 @@ async function getOrCreateSession(
     // Session is ready — system prompt will be prepended to first user message
     session.status = 'idle';
     broadcast({ type: 'planning:status', workspaceId, status: 'idle' });
+    broadcastPlanningContextUsage(session);
 
   } catch (err) {
     console.error('[PlanningAgent] Failed to create session:', err);
@@ -925,6 +927,85 @@ function extractDraftTaskPayloadFromToolResult(toolName: string, result: unknown
   return undefined;
 }
 
+function getPlanningContextUsageSnapshot(session: PlanningSession): ContextUsageSnapshot | null {
+  try {
+    const usage = session.piSession?.getContextUsage?.();
+    if (!usage) return null;
+
+    return {
+      tokens: usage.tokens ?? null,
+      contextWindow: usage.contextWindow,
+      percent: usage.percent ?? null,
+    };
+  } catch (err) {
+    console.warn(`[PlanningAgent] Failed to read context usage for ${session.workspaceId}:`, err);
+    return null;
+  }
+}
+
+function broadcastPlanningContextUsage(session: PlanningSession): void {
+  const usage = getPlanningContextUsageSnapshot(session);
+  session.broadcast({
+    type: 'planning:context_usage',
+    workspaceId: session.workspaceId,
+    usage,
+  });
+}
+
+type PlanningAutoCompactionEndEvent = Extract<AgentSessionEvent, { type: 'auto_compaction_end' }>;
+
+function buildPlanningCompactionStartNotice(reason: 'threshold' | 'overflow'): string {
+  if (reason === 'overflow') {
+    return 'Context window full — compacting foreman conversation';
+  }
+
+  return 'Compacting foreman conversation to reduce context usage';
+}
+
+function buildPlanningCompactionEndNotice(event: PlanningAutoCompactionEndEvent): {
+  message: string;
+  outcome: 'success' | 'aborted' | 'failed';
+} {
+  if (!event.aborted) {
+    return { message: 'Foreman conversation compacted successfully', outcome: 'success' };
+  }
+
+  const hasError = typeof event.errorMessage === 'string' && event.errorMessage.trim().length > 0;
+  if (hasError) {
+    const retrySuffix = event.willRetry ? ' Retrying automatically.' : '';
+    return {
+      message: `Foreman compaction failed: ${event.errorMessage}${retrySuffix}`,
+      outcome: 'failed',
+    };
+  }
+
+  return {
+    message: event.willRetry
+      ? 'Foreman compaction aborted. Retrying automatically.'
+      : 'Foreman compaction aborted.',
+    outcome: 'aborted',
+  };
+}
+
+function appendPlanningSystemNotice(
+  session: PlanningSession,
+  message: string,
+  metadata?: Record<string, unknown>,
+): void {
+  const planningMsg: PlanningMessage = {
+    id: crypto.randomUUID(),
+    role: 'system',
+    content: message,
+    timestamp: new Date().toISOString(),
+    sessionId: session.sessionId,
+    metadata,
+  };
+
+  session.messages.push(planningMsg);
+  persistMessages(session.workspaceId, session.messages);
+  session.broadcast({ type: 'planning:message', workspaceId: session.workspaceId, message: planningMsg });
+}
+
 // =============================================================================
 // Handle Pi SDK events for the planning session
 // =============================================================================
@@ -941,6 +1022,7 @@ function handlePlanningEvent(
       session.currentThinkingText = '';
       session.status = 'streaming';
       broadcast({ type: 'planning:status', workspaceId, status: 'streaming' });
+      broadcastPlanningContextUsage(session);
       break;
 
     case 'message_start':
@@ -999,6 +1081,7 @@ function handlePlanningEvent(
 
       session.currentStreamText = '';
       session.currentThinkingText = '';
+      broadcastPlanningContextUsage(session);
       break;
     }
 
@@ -1009,6 +1092,7 @@ function handlePlanningEvent(
       });
       session.status = 'tool_use';
       broadcast({ type: 'planning:status', workspaceId, status: 'tool_use' });
+      broadcastPlanningContextUsage(session);
       broadcast({
         type: 'planning:tool_start',
         workspaceId,
@@ -1081,6 +1165,35 @@ function handlePlanningEvent(
       session.toolCallArgs.delete(event.toolCallId);
       session.status = 'streaming';
       broadcast({ type: 'planning:status', workspaceId, status: 'streaming' });
+      broadcastPlanningContextUsage(session);
+      break;
+    }
+
+    case 'auto_compaction_start': {
+      appendPlanningSystemNotice(
+        session,
+        buildPlanningCompactionStartNotice(event.reason),
+        { kind: 'compaction', phase: 'start', reason: event.reason },
+      );
+      broadcastPlanningContextUsage(session);
+      break;
+    }
+
+    case 'auto_compaction_end': {
+      const notice = buildPlanningCompactionEndNotice(event);
+      appendPlanningSystemNotice(
+        session,
+        notice.message,
+        {
+          kind: 'compaction',
+          phase: 'end',
+          outcome: notice.outcome,
+          aborted: event.aborted,
+          willRetry: event.willRetry,
+          errorMessage: event.errorMessage,
+        },
+      );
+      broadcastPlanningContextUsage(session);
       break;
     }
   }
@@ -1109,6 +1222,7 @@ async function sendToAgent(
 
   session.status = 'streaming';
   broadcast({ type: 'planning:status', workspaceId, status: 'streaming' });
+  broadcastPlanningContextUsage(session);
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
@@ -1135,7 +1249,11 @@ async function sendToAgent(
           // Include last ~10 messages, truncate each to ~500 chars to avoid token limits
           const recentHistory = priorMessages.slice(-10);
           for (const msg of recentHistory) {
-            const role = msg.role === 'user' ? 'User' : 'Assistant';
+            const role = msg.role === 'user'
+              ? 'User'
+              : msg.role === 'system'
+                ? 'System'
+                : 'Assistant';
             const truncated = msg.content.length > 500
               ? msg.content.slice(0, 500) + '... [truncated]'
               : msg.content;
@@ -1162,6 +1280,7 @@ async function sendToAgent(
       // Turn complete
       session.status = 'idle';
       broadcast({ type: 'planning:status', workspaceId, status: 'idle' });
+      broadcastPlanningContextUsage(session);
       broadcast({ type: 'planning:turn_end', workspaceId });
       return;
     } catch (err) {
@@ -1172,6 +1291,7 @@ async function sendToAgent(
         session.toolCallArgs.clear();
         session.status = 'idle';
         broadcast({ type: 'planning:status', workspaceId, status: 'idle' });
+        broadcastPlanningContextUsage(session);
         broadcast({ type: 'planning:turn_end', workspaceId });
         return;
       }
@@ -1217,6 +1337,7 @@ async function sendToAgent(
           });
 
           broadcast({ type: 'planning:status', workspaceId, status: 'streaming' });
+          broadcastPlanningContextUsage(session);
         } catch (recreateErr) {
           console.error('[PlanningAgent] Failed to recreate session:', recreateErr);
           session.status = 'error';

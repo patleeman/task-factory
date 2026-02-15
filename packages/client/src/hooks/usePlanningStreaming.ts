@@ -19,6 +19,7 @@ const INITIAL_AGENT_STREAM: AgentStreamState = {
   streamingText: '',
   thinkingText: '',
   toolCalls: [],
+  contextUsage: null,
   isActive: false,
 }
 
@@ -62,6 +63,17 @@ function messagesToEntries(messages: PlanningMessage[]): ActivityEntry[] {
           qaRequest: msg.metadata?.qaRequest,
           qaResponse: msg.metadata?.qaResponse,
         },
+      }
+    }
+    if (msg.role === 'system') {
+      return {
+        type: 'system-event',
+        id: msg.id,
+        taskId: PLANNING_TASK_ID,
+        event: 'phase-change',
+        message: msg.content,
+        timestamp: msg.timestamp,
+        metadata: msg.metadata,
       }
     }
     return {
@@ -156,6 +168,7 @@ export function usePlanningStreaming(
           setAgentStream((prev) => ({
             ...prev,
             status: msg.status as any,
+            contextUsage: msg.contextUsage !== undefined ? msg.contextUsage : prev.contextUsage,
             isActive: msg.status !== 'idle' && msg.status !== 'error' && msg.status !== 'awaiting_qa',
           }))
           // Clear QA dialog when agent resumes (not awaiting anymore)
@@ -163,6 +176,13 @@ export function usePlanningStreaming(
             setActiveQARequest(null)
             stopQAPoll()
           }
+          break
+
+        case 'planning:context_usage':
+          setAgentStream((prev) => ({
+            ...prev,
+            contextUsage: msg.usage,
+          }))
           break
 
         case 'qa:request':
