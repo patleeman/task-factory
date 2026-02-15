@@ -16,5 +16,6 @@ This directory contains developer-facing documentation for this repository.
    - [Runbooks](./operations/runbooks/README.md) — repeatable operational procedures.
    - [Troubleshooting](./operations/troubleshooting/README.md) — issue diagnosis playbooks.
 5. [Contribution](./contribution/README.md) — contribution workflow and quality standards.
+   - [Extension + Execution Skill Customization](./contribution/extensions-and-execution-skills.md) — extension/skill discovery, hook behavior, safety guardrails, and validation checks.
    - [Developer Commands Reference](./contribution/developer-commands.md) — build/dev/lint/typecheck/test/coverage commands.
 6. [Templates](./templates/README.md) — reusable document templates.

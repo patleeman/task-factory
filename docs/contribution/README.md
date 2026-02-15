@@ -4,6 +4,7 @@ Use this section for day-to-day contributor workflow.
 
 ## Guides
 
+- [Extension + Execution Skill Customization](./extensions-and-execution-skills.md) — how repo extensions and execution hooks are discovered, scoped, validated, and secured.
 - [Developer Commands Reference](./developer-commands.md) — build/dev/lint/typecheck/test/coverage workflows and workspace-scoped commands.
 
 ## Architecture references for contributors

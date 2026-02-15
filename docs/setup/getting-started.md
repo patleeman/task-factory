@@ -97,4 +97,5 @@ PORT=3100 npm start
 - [System Architecture](../architecture/system-architecture.md)
 - [Runtime Flows](../architecture/runtime-flows.md)
 - [State Contract (canonical)](../architecture/state-contract.md)
+- [Extension + Execution Skill Customization](../contribution/extensions-and-execution-skills.md)
 - [Developer Commands Reference](../contribution/developer-commands.md)
