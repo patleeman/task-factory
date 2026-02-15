@@ -30,7 +30,8 @@
     "test:coverage": "npm run test:coverage -w @pi-factory/server"
   },
   "dependencies": {
-    "@mariozechner/pi-coding-agent": "^0.52.10"
+    "@mariozechner/pi-coding-agent": "^0.52.10",
+    "@sinclair/typebox": "^0.34.48"
   },
   "devDependencies": {
     "@eslint/js": "^9.35.0",

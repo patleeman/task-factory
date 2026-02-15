@@ -1,4 +1,4 @@
-# npm audit triage (PIFA-106) — 2026-02-15
+# npm audit triage (PIFA-106, refreshed by PIFA-123) — 2026-02-15
 
 ## Scope
 - Baseline command: `npm audit --omit=dev --json`
@@ -10,6 +10,7 @@
 - Post-fix JSON: `docs/security/npm-audit-postfix-2026-02-15.json`
 - Baseline counts: **6 total** (`moderate: 5`, `low: 1`, `high/critical: 0`)
 - Post-fix counts: **5 total** (`moderate: 5`, `low: 0`, `high/critical: 0`)
+- Current refresh counts (PIFA-123, `npm audit --omit=dev --json`): **5 total** (`moderate: 5`, `low: 0`, `high/critical: 0`)
 - Follow-up `npm audit fix --omit=dev --dry-run` still reports the same 5 moderate findings; npm only offers `--force` (Excalidraw downgrade path) for full removal.
 
 ## Advisory ownership and triage
@@ -29,6 +30,14 @@
 - Treat whiteboard/diagram content as trusted internal content until upstream-safe upgrades are available.
 - Track upstream releases for `@excalidraw/excalidraw` and its mermaid/nanoid chain; prioritize upgrade when a React 19-compatible safe path exists.
 
+## PIFA-123 dependency-manifest refresh
+- Removed unused client manifest entries: `@codemirror/autocomplete`, `codemirror`, `date-fns`.
+- Added direct declarations for transitive-only imports:
+  - root/extensions: `@sinclair/typebox`
+  - `@pi-factory/server`: `@mariozechner/pi-ai`
+- Re-ran `npm audit --omit=dev --audit-level=high`; result remains **pass** with no high/critical findings.
+- Remaining findings are unchanged moderate Excalidraw-chain advisories tracked in this doc.
+
 ## Release sign-off notes
 - Release recommendation: **Proceed with accepted moderate client-side risk** after lockfile patching of `qs`.
 - Accepted risk scope: Excalidraw/mermaid/dompurify/nanoid transitive advisories only.
@@ -37,7 +46,7 @@
   - [ ] Release manager sign-off (name/date)
   - [ ] Security reviewer acknowledgement (name/date)
 
-## Quality gates after update
+## Quality gates after update (revalidated in PIFA-123)
 - `npm audit --omit=dev --audit-level=high` ✅ (exit 0)
 - `npm audit --omit=dev --audit-level=moderate` ❌ (exit 1, expected: 5 accepted Excalidraw-chain moderates)
 - `npm run build` ✅
