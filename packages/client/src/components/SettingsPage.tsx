@@ -96,7 +96,6 @@ function normalizePlanningGuardrailsForUi(settings: PiFactorySettings | null | u
   return {
     timeoutMs: coerce(candidate?.timeoutMs, DEFAULT_PLANNING_GUARDRAILS.timeoutMs),
     maxToolCalls: coerce(candidate?.maxToolCalls, DEFAULT_PLANNING_GUARDRAILS.maxToolCalls),
-    maxReadBytes: coerce(candidate?.maxReadBytes, DEFAULT_PLANNING_GUARDRAILS.maxReadBytes),
   }
 }
 
@@ -355,7 +354,6 @@ export function SettingsPage() {
         planningGuardrails: {
           timeoutMs: planningGuardrailsForm.timeoutMs,
           maxToolCalls: planningGuardrailsForm.maxToolCalls,
-          maxReadBytes: planningGuardrailsForm.maxReadBytes,
         },
         workflowDefaults,
       }
@@ -910,7 +908,7 @@ export function SettingsPage() {
                   <p className="text-xs text-slate-500 mt-0.5">Limit planning runs to avoid long repository scans and timeout loops.</p>
                 </div>
 
-                <div className="grid gap-3 md:grid-cols-3">
+                <div className="grid gap-3 md:grid-cols-2">
                   <label className="block text-xs font-medium text-slate-600">
                     Timeout (seconds)
                     <input
@@ -945,26 +943,6 @@ export function SettingsPage() {
                           maxToolCalls: Number.isFinite(value) && value > 0
                             ? value
                             : DEFAULT_PLANNING_GUARDRAILS.maxToolCalls,
-                        }))
-                      }}
-                      className="mt-1 w-full text-sm border border-slate-200 rounded-lg px-2.5 py-2 bg-white"
-                    />
-                  </label>
-
-                  <label className="block text-xs font-medium text-slate-600">
-                    Max read output (KB)
-                    <input
-                      type="number"
-                      min={1}
-                      step={1}
-                      value={Math.round(planningGuardrailsForm.maxReadBytes / 1024)}
-                      onChange={(event) => {
-                        const kb = Number.parseInt(event.target.value, 10)
-                        setPlanningGuardrailsForm((current) => ({
-                          ...current,
-                          maxReadBytes: Number.isFinite(kb) && kb > 0
-                            ? kb * 1024
-                            : DEFAULT_PLANNING_GUARDRAILS.maxReadBytes,
                         }))
                       }}
                       className="mt-1 w-full text-sm border border-slate-200 rounded-lg px-2.5 py-2 bg-white"

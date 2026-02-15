@@ -1154,6 +1154,99 @@ describe('planTask', () => {
     expect(persistedTask.frontmatter.planningStatus).toBe('completed');
   });
 
+  it('does not abort planning when read tool output is large', async () => {
+    const workspacePath = mkdtempSync(join(tmpdir(), 'pi-factory-plan-task-'));
+    tempDirs.push(workspacePath);
+
+    const tasksDir = join(workspacePath, '.pi', 'tasks');
+    mkdirSync(tasksDir, { recursive: true });
+
+    const { createTask, parseTaskFile } = await import('../src/task-service.js');
+    const { planTask } = await import('../src/agent-execution-service.js');
+
+    const task = createTask(workspacePath, tasksDir, {
+      content: 'Large read output should not trigger a planning read budget guardrail',
+      acceptanceCriteria: [],
+    });
+
+    const subscribers: Array<(event: any) => void> = [];
+    let promptCount = 0;
+    let abortCalled = false;
+    let callbackInvoked = false;
+
+    createAgentSessionMock.mockResolvedValue({
+      session: {
+        subscribe: (listener: (event: any) => void) => {
+          subscribers.push(listener);
+          return () => {
+            const idx = subscribers.indexOf(listener);
+            if (idx >= 0) subscribers.splice(idx, 1);
+          };
+        },
+        prompt: vi.fn(async () => {
+          promptCount++;
+
+          if (promptCount > 1) {
+            throw new Error('Planning should not enter a grace turn for large read output');
+          }
+
+          for (const sub of [...subscribers]) {
+            sub({
+              type: 'tool_execution_end',
+              toolName: 'read',
+              toolCallId: 'read-1',
+              isError: false,
+              result: {
+                content: [
+                  {
+                    type: 'text',
+                    text: 'x'.repeat(250_000),
+                  },
+                ],
+              },
+            });
+          }
+
+          if (abortCalled) {
+            return;
+          }
+
+          const callback = (globalThis as any).__piFactoryPlanCallbacks?.get(task.id);
+          if (!callback) throw new Error('save_plan callback not registered');
+          callbackInvoked = true;
+          callback({
+            acceptanceCriteria: ['Large read output criterion'],
+            plan: {
+              goal: 'Plan despite large read output',
+              steps: ['Step one'],
+              validation: ['Validate one'],
+              cleanup: [],
+              generatedAt: new Date().toISOString(),
+            },
+          });
+        }),
+        abort: vi.fn(async () => {
+          abortCalled = true;
+        }),
+      },
+    });
+
+    const result = await planTask({
+      task,
+      workspaceId: 'workspace-test',
+      workspacePath,
+      broadcastToWorkspace: () => {},
+    });
+
+    expect(result).not.toBeNull();
+    expect(callbackInvoked).toBe(true);
+    expect(promptCount).toBe(1);
+
+    const persistedTask = parseTaskFile(task.filePath);
+    expect(persistedTask.frontmatter.plan).toBeDefined();
+    expect(persistedTask.frontmatter.planningStatus).toBe('completed');
+  });
+
   it('gives the agent a grace turn to call save_plan when planning ends due output length', async () => {
     const workspacePath = mkdtempSync(join(tmpdir(), 'pi-factory-plan-task-'));
     tempDirs.push(workspacePath);

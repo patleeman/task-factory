@@ -1768,7 +1768,6 @@ export function resolvePlanningGuardrails(raw: unknown): PlanningGuardrails {
   return {
     timeoutMs: coercePlanningGuardrailNumber(candidate.timeoutMs, DEFAULT_PLANNING_GUARDRAILS.timeoutMs),
     maxToolCalls: coercePlanningGuardrailNumber(candidate.maxToolCalls, DEFAULT_PLANNING_GUARDRAILS.maxToolCalls),
-    maxReadBytes: coercePlanningGuardrailNumber(candidate.maxReadBytes, DEFAULT_PLANNING_GUARDRAILS.maxReadBytes),
   };
 }
 
@@ -1873,7 +1872,7 @@ export function buildPlanningPrompt(
   prompt += `10. Call the \`save_plan\` tool **exactly once** with taskId "${task.id}", acceptanceCriteria, goal, steps, validation, and cleanup.\n`;
   prompt += `11. Cleanup items are post-completion tasks (pass an empty array if none needed).\n`;
   prompt += `12. After calling \`save_plan\`, stop immediately. Do not run any further tools or actions.\n`;
-  prompt += `13. Stay within planning guardrails: at most ${guardrails.maxToolCalls} tool calls and about ${Math.round(guardrails.maxReadBytes / 1024)}KB of total read output. Prefer targeted reads over broad scans.\n`;
+  prompt += `13. Stay within planning guardrails: at most ${guardrails.maxToolCalls} tool calls. Prefer targeted reads over broad scans.\n`;
   return prompt;
 }
 
@@ -1926,7 +1925,7 @@ export function buildPlanningResumePrompt(
   prompt += `6. Keep wording short and easy to scan: goal should be 1-2 short sentences, and each step/validation/cleanup item should be one short line when possible. Avoid walls of text.\n`;
   prompt += `7. Call the \`save_plan\` tool exactly once with taskId "${task.id}", acceptanceCriteria, goal, steps, validation, and cleanup.\n`;
   prompt += `8. After calling \`save_plan\`, stop immediately.\n`;
-  prompt += `9. Stay within planning guardrails: at most ${guardrails.maxToolCalls} tool calls and about ${Math.round(guardrails.maxReadBytes / 1024)}KB of total read output.\n`;
+  prompt += `9. Stay within planning guardrails: at most ${guardrails.maxToolCalls} tool calls.\n`;
 
   return prompt;
 }
@@ -2178,7 +2177,6 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
   let savedPlan: TaskPlan | null = null;
   let hasPersistedPlan = false;
   let planningToolCallCount = 0;
-  let planningReadBytes = 0;
   let planningGuardrailAbortMessage: string | null = null;
   let planningTurnLimitMessage: string | null = null;
   let graceTurnActive = false;
@@ -2274,18 +2272,6 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
         return;
       }
 
-      if (event.toolName !== 'read') {
-        return;
-      }
-
-      const resultText = extractToolResultText((event as any).result) || '';
-      planningReadBytes += Buffer.byteLength(resultText, 'utf8');
-
-      if (planningReadBytes > planningGuardrails.maxReadBytes) {
-        abortForPlanningGuardrail(
-          `read-output budget exceeded (${planningReadBytes}/${planningGuardrails.maxReadBytes} bytes). Narrow scope or raise planning guardrails in Settings.`,
-        );
-      }
     });
 
     // Load task attachments for the planning prompt

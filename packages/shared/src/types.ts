@@ -90,13 +90,11 @@ export interface TaskDefaults {
 export interface PlanningGuardrails {
   timeoutMs: number;
   maxToolCalls: number;
-  maxReadBytes: number;
 }
 
 export const DEFAULT_PLANNING_GUARDRAILS: PlanningGuardrails = {
   timeoutMs: 30 * 60 * 1000,
-  maxToolCalls: 40,
-  maxReadBytes: 180_000,
+  maxToolCalls: 100,
 };
 
 // =============================================================================
