@@ -15,6 +15,7 @@ This directory contains developer-facing documentation for this repository.
 4. [Operations](./operations/README.md) — deploy/observe/maintain guidance.
    - [Runbooks](./operations/runbooks/README.md) — repeatable operational procedures.
    - [Troubleshooting](./operations/troubleshooting/README.md) — issue diagnosis playbooks.
+   - [Security Posture](./operations/security-posture.md) — accepted-risk model and release-time risk handling.
 5. [Contribution](./contribution/README.md) — contribution workflow and quality standards.
    - [Extension + Execution Skill Customization](./contribution/extensions-and-execution-skills.md) — extension/skill discovery, hook behavior, safety guardrails, and validation checks.
    - [Developer Commands Reference](./contribution/developer-commands.md) — build/dev/lint/typecheck/test/coverage commands.

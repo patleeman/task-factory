@@ -1,15 +1,25 @@
 # Operations
 
-Use this section to document how the system is deployed, monitored, and maintained.
+This section captures the **post-reset operations docs** for running, releasing, and supporting Task Factory reliably.
 
-## Subsections
+## Runbooks
 
-- [Runbooks](./runbooks/README.md)
-- [Troubleshooting](./troubleshooting/README.md)
+- [Factory Runtime Operations](./runbooks/factory-runtime-operations.md) — runtime configuration, host binding, logging, and queue/factory controls.
+- [Factory Release Checklist](./runbooks/factory-release-checklist.md) — required quality gates, dependency/audit checks, and release signoff workflow.
 
-## What to include
+## Troubleshooting
 
-- Deployment workflows
-- Monitoring and alerting strategy
-- Incident response expectations
-- Access and escalation paths
+- [Planning Stuck or Not Progressing](./troubleshooting/planning-stuck.md)
+- [Queue Not Progressing](./troubleshooting/queue-not-progressing.md)
+- [WebSocket Disconnects or Missing Live Updates](./troubleshooting/websocket-disconnects.md)
+- [Pi Auth / Model Config Issues](./troubleshooting/pi-auth-and-config.md)
+
+## Security posture
+
+- [Security Posture and Accepted-Risk Handling](./security-posture.md)
+
+## Related docs
+
+- [REST API Reference](../api/rest-api-reference.md)
+- [WebSocket Event Reference](../api/websocket-events-reference.md)
+- [State Contract (canonical)](../architecture/state-contract.md)

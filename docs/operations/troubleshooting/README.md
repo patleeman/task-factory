@@ -1,10 +1,17 @@
 # Troubleshooting
 
-Store issue diagnosis and remediation guides in this directory.
+Issue diagnosis and remediation guides for common Task Factory failures.
+
+## Guides
+
+- [Planning Stuck or Not Progressing](./planning-stuck.md)
+- [Queue Not Progressing](./queue-not-progressing.md)
+- [WebSocket Disconnects or Missing Live Updates](./websocket-disconnects.md)
+- [Pi Auth / Model Config Issues](./pi-auth-and-config.md)
 
 ## Naming convention
 
-`symptom-or-alert-name.md` (example: `high-api-latency.md`)
+`symptom-or-alert-name.md` (example: `queue-not-progressing.md`)
 
 ## Authoring steps
 

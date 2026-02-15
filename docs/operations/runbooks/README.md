@@ -1,10 +1,15 @@
 # Runbooks
 
-Store repeatable operational procedures in this directory.
+Repeatable procedures for operating Task Factory.
+
+## Core runbooks
+
+- [Factory Runtime Operations](./factory-runtime-operations.md)
+- [Factory Release Checklist](./factory-release-checklist.md)
 
 ## Naming convention
 
-`service-or-scope-action.md` (example: `api-rollback-release.md`)
+`service-or-scope-action.md` (example: `factory-runtime-operations.md`)
 
 ## Authoring steps
 
