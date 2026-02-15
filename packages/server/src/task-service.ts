@@ -3,7 +3,7 @@
 // =============================================================================
 // Manages task files, parsing, and operations
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, rmSync, statSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, rmSync, statSync, copyFileSync } from 'fs';
 import { join, basename, dirname } from 'path';
 import YAML from 'yaml';
 import {
@@ -260,6 +260,42 @@ export function getTaskAttachmentsDir(tasksDir: string, taskId: string): string 
   return join(getTaskDir(tasksDir, taskId), 'attachments');
 }
 
+const ARCHIVED_CONVERSATION_FILENAME = 'conversation-archive.jsonl';
+
+function archiveTaskConversationSnapshot(task: Task): void {
+  const sessionFile = typeof task.frontmatter.sessionFile === 'string'
+    ? task.frontmatter.sessionFile.trim()
+    : '';
+
+  if (!sessionFile || !existsSync(sessionFile)) {
+    return;
+  }
+
+  let sourceStats;
+  try {
+    sourceStats = statSync(sessionFile);
+  } catch {
+    return;
+  }
+
+  if (!sourceStats.isFile()) {
+    return;
+  }
+
+  const taskDir = dirname(task.filePath);
+  if (!existsSync(taskDir)) {
+    mkdirSync(taskDir, { recursive: true });
+  }
+
+  const archivePath = join(taskDir, ARCHIVED_CONVERSATION_FILENAME);
+
+  try {
+    copyFileSync(sessionFile, archivePath);
+  } catch (err) {
+    console.warn(`[TaskService] Failed to snapshot conversation for ${task.id}:`, err);
+  }
+}
+
 export function saveTaskFile(task: Task): void {
   const serialized = serializeTask(task);
   const taskDir = dirname(task.filePath);
@@ -488,6 +524,11 @@ export function moveTaskToPhase(
   });
 
   saveTaskFile(task);
+
+  if (newPhase === 'archived') {
+    archiveTaskConversationSnapshot(task);
+  }
+
   return task;
 }
 

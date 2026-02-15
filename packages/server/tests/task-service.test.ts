@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, existsSync, readFileSync } from 'fs';
+import { mkdtempSync, mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import type { Task } from '@pi-factory/shared';
@@ -13,6 +13,7 @@ import {
   shouldResumeInterruptedPlanning,
   updateTask,
   getTaskDir,
+  saveTaskFile,
 } from '../src/task-service.js';
 
 function createTask(overrides: Partial<Task['frontmatter']> = {}): Task {
@@ -405,6 +406,165 @@ describe('archived restore moves', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('archived conversation snapshots', () => {
+  function getArchivedConversationPath(tasksDir: string, taskId: string): string {
+    return join(getTaskDir(tasksDir, taskId), 'conversation-archive.jsonl');
+  }
+
+  it('copies the task conversation into the task directory when archiving', () => {
+    const { workspacePath, tasksDir } = createTempWorkspace();
+
+    const task = createTaskFile(workspacePath, tasksDir, {
+      title: 'Archive conversation copy',
+      content: 'archive with snapshot',
+      acceptanceCriteria: ['done'],
+    });
+
+    const sessionDir = join(workspacePath, '.pi', 'sessions');
+    mkdirSync(sessionDir, { recursive: true });
+
+    const sessionFile = join(sessionDir, 'task-session.jsonl');
+    const conversation = '{"role":"assistant","content":"hello"}\n';
+    writeFileSync(sessionFile, conversation, 'utf-8');
+
+    task.frontmatter.sessionFile = sessionFile;
+    moveTaskToPhase(task, 'archived', 'user', 'archive', discoverTasks(tasksDir));
+
+    const archivedConversationPath = getArchivedConversationPath(tasksDir, task.id);
+    expect(existsSync(archivedConversationPath)).toBe(true);
+    expect(readFileSync(archivedConversationPath, 'utf-8')).toBe(conversation);
+
+    const persisted = discoverTasks(tasksDir).find((candidate) => candidate.id === task.id)!;
+    expect(persisted.frontmatter.phase).toBe('archived');
+  });
+
+  it('refreshes the archived conversation snapshot when archiving again', () => {
+    const { workspacePath, tasksDir } = createTempWorkspace();
+
+    const task = createTaskFile(workspacePath, tasksDir, {
+      title: 'Re-archive conversation copy',
+      content: 'refresh archive snapshot',
+      acceptanceCriteria: ['done'],
+    });
+
+    const sessionDir = join(workspacePath, '.pi', 'sessions');
+    mkdirSync(sessionDir, { recursive: true });
+
+    const sessionFile = join(sessionDir, 'task-session.jsonl');
+    const firstConversation = '{"turn":1}\n';
+    writeFileSync(sessionFile, firstConversation, 'utf-8');
+
+    task.frontmatter.sessionFile = sessionFile;
+    saveTaskFile(task);
+
+    let tasks = discoverTasks(tasksDir);
+    moveTaskToPhase(tasks.find((candidate) => candidate.id === task.id)!, 'archived', 'user', 'archive first', tasks);
+
+    const archivedConversationPath = getArchivedConversationPath(tasksDir, task.id);
+    expect(readFileSync(archivedConversationPath, 'utf-8')).toBe(firstConversation);
+
+    const secondConversation = '{"turn":2}\n';
+    writeFileSync(sessionFile, secondConversation, 'utf-8');
+
+    tasks = discoverTasks(tasksDir);
+    moveTaskToPhase(tasks.find((candidate) => candidate.id === task.id)!, 'complete', 'user', 'restore', tasks);
+
+    tasks = discoverTasks(tasksDir);
+    moveTaskToPhase(tasks.find((candidate) => candidate.id === task.id)!, 'archived', 'user', 'archive second', tasks);
+
+    expect(readFileSync(archivedConversationPath, 'utf-8')).toBe(secondConversation);
+  });
+
+  it('allows archiving when the conversation file is missing or unset', () => {
+    const { workspacePath, tasksDir } = createTempWorkspace();
+
+    const withoutSession = createTaskFile(workspacePath, tasksDir, {
+      title: 'Archive without session',
+      content: 'no conversation file',
+      acceptanceCriteria: ['done'],
+    });
+
+    expect(() => {
+      moveTaskToPhase(withoutSession, 'archived', 'user', 'archive without session', discoverTasks(tasksDir));
+    }).not.toThrow();
+
+    const withoutSessionPersisted = discoverTasks(tasksDir).find((task) => task.id === withoutSession.id)!;
+    expect(withoutSessionPersisted.frontmatter.phase).toBe('archived');
+    expect(existsSync(getArchivedConversationPath(tasksDir, withoutSession.id))).toBe(false);
+
+    const missingSession = createTaskFile(workspacePath, tasksDir, {
+      title: 'Archive with missing session',
+      content: 'missing file should not block archive',
+      acceptanceCriteria: ['done'],
+    });
+
+    missingSession.frontmatter.sessionFile = join(workspacePath, '.pi', 'sessions', 'missing-session.jsonl');
+
+    expect(() => {
+      moveTaskToPhase(missingSession, 'archived', 'user', 'archive missing session', discoverTasks(tasksDir));
+    }).not.toThrow();
+
+    const missingSessionPersisted = discoverTasks(tasksDir).find((task) => task.id === missingSession.id)!;
+    expect(missingSessionPersisted.frontmatter.phase).toBe('archived');
+    expect(existsSync(getArchivedConversationPath(tasksDir, missingSession.id))).toBe(false);
+
+    const directorySession = createTaskFile(workspacePath, tasksDir, {
+      title: 'Archive with directory session path',
+      content: 'directory should not block archive',
+      acceptanceCriteria: ['done'],
+    });
+
+    const sessionDir = join(workspacePath, '.pi', 'sessions', 'directory-session');
+    mkdirSync(sessionDir, { recursive: true });
+    directorySession.frontmatter.sessionFile = sessionDir;
+
+    expect(() => {
+      moveTaskToPhase(directorySession, 'archived', 'user', 'archive directory session', discoverTasks(tasksDir));
+    }).not.toThrow();
+
+    const directorySessionPersisted = discoverTasks(tasksDir).find((task) => task.id === directorySession.id)!;
+    expect(directorySessionPersisted.frontmatter.phase).toBe('archived');
+    expect(existsSync(getArchivedConversationPath(tasksDir, directorySession.id))).toBe(false);
+  });
+
+  it('does not create archived conversation snapshots for non-archived moves', () => {
+    const { workspacePath, tasksDir } = createTempWorkspace();
+
+    const task = createTaskFile(workspacePath, tasksDir, {
+      title: 'Non-archive moves do not snapshot conversation',
+      content: 'should not snapshot before archive',
+      acceptanceCriteria: ['done'],
+    });
+
+    const sessionDir = join(workspacePath, '.pi', 'sessions');
+    mkdirSync(sessionDir, { recursive: true });
+
+    const sessionFile = join(sessionDir, 'task-session.jsonl');
+    writeFileSync(sessionFile, '{"turn":1}\n', 'utf-8');
+
+    task.frontmatter.sessionFile = sessionFile;
+    saveTaskFile(task);
+
+    const archivedConversationPath = getArchivedConversationPath(tasksDir, task.id);
+
+    let tasks = discoverTasks(tasksDir);
+    moveTaskToPhase(tasks.find((candidate) => candidate.id === task.id)!, 'ready', 'user', 'to ready', tasks);
+    expect(existsSync(archivedConversationPath)).toBe(false);
+
+    tasks = discoverTasks(tasksDir);
+    moveTaskToPhase(tasks.find((candidate) => candidate.id === task.id)!, 'executing', 'user', 'to executing', tasks);
+    expect(existsSync(archivedConversationPath)).toBe(false);
+
+    tasks = discoverTasks(tasksDir);
+    moveTaskToPhase(tasks.find((candidate) => candidate.id === task.id)!, 'complete', 'user', 'to complete', tasks);
+    expect(existsSync(archivedConversationPath)).toBe(false);
+
+    tasks = discoverTasks(tasksDir);
+    moveTaskToPhase(tasks.find((candidate) => candidate.id === task.id)!, 'ready', 'user', 'rework', tasks);
+    expect(existsSync(archivedConversationPath)).toBe(false);
   });
 });
 
