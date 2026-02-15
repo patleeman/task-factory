@@ -9,6 +9,7 @@ import type {
   PlanningAgentStatus,
   Shelf,
   DraftTask,
+  IdeaBacklog,
   TaskDefaults,
   PostExecutionSummary,
   CriterionStatus,
@@ -607,6 +608,56 @@ export const api = {
     const res = await fetch(`/api/workspaces/${workspaceId}/shelf`, {
       method: 'DELETE',
     })
+    return res.json()
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Workspace Idea Backlog
+  // ─────────────────────────────────────────────────────────────────────────
+
+  async getIdeaBacklog(workspaceId: string): Promise<IdeaBacklog> {
+    const res = await fetch(`/api/workspaces/${workspaceId}/idea-backlog`)
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to load idea backlog' }))
+      throw new Error(err.error || `Failed to load idea backlog (${res.status})`)
+    }
+    return res.json()
+  },
+
+  async addIdeaBacklogItem(workspaceId: string, text: string): Promise<IdeaBacklog> {
+    const res = await fetch(`/api/workspaces/${workspaceId}/idea-backlog/items`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to add idea' }))
+      throw new Error(err.error || `Failed to add idea (${res.status})`)
+    }
+    return res.json()
+  },
+
+  async removeIdeaBacklogItem(workspaceId: string, ideaId: string): Promise<IdeaBacklog> {
+    const res = await fetch(`/api/workspaces/${workspaceId}/idea-backlog/items/${ideaId}`, {
+      method: 'DELETE',
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to delete idea' }))
+      throw new Error(err.error || `Failed to delete idea (${res.status})`)
+    }
+    return res.json()
+  },
+
+  async reorderIdeaBacklog(workspaceId: string, ideaIds: string[]): Promise<IdeaBacklog> {
+    const res = await fetch(`/api/workspaces/${workspaceId}/idea-backlog/reorder`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ideaIds }),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to reorder ideas' }))
+      throw new Error(err.error || `Failed to reorder ideas (${res.status})`)
+    }
     return res.json()
   },
 

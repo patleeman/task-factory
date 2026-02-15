@@ -266,6 +266,14 @@ export async function deleteWorkspace(id: string): Promise<boolean> {
     // Best-effort cleanup
   }
 
+  // Remove idea backlog data (.pi/idea-backlog.json)
+  const ideaBacklogPath = join(entry.path, '.pi', 'idea-backlog.json');
+  try {
+    await rm(ideaBacklogPath);
+  } catch {
+    // Best-effort cleanup
+  }
+
   // Remove planning attachments (.pi/planning-attachments/)
   const planningAttDir = join(entry.path, '.pi', 'planning-attachments');
   try {

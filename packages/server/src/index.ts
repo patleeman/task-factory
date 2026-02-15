@@ -2189,6 +2189,13 @@ import {
   clearShelf,
 } from './shelf-service.js';
 
+import {
+  getIdeaBacklog,
+  addIdeaBacklogItem,
+  removeIdeaBacklogItem,
+  reorderIdeaBacklogItems,
+} from './idea-backlog-service.js';
+
 // ─── Planning Attachments ────────────────────────────────────────────────────
 
 function getPlanningAttachmentsDir(workspace: import('@pi-factory/shared').Workspace): string {
@@ -2521,6 +2528,73 @@ app.get('/api/workspaces/:workspaceId/shelf', async (req, res) => {
     return;
   }
   res.json(await getShelf(workspace.id));
+});
+
+// Get workspace idea backlog
+app.get('/api/workspaces/:workspaceId/idea-backlog', async (req, res) => {
+  const workspace = await getWorkspaceById(req.params.workspaceId);
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return;
+  }
+
+  const backlog = await getIdeaBacklog(workspace.id);
+  res.json(backlog);
+});
+
+// Add an idea to workspace idea backlog
+app.post('/api/workspaces/:workspaceId/idea-backlog/items', async (req, res) => {
+  const workspace = await getWorkspaceById(req.params.workspaceId);
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return;
+  }
+
+  const text = typeof req.body?.text === 'string' ? req.body.text : '';
+
+  try {
+    const backlog = await addIdeaBacklogItem(workspace.id, text);
+    broadcastToWorkspace(workspace.id, { type: 'idea_backlog:updated', workspaceId: workspace.id, backlog });
+    res.json(backlog);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to add idea';
+    res.status(400).json({ error: message });
+  }
+});
+
+// Remove an idea from workspace idea backlog
+app.delete('/api/workspaces/:workspaceId/idea-backlog/items/:ideaId', async (req, res) => {
+  const workspace = await getWorkspaceById(req.params.workspaceId);
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return;
+  }
+
+  const backlog = await removeIdeaBacklogItem(workspace.id, req.params.ideaId);
+  broadcastToWorkspace(workspace.id, { type: 'idea_backlog:updated', workspaceId: workspace.id, backlog });
+  res.json(backlog);
+});
+
+// Reorder ideas within workspace idea backlog
+app.post('/api/workspaces/:workspaceId/idea-backlog/reorder', async (req, res) => {
+  const workspace = await getWorkspaceById(req.params.workspaceId);
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return;
+  }
+
+  const ideaIds = Array.isArray(req.body?.ideaIds)
+    ? req.body.ideaIds.filter((id: unknown): id is string => typeof id === 'string')
+    : [];
+
+  try {
+    const backlog = await reorderIdeaBacklogItems(workspace.id, ideaIds);
+    broadcastToWorkspace(workspace.id, { type: 'idea_backlog:updated', workspaceId: workspace.id, backlog });
+    res.json(backlog);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to reorder ideas';
+    res.status(400).json({ error: message });
+  }
 });
 
 // Update draft task on shelf

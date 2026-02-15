@@ -790,6 +790,7 @@ export type ServerEvent =
     overrides?: WorkspaceWorkflowOverrides;
     globalDefaults?: WorkspaceWorkflowSettings;
   }
+  | { type: 'idea_backlog:updated'; workspaceId: string; backlog: IdeaBacklog }
   // Planning agent events
   | PlanningEvent;
 
@@ -863,6 +864,17 @@ export type ShelfItem =
 
 export interface Shelf {
   items: ShelfItem[];
+}
+
+// Workspace idea backlog (simple scratch-pad list)
+export interface IdeaBacklogItem {
+  id: string;
+  text: string;
+  createdAt: string;
+}
+
+export interface IdeaBacklog {
+  items: IdeaBacklogItem[];
 }
 
 // Planning agent chat message

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { ArrowLeft, Power } from 'lucide-react'
+import { ArrowLeft, Lightbulb, Power } from 'lucide-react'
 import { useParams, useNavigate, useMatch, useOutletContext } from 'react-router-dom'
-import type { Task, Workspace, ActivityEntry, Phase, QueueStatus, PlanningMessage, QAAnswer, AgentExecutionStatus, WorkspaceWorkflowSettings, Artifact, DraftTask, NewTaskFormState } from '@pi-factory/shared'
+import type { Task, Workspace, ActivityEntry, Phase, QueueStatus, PlanningMessage, QAAnswer, AgentExecutionStatus, WorkspaceWorkflowSettings, Artifact, DraftTask, IdeaBacklog, IdeaBacklogItem, NewTaskFormState } from '@pi-factory/shared'
 import { DEFAULT_WORKFLOW_SETTINGS } from '@pi-factory/shared'
 import { api, type WorkflowAutomationResponse } from '../api'
 import { AppIcon } from './AppIcon'
@@ -9,6 +9,7 @@ import { PipelineBar } from './PipelineBar'
 import { TaskDetailPane } from './TaskDetailPane'
 import { CreateTaskPane, type CreateTaskData } from './CreateTaskPane'
 import { ShelfPane } from './ShelfPane'
+import { IdeaBacklogPane } from './IdeaBacklogPane'
 import { ResizeHandle } from './ResizeHandle'
 import type { WorkspaceWebSocketConnection } from '../hooks/useWebSocket'
 import { useAgentStreaming } from '../hooks/useAgentStreaming'
@@ -100,6 +101,8 @@ export function WorkspacePage() {
   const toastTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
 
   const [selectedArtifact, setSelectedArtifact] = useState<Artifact | null>(null)
+  const [ideaBacklog, setIdeaBacklog] = useState<IdeaBacklog | null>(null)
+  const [activeForemanPane, setActiveForemanPane] = useState<'workspace' | 'ideas'>('workspace')
   const [planningMessages, setPlanningMessages] = useState<PlanningMessage[]>([])
   const [agentTaskFormUpdates, setAgentTaskFormUpdates] = useState<Partial<NewTaskFormState> | null>(null)
   const [newTaskPrefill, setNewTaskPrefill] = useState<{ id: string; formState: Partial<NewTaskFormState>; sourceDraftId?: string } | null>(null)
@@ -250,6 +253,8 @@ export function WorkspacePage() {
     setError(null)
     setActivity([])
     setSelectedArtifact(null)
+    setIdeaBacklog(null)
+    setActiveForemanPane('workspace')
     setAgentTaskFormUpdates(null)
     setNewTaskPrefill(null)
     setDraftTaskStates({})
@@ -271,12 +276,16 @@ export function WorkspacePage() {
       api.getActivity(workspaceId, 100),
       api.getWorkflowAutomation(workspaceId),
       api.getPlanningMessages(workspaceId),
+      api.getIdeaBacklog(workspaceId).catch((err) => {
+        console.warn('Failed to load idea backlog:', err)
+        return { items: [] }
+      }),
       api.getActiveExecutions(workspaceId).catch((err) => {
         console.warn('Failed to load active execution snapshots:', err)
         return []
       }),
     ])
-      .then(([ws, tasksData, activityData, automationData, planningMsgs, activeExecutions]) => {
+      .then(([ws, tasksData, activityData, automationData, planningMsgs, ideaBacklogData, activeExecutions]) => {
         setWorkspace({
           ...ws,
           config: {
@@ -325,6 +334,7 @@ export function WorkspacePage() {
         setAutomationSettings(automationData.effective)
         setQueueStatus(automationData.queueStatus)
         setPlanningMessages(planningMsgs)
+        setIdeaBacklog(ideaBacklogData)
 
         const tasksById = new Map(tasksData.map((task) => [task.id, task]))
 
@@ -539,6 +549,9 @@ export function WorkspacePage() {
           break
         case 'planning:task_form_updated':
           setAgentTaskFormUpdates(msg.formState)
+          break
+        case 'idea_backlog:updated':
+          setIdeaBacklog(msg.backlog)
           break
         case 'shelf:updated':
           // Legacy event retained for compatibility with older clients/tools.
@@ -818,6 +831,7 @@ export function WorkspacePage() {
       html: artifact.html,
       createdAt: new Date().toISOString(),
     })
+    setActiveForemanPane('workspace')
     if (isCreateRoute) {
       navigate(workspaceRootPath)
     }
@@ -826,6 +840,69 @@ export function WorkspacePage() {
   const handleCloseArtifact = useCallback(() => {
     setSelectedArtifact(null)
   }, [])
+
+  const handleAddIdea = useCallback(async (text: string) => {
+    if (!workspaceId) return
+    try {
+      const updatedBacklog = await api.addIdeaBacklogItem(workspaceId, text)
+      setIdeaBacklog(updatedBacklog)
+    } catch (err) {
+      console.error('Failed to add idea:', err)
+      showToast('Failed to add idea')
+    }
+  }, [workspaceId, showToast])
+
+  const handleDeleteIdea = useCallback(async (ideaId: string) => {
+    if (!workspaceId) return
+    try {
+      const updatedBacklog = await api.removeIdeaBacklogItem(workspaceId, ideaId)
+      setIdeaBacklog(updatedBacklog)
+    } catch (err) {
+      console.error('Failed to delete idea:', err)
+      showToast('Failed to delete idea')
+    }
+  }, [workspaceId, showToast])
+
+  const handleReorderIdeas = useCallback(async (ideaIds: string[]) => {
+    if (!workspaceId || !ideaBacklog) return
+
+    const originalBacklog = ideaBacklog
+    const byId = new Map(originalBacklog.items.map((item) => [item.id, item] as const))
+    const optimisticItems = ideaIds
+      .map((id) => byId.get(id))
+      .filter((item): item is IdeaBacklogItem => item !== undefined)
+
+    if (optimisticItems.length !== originalBacklog.items.length) {
+      return
+    }
+
+    setIdeaBacklog({ items: optimisticItems })
+
+    try {
+      const updatedBacklog = await api.reorderIdeaBacklog(workspaceId, ideaIds)
+      setIdeaBacklog(updatedBacklog)
+    } catch (err) {
+      console.error('Failed to reorder ideas:', err)
+      try {
+        const latestBacklog = await api.getIdeaBacklog(workspaceId)
+        setIdeaBacklog(latestBacklog)
+      } catch {
+        setIdeaBacklog(originalBacklog)
+      }
+      showToast('Failed to reorder ideas')
+    }
+  }, [workspaceId, ideaBacklog, showToast])
+
+  const handlePromoteIdea = useCallback((idea: IdeaBacklogItem) => {
+    setNewTaskPrefill({
+      id: `${idea.id}-${Date.now()}`,
+      formState: {
+        content: idea.text,
+      },
+    })
+    setAgentTaskFormUpdates(null)
+    navigate(`${workspaceRootPath}/tasks/new`)
+  }, [navigate, workspaceRootPath])
 
   const handleOpenDraftTask = useCallback((draftTask: DraftTask) => {
     const content = formatDraftTaskForNewTaskForm(draftTask)
@@ -1086,6 +1163,20 @@ export function WorkspacePage() {
             )}
             {isFactoryRunning ? 'STOP FACTORY' : 'START FACTORY'}
           </button>
+          {mode === 'foreman' && !isCreateRoute && (
+            <button
+              onClick={() => setActiveForemanPane('ideas')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold border transition-colors ${
+                activeForemanPane === 'ideas'
+                  ? 'bg-amber-500 text-slate-900 border-amber-400'
+                  : 'bg-slate-800 text-amber-200 border-slate-700 hover:bg-slate-700'
+              }`}
+              title="Open workspace idea backlog"
+            >
+              <AppIcon icon={Lightbulb} size="xs" />
+              Idea Backlog
+            </button>
+          )}
           <ThemeToggle />
           {isConnected ? (
             <span className="flex items-center gap-1.5 text-xs text-green-400">
@@ -1223,6 +1314,15 @@ export function WorkspacePage() {
                   onSubmit={handleCreateTask}
                   agentFormUpdates={agentTaskFormUpdates}
                   prefillRequest={newTaskPrefill}
+                />
+              ) : activeForemanPane === 'ideas' ? (
+                <IdeaBacklogPane
+                  backlog={ideaBacklog}
+                  onBack={() => setActiveForemanPane('workspace')}
+                  onAddIdea={handleAddIdea}
+                  onDeleteIdea={handleDeleteIdea}
+                  onReorderIdeas={handleReorderIdeas}
+                  onPromoteIdea={handlePromoteIdea}
                 />
               ) : (
                 <ShelfPane

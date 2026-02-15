@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import type { PlanningMessage, Shelf } from '@pi-factory/shared';
+import type { IdeaBacklog, PlanningMessage, Shelf } from '@pi-factory/shared';
 
 const originalHome = process.env.HOME;
 const originalUserProfile = process.env.USERPROFILE;
@@ -123,12 +123,24 @@ describe('resetPlanningSession', () => {
       ],
     };
 
+    const initialIdeaBacklog: IdeaBacklog = {
+      items: [
+        {
+          id: 'idea-1',
+          text: 'Remember to improve onboarding copy',
+          createdAt: now,
+        },
+      ],
+    };
+
     writeFileSync(join(piDir, 'planning-session-id.txt'), oldSessionId, 'utf-8');
     writeFileSync(join(piDir, 'planning-messages.json'), JSON.stringify(oldMessages, null, 2), 'utf-8');
     writeFileSync(join(piDir, 'shelf.json'), JSON.stringify(initialShelf, null, 2), 'utf-8');
+    writeFileSync(join(piDir, 'idea-backlog.json'), JSON.stringify(initialIdeaBacklog, null, 2), 'utf-8');
 
     const { resetPlanningSession } = await import('../src/planning-agent-service.js');
     const { getShelf } = await import('../src/shelf-service.js');
+    const { getIdeaBacklog } = await import('../src/idea-backlog-service.js');
 
     const events: any[] = [];
     const newSessionId = await resetPlanningSession(workspaceId, (event) => events.push(event));
@@ -149,6 +161,12 @@ describe('resetPlanningSession', () => {
     const shelfOnDisk = JSON.parse(readFileSync(join(piDir, 'shelf.json'), 'utf-8')) as Shelf;
     expect(shelfOnDisk.items).toEqual([]);
 
+    const ideaBacklogInMemory = await getIdeaBacklog(workspaceId);
+    expect(ideaBacklogInMemory).toEqual(initialIdeaBacklog);
+
+    const ideaBacklogOnDisk = JSON.parse(readFileSync(join(piDir, 'idea-backlog.json'), 'utf-8')) as IdeaBacklog;
+    expect(ideaBacklogOnDisk).toEqual(initialIdeaBacklog);
+
     const resetEvent = events.find((event) => event.type === 'planning:session_reset');
     expect(resetEvent).toEqual({
       type: 'planning:session_reset',
@@ -166,7 +184,11 @@ describe('resetPlanningSession', () => {
     // Simulate reload: clear module cache and fetch shelf again from disk.
     vi.resetModules();
     const { getShelf: getShelfAfterReload } = await import('../src/shelf-service.js');
+    const { getIdeaBacklog: getIdeaBacklogAfterReload } = await import('../src/idea-backlog-service.js');
     const shelfAfterReload = await getShelfAfterReload(workspaceId);
     expect(shelfAfterReload.items).toEqual([]);
+
+    const ideaBacklogAfterReload = await getIdeaBacklogAfterReload(workspaceId);
+    expect(ideaBacklogAfterReload).toEqual(initialIdeaBacklog);
   });
 });
