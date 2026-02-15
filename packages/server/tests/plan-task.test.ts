@@ -54,10 +54,21 @@ vi.mock('../src/activity-service.js', () => ({
   })),
 }));
 
+let mockedFactorySettings: Record<string, unknown> | null = null;
+
+vi.mock('../src/pi-integration.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/pi-integration.js')>();
+  return {
+    ...actual,
+    loadPiFactorySettings: () => mockedFactorySettings,
+  };
+});
+
 describe('planTask', () => {
   const tempDirs: string[] = [];
 
   beforeEach(() => {
+    mockedFactorySettings = null;
     createAgentSessionMock.mockReset();
     sessionManagerCreateMock.mockClear();
     sessionManagerOpenMock.mockClear();
@@ -371,6 +382,159 @@ describe('planTask', () => {
         && event.to === 'ready'
       )),
     ).toBe(true);
+  });
+
+  it('auto-promotes backlog tasks using global workflow defaults when workspace overrides are unset', async () => {
+    mockedFactorySettings = {
+      workflowDefaults: {
+        readyLimit: 5,
+        executingLimit: 1,
+        backlogToReady: true,
+        readyToExecuting: false,
+      },
+    };
+
+    const workspacePath = mkdtempSync(join(tmpdir(), 'pi-factory-plan-task-'));
+    tempDirs.push(workspacePath);
+
+    const piDir = join(workspacePath, '.pi');
+    const tasksDir = join(piDir, 'tasks');
+    mkdirSync(tasksDir, { recursive: true });
+
+    writeFileSync(
+      join(piDir, 'factory.json'),
+      JSON.stringify({
+        taskLocations: ['.pi/tasks'],
+        defaultTaskLocation: '.pi/tasks',
+      }),
+      'utf-8',
+    );
+
+    const { createTask, parseTaskFile } = await import('../src/task-service.js');
+    const { planTask } = await import('../src/agent-execution-service.js');
+
+    const task = createTask(workspacePath, tasksDir, {
+      content: 'Use global defaults for planning auto-promotion',
+      acceptanceCriteria: [],
+    });
+
+    createAgentSessionMock.mockResolvedValue({
+      session: {
+        subscribe: () => () => {},
+        prompt: async () => {
+          const callback = (globalThis as any).__piFactoryPlanCallbacks?.get(task.id);
+          if (!callback) {
+            throw new Error('save_plan callback not registered');
+          }
+
+          callback({
+            acceptanceCriteria: ['Task is planned'],
+            plan: {
+              goal: 'Goal',
+              steps: ['Step one'],
+              validation: ['Validate one'],
+              cleanup: [],
+              generatedAt: new Date().toISOString(),
+            },
+          });
+        },
+        abort: async () => {},
+      },
+    });
+
+    const result = await planTask({
+      task,
+      workspaceId: 'workspace-test',
+      workspacePath,
+      broadcastToWorkspace: () => {},
+    });
+
+    expect(result).not.toBeNull();
+
+    const persistedTask = parseTaskFile(task.filePath);
+    expect(persistedTask.frontmatter.phase).toBe('ready');
+  });
+
+  it('respects global ready WIP limit when workspace ready limit override is unset', async () => {
+    mockedFactorySettings = {
+      workflowDefaults: {
+        readyLimit: 1,
+        executingLimit: 1,
+        backlogToReady: true,
+        readyToExecuting: false,
+      },
+    };
+
+    const workspacePath = mkdtempSync(join(tmpdir(), 'pi-factory-plan-task-'));
+    tempDirs.push(workspacePath);
+
+    const piDir = join(workspacePath, '.pi');
+    const tasksDir = join(piDir, 'tasks');
+    mkdirSync(tasksDir, { recursive: true });
+
+    writeFileSync(
+      join(piDir, 'factory.json'),
+      JSON.stringify({
+        taskLocations: ['.pi/tasks'],
+        defaultTaskLocation: '.pi/tasks',
+      }),
+      'utf-8',
+    );
+
+    const { createTask, parseTaskFile, discoverTasks, moveTaskToPhase } = await import('../src/task-service.js');
+    const { planTask } = await import('../src/agent-execution-service.js');
+
+    const existingReadyTask = createTask(workspacePath, tasksDir, {
+      content: 'Already ready task',
+      acceptanceCriteria: ['done'],
+    });
+    const liveTasks = discoverTasks(tasksDir);
+    const existingReadyLive = liveTasks.find((candidate) => candidate.id === existingReadyTask.id);
+    if (!existingReadyLive) {
+      throw new Error('Failed to seed ready task');
+    }
+    moveTaskToPhase(existingReadyLive, 'ready', 'user', 'seed ready WIP', liveTasks);
+
+    const task = createTask(workspacePath, tasksDir, {
+      content: 'Should stay backlog due to global ready WIP limit',
+      acceptanceCriteria: [],
+    });
+
+    createAgentSessionMock.mockResolvedValue({
+      session: {
+        subscribe: () => () => {},
+        prompt: async () => {
+          const callback = (globalThis as any).__piFactoryPlanCallbacks?.get(task.id);
+          if (!callback) {
+            throw new Error('save_plan callback not registered');
+          }
+
+          callback({
+            acceptanceCriteria: ['Task is planned'],
+            plan: {
+              goal: 'Goal',
+              steps: ['Step one'],
+              validation: ['Validate one'],
+              cleanup: [],
+              generatedAt: new Date().toISOString(),
+            },
+          });
+        },
+        abort: async () => {},
+      },
+    });
+
+    const result = await planTask({
+      task,
+      workspaceId: 'workspace-test',
+      workspacePath,
+      broadcastToWorkspace: () => {},
+    });
+
+    expect(result).not.toBeNull();
+
+    const persistedTask = parseTaskFile(task.filePath);
+    expect(persistedTask.frontmatter.phase).toBe('backlog');
   });
 
   it('does not auto-promote when ready WIP limit would be breached', async () => {

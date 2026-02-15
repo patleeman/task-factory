@@ -29,13 +29,6 @@ const DEFAULT_CONFIG: WorkspaceConfig = {
     defaultBranch: 'main',
     branchPrefix: 'feat/',
   },
-  queueProcessing: {
-    enabled: false,
-  },
-  workflowAutomation: {
-    backlogToReady: false,
-    readyToExecuting: false,
-  },
 };
 
 // =============================================================================

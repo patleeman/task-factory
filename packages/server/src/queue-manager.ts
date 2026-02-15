@@ -15,9 +15,10 @@
 // It recovers gracefully from server restarts by detecting orphaned executing tasks.
 
 import type { Task, ServerEvent, QueueStatus, Workspace } from '@pi-factory/shared';
-import { DEFAULT_WIP_LIMITS, getWorkspaceAutomationSettings } from '@pi-factory/shared';
+import { resolveWorkspaceWorkflowSettings } from '@pi-factory/shared';
 import { getWorkspaceById, getTasksDir, listWorkspaces, updateWorkspaceConfig } from './workspace-service.js';
 import { discoverTasks, moveTaskToPhase } from './task-service.js';
+import { loadGlobalWorkflowSettings } from './workflow-settings-service.js';
 import { executeTask, hasRunningSession } from './agent-execution-service.js';
 import { createSystemEvent } from './activity-service.js';
 import { logger } from './logger.js';
@@ -119,7 +120,9 @@ class QueueManager {
       const tasks = discoverTasks(tasksDir);
 
       const executingTasks = tasks.filter(t => t.frontmatter.phase === 'executing');
-      const wipLimit = workspace.config.wipLimits?.executing ?? DEFAULT_WIP_LIMITS.executing ?? 1;
+      const globalWorkflowDefaults = loadGlobalWorkflowSettings();
+      const workflowSettings = resolveWorkspaceWorkflowSettings(workspace.config, globalWorkflowDefaults);
+      const wipLimit = workflowSettings.executingLimit;
 
       // Check for orphaned executing tasks (no active session — e.g. after server restart)
       // Only resume orphans that haven't been attempted recently (avoid infinite retry loops
@@ -338,22 +341,32 @@ function getOrCreateManager(
 export async function startQueueProcessing(
   workspaceId: string,
   broadcastFn: (event: ServerEvent) => void,
+  options?: { persist?: boolean },
 ): Promise<QueueStatus> {
   const manager = getOrCreateManager(workspaceId, broadcastFn);
   await manager.start();
-  await persistQueueEnabled(workspaceId, true);
+  if (options?.persist !== false) {
+    await persistQueueEnabled(workspaceId, true);
+  }
   return manager.getStatus();
 }
 
-export async function stopQueueProcessing(workspaceId: string): Promise<QueueStatus> {
+export async function stopQueueProcessing(
+  workspaceId: string,
+  options?: { persist?: boolean },
+): Promise<QueueStatus> {
   const manager = managers.get(workspaceId);
   if (manager) {
     await manager.stop();
-    await persistQueueEnabled(workspaceId, false);
+    if (options?.persist !== false) {
+      await persistQueueEnabled(workspaceId, false);
+    }
     return manager.getStatus();
   }
 
-  await persistQueueEnabled(workspaceId, false);
+  if (options?.persist !== false) {
+    await persistQueueEnabled(workspaceId, false);
+  }
   return getQueueStatus(workspaceId);
 }
 
@@ -374,7 +387,10 @@ export async function getQueueStatus(workspaceId: string): Promise<QueueStatus> 
     const tasks = discoverTasks(tasksDir);
     tasksInReady = tasks.filter(t => t.frontmatter.phase === 'ready').length;
     tasksInExecuting = tasks.filter(t => t.frontmatter.phase === 'executing').length;
-    enabled = getWorkspaceAutomationSettings(workspace.config).readyToExecuting;
+
+    const globalWorkflowDefaults = loadGlobalWorkflowSettings();
+    const workflowSettings = resolveWorkspaceWorkflowSettings(workspace.config, globalWorkflowDefaults);
+    enabled = workflowSettings.readyToExecuting;
   }
 
   return {
@@ -411,10 +427,11 @@ export async function initializeQueueManagers(
   broadcastForWorkspace: (workspaceId: string, event: ServerEvent) => void,
 ): Promise<void> {
   const workspaces = await listWorkspaces();
+  const globalWorkflowDefaults = loadGlobalWorkflowSettings();
 
   for (const workspace of workspaces) {
-    const automation = getWorkspaceAutomationSettings(workspace.config);
-    if (automation.readyToExecuting) {
+    const workflowSettings = resolveWorkspaceWorkflowSettings(workspace.config, globalWorkflowDefaults);
+    if (workflowSettings.readyToExecuting) {
       logger.info(`[QueueManager] Resuming queue processing for workspace: ${workspace.name}`);
       const manager = getOrCreateManager(
         workspace.id,
@@ -433,12 +450,13 @@ async function persistQueueEnabled(workspaceId: string, enabled: boolean): Promi
   const workspace = await getWorkspaceById(workspaceId);
   if (!workspace) return;
 
-  const currentAutomation = getWorkspaceAutomationSettings(workspace.config);
+  const workflowAutomation = {
+    ...(workspace.config.workflowAutomation ?? {}),
+    readyToExecuting: enabled,
+  };
+
   await updateWorkspaceConfig(workspace, {
     queueProcessing: { enabled },
-    workflowAutomation: {
-      backlogToReady: currentAutomation.backlogToReady,
-      readyToExecuting: enabled,
-    },
+    workflowAutomation,
   });
 }

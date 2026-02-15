@@ -322,6 +322,28 @@ export interface WorkspaceAutomationSettings {
   readyToExecuting: boolean;
 }
 
+/** Global workflow defaults persisted in ~/.pi/factory/settings.json. */
+export interface WorkflowDefaultsConfig {
+  readyLimit?: number;
+  executingLimit?: number;
+  backlogToReady?: boolean;
+  readyToExecuting?: boolean;
+}
+
+/** Workspace-level override values (undefined = inherit from global defaults). */
+export interface WorkspaceWorkflowOverrides {
+  readyLimit?: number;
+  executingLimit?: number;
+  backlogToReady?: boolean;
+  readyToExecuting?: boolean;
+}
+
+/** Fully-resolved workflow settings used at runtime. */
+export interface WorkspaceWorkflowSettings extends WorkspaceAutomationSettings {
+  readyLimit: number;
+  executingLimit: number;
+}
+
 export interface WorkspaceConfig {
   // Task file locations
   taskLocations: string[]; // directory paths
@@ -346,15 +368,106 @@ export interface WorkspaceConfig {
   workflowAutomation?: WorkspaceAutomationConfig;
 }
 
-export function getWorkspaceAutomationSettings(config: WorkspaceConfig): WorkspaceAutomationSettings {
-  const backlogToReady = config.workflowAutomation?.backlogToReady ?? false;
-  const readyToExecuting = config.workflowAutomation?.readyToExecuting
-    ?? config.queueProcessing?.enabled
-    ?? true;
+const BUILT_IN_READY_LIMIT = typeof DEFAULT_WIP_LIMITS.ready === 'number' && DEFAULT_WIP_LIMITS.ready > 0
+  ? DEFAULT_WIP_LIMITS.ready
+  : 5;
+
+const BUILT_IN_EXECUTING_LIMIT = typeof DEFAULT_WIP_LIMITS.executing === 'number' && DEFAULT_WIP_LIMITS.executing > 0
+  ? DEFAULT_WIP_LIMITS.executing
+  : 1;
+
+export const DEFAULT_WORKFLOW_SETTINGS: WorkspaceWorkflowSettings = {
+  readyLimit: BUILT_IN_READY_LIMIT,
+  executingLimit: BUILT_IN_EXECUTING_LIMIT,
+  backlogToReady: false,
+  readyToExecuting: true,
+};
+
+function sanitizeWorkflowSlotLimit(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return undefined;
+  }
+
+  const rounded = Math.floor(value);
+  return rounded > 0 ? rounded : undefined;
+}
+
+export function resolveGlobalWorkflowSettings(
+  defaults: WorkflowDefaultsConfig | null | undefined,
+): WorkspaceWorkflowSettings {
+  return {
+    readyLimit: sanitizeWorkflowSlotLimit(defaults?.readyLimit) ?? DEFAULT_WORKFLOW_SETTINGS.readyLimit,
+    executingLimit: sanitizeWorkflowSlotLimit(defaults?.executingLimit) ?? DEFAULT_WORKFLOW_SETTINGS.executingLimit,
+    backlogToReady: typeof defaults?.backlogToReady === 'boolean'
+      ? defaults.backlogToReady
+      : DEFAULT_WORKFLOW_SETTINGS.backlogToReady,
+    readyToExecuting: typeof defaults?.readyToExecuting === 'boolean'
+      ? defaults.readyToExecuting
+      : DEFAULT_WORKFLOW_SETTINGS.readyToExecuting,
+  };
+}
+
+export function getWorkspaceWorkflowOverrides(config: WorkspaceConfig): WorkspaceWorkflowOverrides {
+  const readyLimit = sanitizeWorkflowSlotLimit(config.wipLimits?.ready);
+  const executingLimit = sanitizeWorkflowSlotLimit(config.wipLimits?.executing);
+
+  const backlogToReady = typeof config.workflowAutomation?.backlogToReady === 'boolean'
+    ? config.workflowAutomation.backlogToReady
+    : undefined;
+
+  const readyToExecuting = typeof config.workflowAutomation?.readyToExecuting === 'boolean'
+    ? config.workflowAutomation.readyToExecuting
+    : typeof config.queueProcessing?.enabled === 'boolean'
+      ? config.queueProcessing.enabled
+      : undefined;
 
   return {
+    readyLimit,
+    executingLimit,
     backlogToReady,
     readyToExecuting,
+  };
+}
+
+export function resolveWorkspaceWorkflowSettings(
+  config: WorkspaceConfig,
+  globalDefaults?: WorkflowDefaultsConfig | null,
+): WorkspaceWorkflowSettings {
+  const defaults = resolveGlobalWorkflowSettings(globalDefaults);
+  const overrides = getWorkspaceWorkflowOverrides(config);
+
+  return {
+    readyLimit: overrides.readyLimit ?? defaults.readyLimit,
+    executingLimit: overrides.executingLimit ?? defaults.executingLimit,
+    backlogToReady: overrides.backlogToReady ?? defaults.backlogToReady,
+    readyToExecuting: overrides.readyToExecuting ?? defaults.readyToExecuting,
+  };
+}
+
+export function resolveWorkspaceWipLimit(
+  config: WorkspaceConfig,
+  phase: Phase,
+  globalDefaults?: WorkflowDefaultsConfig | null,
+): number | null {
+  if (phase === 'ready') {
+    return resolveWorkspaceWorkflowSettings(config, globalDefaults).readyLimit;
+  }
+
+  if (phase === 'executing') {
+    return resolveWorkspaceWorkflowSettings(config, globalDefaults).executingLimit;
+  }
+
+  return config.wipLimits?.[phase] ?? DEFAULT_WIP_LIMITS[phase];
+}
+
+export function getWorkspaceAutomationSettings(
+  config: WorkspaceConfig,
+  globalDefaults?: WorkflowDefaultsConfig | null,
+): WorkspaceAutomationSettings {
+  const resolved = resolveWorkspaceWorkflowSettings(config, globalDefaults);
+  return {
+    backlogToReady: resolved.backlogToReady,
+    readyToExecuting: resolved.readyToExecuting,
   };
 }
 
@@ -483,7 +596,13 @@ export type ServerEvent =
   | { type: 'agent:execution_status'; taskId: string; status: AgentExecutionStatus }
   | { type: 'task:plan_generated'; taskId: string; plan: TaskPlan }
   | { type: 'queue:status'; status: QueueStatus }
-  | { type: 'workspace:automation_updated'; workspaceId: string; settings: WorkspaceAutomationSettings }
+  | {
+    type: 'workspace:automation_updated';
+    workspaceId: string;
+    settings: WorkspaceWorkflowSettings;
+    overrides?: WorkspaceWorkflowOverrides;
+    globalDefaults?: WorkspaceWorkflowSettings;
+  }
   // Planning agent events
   | PlanningEvent;
 
@@ -520,6 +639,15 @@ export interface QueueStatus {
   currentTaskId: string | null;
   tasksInReady: number;
   tasksInExecuting: number;
+}
+
+export interface WorkspaceWorkflowSettingsResponse {
+  /** Legacy alias retained for older clients. */
+  settings: WorkspaceAutomationSettings;
+  effective: WorkspaceWorkflowSettings;
+  overrides: WorkspaceWorkflowOverrides;
+  globalDefaults: WorkspaceWorkflowSettings;
+  queueStatus: QueueStatus;
 }
 
 // =============================================================================

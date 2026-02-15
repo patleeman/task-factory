@@ -2,6 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const updateWorkspaceConfigMock = vi.fn();
 const getWorkspaceByIdMock = vi.fn();
+const loadGlobalWorkflowSettingsMock = vi.fn(() => ({
+  readyLimit: 5,
+  executingLimit: 1,
+  backlogToReady: false,
+  readyToExecuting: true,
+}));
 
 vi.mock('../src/workspace-service.js', () => ({
   getWorkspaceById: (...args: any[]) => getWorkspaceByIdMock(...args),
@@ -40,11 +46,22 @@ vi.mock('../src/state-contract.js', () => ({
   buildTaskStateSnapshot: vi.fn(() => ({})),
 }));
 
+vi.mock('../src/workflow-settings-service.js', () => ({
+  loadGlobalWorkflowSettings: (...args: any[]) => loadGlobalWorkflowSettingsMock(...args),
+}));
+
 describe('queue manager automation persistence', () => {
   beforeEach(() => {
     vi.resetModules();
     updateWorkspaceConfigMock.mockReset();
     getWorkspaceByIdMock.mockReset();
+    loadGlobalWorkflowSettingsMock.mockReset();
+    loadGlobalWorkflowSettingsMock.mockImplementation(() => ({
+      readyLimit: 5,
+      executingLimit: 1,
+      backlogToReady: false,
+      readyToExecuting: true,
+    }));
   });
 
   it('persists ready→executing updates while preserving backlog→ready setting', async () => {

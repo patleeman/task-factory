@@ -1,4 +1,26 @@
-import type { Task, Workspace, ActivityEntry, Phase, Attachment, QueueStatus, PlanningMessage, PlanningAgentStatus, Shelf, DraftTask, TaskDefaults, PostExecutionSummary, CriterionStatus, QAAnswer, QARequest, PlanningGuardrails, WorkspaceAutomationSettings } from '@pi-factory/shared'
+import type {
+  Task,
+  Workspace,
+  ActivityEntry,
+  Phase,
+  Attachment,
+  QueueStatus,
+  PlanningMessage,
+  PlanningAgentStatus,
+  Shelf,
+  DraftTask,
+  TaskDefaults,
+  PostExecutionSummary,
+  CriterionStatus,
+  QAAnswer,
+  QARequest,
+  PlanningGuardrails,
+  WorkspaceAutomationSettings,
+  WorkspaceWorkflowSettings,
+  WorkspaceWorkflowOverrides,
+  WorkspaceWorkflowSettingsResponse,
+  WorkflowDefaultsConfig,
+} from '@pi-factory/shared'
 
 export interface AvailableModel {
   provider: string
@@ -74,12 +96,24 @@ export interface PiFactorySettings {
   voiceInputHotkey?: string
   taskDefaults?: TaskDefaults
   planningGuardrails?: Partial<PlanningGuardrails>
+  workflowDefaults?: WorkflowDefaultsConfig
   [key: string]: unknown
 }
 
-export interface WorkflowAutomationResponse {
+export interface WorkflowAutomationResponse extends WorkspaceWorkflowSettingsResponse {
+  // Legacy alias retained for older call sites.
   settings: WorkspaceAutomationSettings
+  effective: WorkspaceWorkflowSettings
+  overrides: WorkspaceWorkflowOverrides
+  globalDefaults: WorkspaceWorkflowSettings
   queueStatus: QueueStatus
+}
+
+export interface WorkflowAutomationUpdate {
+  backlogToReady?: boolean | null
+  readyToExecuting?: boolean | null
+  readyLimit?: number | null
+  executingLimit?: number | null
 }
 
 export const api = {
@@ -413,7 +447,7 @@ export const api = {
     return res.json()
   },
 
-  async updateWorkflowAutomation(workspaceId: string, updates: Partial<WorkspaceAutomationSettings>): Promise<WorkflowAutomationResponse> {
+  async updateWorkflowAutomation(workspaceId: string, updates: WorkflowAutomationUpdate): Promise<WorkflowAutomationResponse> {
     const res = await fetch(`/api/workspaces/${workspaceId}/automation`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },

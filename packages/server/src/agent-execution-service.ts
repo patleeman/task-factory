@@ -19,8 +19,8 @@ import {
 } from '@mariozechner/pi-coding-agent';
 import {
   DEFAULT_PLANNING_GUARDRAILS,
-  DEFAULT_WIP_LIMITS,
-  getWorkspaceAutomationSettings,
+  resolveGlobalWorkflowSettings,
+  resolveWorkspaceWorkflowSettings,
   type Task,
   type TaskPlan,
   type Attachment,
@@ -2522,11 +2522,12 @@ function maybeAutoPromoteBacklogTaskAfterPlanning(
   }
 
   const workspaceConfig = readWorkspaceConfigForTask(task);
-  const automation = workspaceConfig
-    ? getWorkspaceAutomationSettings(workspaceConfig)
-    : { backlogToReady: false, readyToExecuting: false };
+  const globalWorkflowDefaults = resolveGlobalWorkflowSettings(loadPiFactorySettings()?.workflowDefaults);
+  const workflowSettings = workspaceConfig
+    ? resolveWorkspaceWorkflowSettings(workspaceConfig, globalWorkflowDefaults)
+    : globalWorkflowDefaults;
 
-  if (!automation.backlogToReady) {
+  if (!workflowSettings.backlogToReady) {
     return task;
   }
 
@@ -2539,7 +2540,7 @@ function maybeAutoPromoteBacklogTaskAfterPlanning(
     return latestTask;
   }
 
-  const wipLimit = workspaceConfig?.wipLimits?.ready ?? DEFAULT_WIP_LIMITS.ready;
+  const wipLimit = workflowSettings.readyLimit;
   if (wipLimit !== null && wipLimit !== undefined) {
     const tasksInReady = tasks.filter((candidate) => candidate.frontmatter.phase === 'ready');
     if (tasksInReady.length >= wipLimit && latestTask.frontmatter.phase !== 'ready') {

@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { ArrowLeft, Power } from 'lucide-react'
 import { useParams, useNavigate, useMatch, useOutletContext } from 'react-router-dom'
-import type { Task, Workspace, ActivityEntry, Phase, QueueStatus, PlanningMessage, QAAnswer, AgentExecutionStatus, WorkspaceAutomationSettings, Artifact, DraftTask, NewTaskFormState } from '@pi-factory/shared'
-import { api } from '../api'
+import type { Task, Workspace, ActivityEntry, Phase, QueueStatus, PlanningMessage, QAAnswer, AgentExecutionStatus, WorkspaceWorkflowSettings, Artifact, DraftTask, NewTaskFormState } from '@pi-factory/shared'
+import { DEFAULT_WORKFLOW_SETTINGS } from '@pi-factory/shared'
+import { api, type WorkflowAutomationResponse } from '../api'
 import { AppIcon } from './AppIcon'
 import { PipelineBar } from './PipelineBar'
 import { TaskDetailPane } from './TaskDetailPane'
@@ -90,9 +91,8 @@ export function WorkspacePage() {
   const [queueStatus, setQueueStatus] = useState<QueueStatus | null>(null)
   const [voiceInputHotkey, setVoiceInputHotkey] = useState(DEFAULT_VOICE_INPUT_HOTKEY)
   const [isVoiceHotkeyPressed, setIsVoiceHotkeyPressed] = useState(false)
-  const [automationSettings, setAutomationSettings] = useState<WorkspaceAutomationSettings>({
-    backlogToReady: false,
-    readyToExecuting: true,
+  const [automationSettings, setAutomationSettings] = useState<WorkspaceWorkflowSettings>({
+    ...DEFAULT_WORKFLOW_SETTINGS,
   })
   const [backlogAutomationToggling, setBacklogAutomationToggling] = useState(false)
   const [readyAutomationToggling, setReadyAutomationToggling] = useState(false)
@@ -153,7 +153,7 @@ export function WorkspacePage() {
   const awaitingTaskIds = awaitingInputTaskIds
   const awaitingInputCount = nonArchivedTasks.filter((task) => awaitingTaskIds.has(task.id)).length
   const executingTasks = nonArchivedTasks.filter((task) => task.frontmatter.phase === 'executing')
-  const effectiveAutomationSettings: WorkspaceAutomationSettings = syncAutomationSettingsWithQueue(
+  const effectiveAutomationSettings: WorkspaceWorkflowSettings = syncAutomationSettingsWithQueue(
     automationSettings,
     queueStatus,
   )
@@ -259,7 +259,7 @@ export function WorkspacePage() {
     setBacklogAutomationToggling(false)
     setReadyAutomationToggling(false)
     setFactoryToggling(false)
-    setAutomationSettings({ backlogToReady: false, readyToExecuting: true })
+    setAutomationSettings({ ...DEFAULT_WORKFLOW_SETTINGS })
 
     Promise.all([
       api.getWorkspace(workspaceId),
@@ -277,8 +277,25 @@ export function WorkspacePage() {
           ...ws,
           config: {
             ...ws.config,
-            workflowAutomation: automationData.settings,
-            queueProcessing: { enabled: automationData.settings.readyToExecuting },
+            wipLimits: {
+              ...(ws.config.wipLimits || {}),
+              ...(automationData.overrides.readyLimit !== undefined
+                ? { ready: automationData.overrides.readyLimit }
+                : {}),
+              ...(automationData.overrides.executingLimit !== undefined
+                ? { executing: automationData.overrides.executingLimit }
+                : {}),
+            },
+            workflowAutomation: {
+              ...(ws.config.workflowAutomation || {}),
+              ...(automationData.overrides.backlogToReady !== undefined
+                ? { backlogToReady: automationData.overrides.backlogToReady }
+                : {}),
+              ...(automationData.overrides.readyToExecuting !== undefined
+                ? { readyToExecuting: automationData.overrides.readyToExecuting }
+                : {}),
+            },
+            queueProcessing: { enabled: automationData.effective.readyToExecuting },
           },
         })
         setTasks(tasksData)
@@ -301,7 +318,7 @@ export function WorkspacePage() {
           merged.sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''))
           return merged
         })
-        setAutomationSettings(automationData.settings)
+        setAutomationSettings(automationData.effective)
         setQueueStatus(automationData.queueStatus)
         setPlanningMessages(planningMsgs)
 
@@ -428,20 +445,49 @@ export function WorkspacePage() {
             }
           })
           break
-        case 'workspace:automation_updated':
+        case 'workspace:automation_updated': {
           setAutomationSettings(msg.settings)
           setWorkspace((prev) => {
             if (!prev) return prev
+
+            const overrides = msg.overrides || {}
+
+            const nextWipLimits = {
+              ...(prev.config.wipLimits || {}),
+            }
+            delete nextWipLimits.ready
+            delete nextWipLimits.executing
+            if (overrides.readyLimit !== undefined) {
+              nextWipLimits.ready = overrides.readyLimit
+            }
+            if (overrides.executingLimit !== undefined) {
+              nextWipLimits.executing = overrides.executingLimit
+            }
+
+            const nextWorkflowAutomation = {
+              ...(prev.config.workflowAutomation || {}),
+            }
+            delete nextWorkflowAutomation.backlogToReady
+            delete nextWorkflowAutomation.readyToExecuting
+            if (overrides.backlogToReady !== undefined) {
+              nextWorkflowAutomation.backlogToReady = overrides.backlogToReady
+            }
+            if (overrides.readyToExecuting !== undefined) {
+              nextWorkflowAutomation.readyToExecuting = overrides.readyToExecuting
+            }
+
             return {
               ...prev,
               config: {
                 ...prev.config,
-                workflowAutomation: msg.settings,
+                wipLimits: nextWipLimits,
+                workflowAutomation: nextWorkflowAutomation,
                 queueProcessing: { enabled: msg.settings.readyToExecuting },
               },
             }
           })
           break
+        }
         case 'agent:execution_status': {
           const task = tasksByIdRef.current.get(msg.taskId)
 
@@ -529,17 +575,43 @@ export function WorkspacePage() {
     toastTimerRef.current = setTimeout(() => setToast(null), 5000)
   }, [])
 
-  const applyAutomationResult = useCallback((result: { settings: WorkspaceAutomationSettings; queueStatus: QueueStatus }) => {
-    setAutomationSettings(result.settings)
+  const applyAutomationResult = useCallback((result: WorkflowAutomationResponse) => {
+    setAutomationSettings(result.effective)
     setQueueStatus(result.queueStatus)
     setWorkspace((prev) => {
       if (!prev) return prev
+
+      const nextWipLimits = {
+        ...(prev.config.wipLimits || {}),
+      }
+      delete nextWipLimits.ready
+      delete nextWipLimits.executing
+      if (result.overrides.readyLimit !== undefined) {
+        nextWipLimits.ready = result.overrides.readyLimit
+      }
+      if (result.overrides.executingLimit !== undefined) {
+        nextWipLimits.executing = result.overrides.executingLimit
+      }
+
+      const nextWorkflowAutomation = {
+        ...(prev.config.workflowAutomation || {}),
+      }
+      delete nextWorkflowAutomation.backlogToReady
+      delete nextWorkflowAutomation.readyToExecuting
+      if (result.overrides.backlogToReady !== undefined) {
+        nextWorkflowAutomation.backlogToReady = result.overrides.backlogToReady
+      }
+      if (result.overrides.readyToExecuting !== undefined) {
+        nextWorkflowAutomation.readyToExecuting = result.overrides.readyToExecuting
+      }
+
       return {
         ...prev,
         config: {
           ...prev.config,
-          workflowAutomation: result.settings,
-          queueProcessing: { enabled: result.settings.readyToExecuting },
+          wipLimits: nextWipLimits,
+          workflowAutomation: nextWorkflowAutomation,
+          queueProcessing: { enabled: result.effective.readyToExecuting },
         },
       }
     })

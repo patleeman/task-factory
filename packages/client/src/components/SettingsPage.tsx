@@ -3,9 +3,12 @@ import { ArrowLeft } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import {
   DEFAULT_PLANNING_GUARDRAILS,
+  DEFAULT_WORKFLOW_SETTINGS,
   type ModelConfig,
   type TaskDefaults,
   type PlanningGuardrails,
+  type WorkflowDefaultsConfig,
+  type WorkspaceWorkflowSettings,
 } from '@pi-factory/shared'
 import {
   api,
@@ -97,6 +100,32 @@ function normalizePlanningGuardrailsForUi(settings: PiFactorySettings | null | u
   }
 }
 
+function normalizeWorkflowDefaultsForUi(settings: PiFactorySettings | null | undefined): WorkspaceWorkflowSettings {
+  const candidate = settings?.workflowDefaults
+
+  const coerceLimit = (value: unknown, fallback: number): number => {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      return fallback
+    }
+
+    const rounded = Math.floor(value)
+    if (rounded < 1) return fallback
+    if (rounded > 100) return 100
+    return rounded
+  }
+
+  return {
+    readyLimit: coerceLimit(candidate?.readyLimit, DEFAULT_WORKFLOW_SETTINGS.readyLimit),
+    executingLimit: coerceLimit(candidate?.executingLimit, DEFAULT_WORKFLOW_SETTINGS.executingLimit),
+    backlogToReady: typeof candidate?.backlogToReady === 'boolean'
+      ? candidate.backlogToReady
+      : DEFAULT_WORKFLOW_SETTINGS.backlogToReady,
+    readyToExecuting: typeof candidate?.readyToExecuting === 'boolean'
+      ? candidate.readyToExecuting
+      : DEFAULT_WORKFLOW_SETTINGS.readyToExecuting,
+  }
+}
+
 function authStateLabel(authState: PiProviderAuthState): string {
   switch (authState) {
     case 'api_key':
@@ -151,6 +180,9 @@ export function SettingsPage() {
   const [planningGuardrailsForm, setPlanningGuardrailsForm] = useState<PlanningGuardrails>({
     ...DEFAULT_PLANNING_GUARDRAILS,
   })
+  const [workflowDefaultsForm, setWorkflowDefaultsForm] = useState<WorkspaceWorkflowSettings>({
+    ...DEFAULT_WORKFLOW_SETTINGS,
+  })
   const [voiceInputHotkey, setVoiceInputHotkey] = useState(DEFAULT_VOICE_INPUT_HOTKEY)
 
   const [isSavingSystemSettings, setIsSavingSystemSettings] = useState(false)
@@ -198,6 +230,7 @@ export function SettingsPage() {
         setSkills(availableSkills)
         setForm(normalizeTaskDefaultsForUi(defaults, availableModels, availableSkills))
         setPlanningGuardrailsForm(normalizePlanningGuardrailsForUi(settings))
+        setWorkflowDefaultsForm(normalizeWorkflowDefaultsForUi(settings))
         setVoiceInputHotkey(normalizeVoiceInputHotkey(settings.voiceInputHotkey))
         setAuthOverview(auth)
       })
@@ -312,6 +345,13 @@ export function SettingsPage() {
       const savedDefaults = await api.saveTaskDefaults(payload)
 
       const currentSettings = await api.getPiFactorySettings()
+      const workflowDefaults: WorkflowDefaultsConfig = {
+        readyLimit: workflowDefaultsForm.readyLimit,
+        executingLimit: workflowDefaultsForm.executingLimit,
+        backlogToReady: workflowDefaultsForm.backlogToReady,
+        readyToExecuting: workflowDefaultsForm.readyToExecuting,
+      }
+
       const nextSettings: PiFactorySettings = {
         ...currentSettings,
         planningGuardrails: {
@@ -319,12 +359,14 @@ export function SettingsPage() {
           maxToolCalls: planningGuardrailsForm.maxToolCalls,
           maxReadBytes: planningGuardrailsForm.maxReadBytes,
         },
+        workflowDefaults,
       }
 
       await api.savePiFactorySettings(nextSettings)
       setPlanningGuardrailsForm(normalizePlanningGuardrailsForUi(nextSettings))
+      setWorkflowDefaultsForm(normalizeWorkflowDefaultsForUi(nextSettings))
       setForm(normalizeTaskDefaultsForUi(savedDefaults, models, skills))
-      setDefaultsSaveMessage('Task defaults and planning guardrails saved')
+      setDefaultsSaveMessage('Task defaults, planning guardrails, and workflow defaults saved')
     } catch (err) {
       console.error('Failed to save settings:', err)
       setDefaultsError(err instanceof Error ? err.message : 'Failed to save settings')
@@ -799,6 +841,89 @@ export function SettingsPage() {
                       })
                     }}
                   />
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-3">
+                <div>
+                  <h4 className="text-sm font-semibold text-slate-800">Workflow Defaults</h4>
+                  <p className="text-xs text-slate-500 mt-0.5">Default slot limits and automation for workspaces that do not set overrides.</p>
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-2">
+                  <label className="block text-xs font-medium text-slate-600">
+                    Ready WIP slots
+                    <input
+                      type="number"
+                      min={1}
+                      max={100}
+                      step={1}
+                      value={workflowDefaultsForm.readyLimit}
+                      onChange={(event) => {
+                        const value = Number.parseInt(event.target.value, 10)
+                        setWorkflowDefaultsForm((current) => ({
+                          ...current,
+                          readyLimit: Number.isFinite(value)
+                            ? Math.max(1, Math.min(100, value))
+                            : current.readyLimit,
+                        }))
+                      }}
+                      className="mt-1 w-full text-sm border border-slate-200 rounded-lg px-2.5 py-2 bg-white"
+                    />
+                  </label>
+
+                  <label className="block text-xs font-medium text-slate-600">
+                    Executing slots
+                    <input
+                      type="number"
+                      min={1}
+                      max={100}
+                      step={1}
+                      value={workflowDefaultsForm.executingLimit}
+                      onChange={(event) => {
+                        const value = Number.parseInt(event.target.value, 10)
+                        setWorkflowDefaultsForm((current) => ({
+                          ...current,
+                          executingLimit: Number.isFinite(value)
+                            ? Math.max(1, Math.min(100, value))
+                            : current.executingLimit,
+                        }))
+                      }}
+                      className="mt-1 w-full text-sm border border-slate-200 rounded-lg px-2.5 py-2 bg-white"
+                    />
+                  </label>
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-2">
+                  <label className="inline-flex items-center gap-2 text-xs font-medium text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={workflowDefaultsForm.backlogToReady}
+                      onChange={(event) => {
+                        const checked = event.target.checked
+                        setWorkflowDefaultsForm((current) => ({
+                          ...current,
+                          backlogToReady: checked,
+                        }))
+                      }}
+                    />
+                    Default Backlog→Ready auto-promote
+                  </label>
+
+                  <label className="inline-flex items-center gap-2 text-xs font-medium text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={workflowDefaultsForm.readyToExecuting}
+                      onChange={(event) => {
+                        const checked = event.target.checked
+                        setWorkflowDefaultsForm((current) => ({
+                          ...current,
+                          readyToExecuting: checked,
+                        }))
+                      }}
+                    />
+                    Default Ready→Executing auto-run
+                  </label>
                 </div>
               </div>
 

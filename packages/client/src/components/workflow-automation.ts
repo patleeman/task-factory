@@ -1,11 +1,11 @@
-import type { QueueStatus, WorkspaceAutomationSettings } from '@pi-factory/shared'
+import type { QueueStatus, WorkspaceWorkflowSettings } from '@pi-factory/shared'
 
 export function syncAutomationSettingsWithQueue(
-  settings: WorkspaceAutomationSettings,
+  settings: WorkspaceWorkflowSettings,
   queueStatus: QueueStatus | null,
-): WorkspaceAutomationSettings {
+): WorkspaceWorkflowSettings {
   return {
-    backlogToReady: settings.backlogToReady,
+    ...settings,
     readyToExecuting: queueStatus?.enabled ?? settings.readyToExecuting,
   }
 }

@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { ArrowRight, ChevronLeft, ChevronRight, Undo2 } from 'lucide-react'
 import { createPortal } from 'react-dom'
-import type { Task, Phase } from '@pi-factory/shared'
+import type { Task, Phase, WorkspaceWorkflowSettings } from '@pi-factory/shared'
 import { PHASE_DISPLAY_NAMES } from '@pi-factory/shared'
 import { AppIcon } from './AppIcon'
 
@@ -10,6 +10,11 @@ interface PipelineBarProps {
   runningTaskIds: ReadonlySet<string>
   awaitingInputTaskIds: ReadonlySet<string>
   selectedTaskId: string | null
+  automationSettings: WorkspaceWorkflowSettings
+  backlogAutomationToggling: boolean
+  readyAutomationToggling: boolean
+  onToggleBacklogAutomation: () => void
+  onToggleReadyAutomation: () => void
   onTaskClick: (task: Task) => void
   onMoveTask: (task: Task, toPhase: Phase) => void
   onReorderTasks?: (phase: Phase, taskIds: string[]) => void
@@ -56,6 +61,11 @@ export function PipelineBar({
   runningTaskIds,
   awaitingInputTaskIds,
   selectedTaskId,
+  automationSettings,
+  backlogAutomationToggling,
+  readyAutomationToggling,
+  onToggleBacklogAutomation,
+  onToggleReadyAutomation,
   onTaskClick,
   onMoveTask,
   onReorderTasks,
@@ -145,6 +155,45 @@ export function PipelineBar({
       case 'backlog': return { label: 'Ready', toPhase: 'ready' }
       default: return null
     }
+  }
+
+  const getAutomationToggleForPhase = (phase: Phase): {
+    enabled: boolean
+    loading: boolean
+    title: string
+    onToggle: () => void
+  } | null => {
+    if (phase === 'backlog') {
+      return {
+        enabled: automationSettings.backlogToReady,
+        loading: backlogAutomationToggling,
+        title: 'Auto-promote backlog tasks to Ready when planning completes',
+        onToggle: onToggleBacklogAutomation,
+      }
+    }
+
+    if (phase === 'ready') {
+      return {
+        enabled: automationSettings.readyToExecuting,
+        loading: readyAutomationToggling,
+        title: 'Auto-execute Ready tasks via queue manager',
+        onToggle: onToggleReadyAutomation,
+      }
+    }
+
+    return null
+  }
+
+  const getPhaseLimit = (phase: Phase): number | null => {
+    if (phase === 'ready') {
+      return automationSettings.readyLimit
+    }
+
+    if (phase === 'executing') {
+      return automationSettings.executingLimit
+    }
+
+    return null
   }
 
   const findTask = useCallback((taskId: string) => {
@@ -283,6 +332,7 @@ export function PipelineBar({
             const isEmpty = phaseTasks.length === 0
             const isDragOver = dragOverPhase === phase
             const isBacklog = phase === 'backlog'
+            const phaseLimit = getPhaseLimit(phase)
 
             return (
               <div
@@ -294,9 +344,36 @@ export function PipelineBar({
                   isDragOver ? 'bg-blue-50/60' : ''
                 }`}
               >
-                {/* Phase label */}
-                <div className={`text-[10px] font-semibold uppercase tracking-wider mb-1.5 ${PHASE_LABEL_COLOR[phase]}`}>
-                  {PHASE_DISPLAY_NAMES[phase]}
+                {/* Phase label + inline automation toggle */}
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <div className={`text-[10px] font-semibold uppercase tracking-wider ${PHASE_LABEL_COLOR[phase]}`}>
+                    {PHASE_DISPLAY_NAMES[phase]}
+                  </div>
+                  {phaseLimit !== null && (
+                    <span className="text-[9px] px-1 py-0.5 rounded border border-slate-300 text-slate-500 bg-white">
+                      WIP {phaseLimit}
+                    </span>
+                  )}
+                  {(() => {
+                    const toggle = getAutomationToggleForPhase(phase)
+                    if (!toggle) return null
+
+                    return (
+                      <button
+                        type="button"
+                        onClick={toggle.onToggle}
+                        disabled={toggle.loading}
+                        title={toggle.title}
+                        className={`inline-flex items-center justify-center min-w-[24px] px-1.5 h-5 rounded-md border text-[9px] font-semibold tracking-wide transition-colors ${
+                          toggle.enabled
+                            ? 'bg-emerald-600 text-white border-emerald-700 hover:bg-emerald-500'
+                            : 'bg-white text-slate-500 border-slate-300 hover:bg-slate-50'
+                        } ${toggle.loading ? 'opacity-60 cursor-not-allowed' : ''}`}
+                      >
+                        {toggle.loading ? '…' : 'AP'}
+                      </button>
+                    )
+                  })()}
                 </div>
 
                 {/* Cards or empty placeholder */}

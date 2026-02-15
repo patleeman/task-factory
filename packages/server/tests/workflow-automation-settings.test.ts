@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { getWorkspaceAutomationSettings, type WorkspaceConfig } from '@pi-factory/shared';
+import {
+  DEFAULT_WORKFLOW_SETTINGS,
+  getWorkspaceAutomationSettings,
+  getWorkspaceWorkflowOverrides,
+  resolveGlobalWorkflowSettings,
+  resolveWorkspaceWipLimit,
+  resolveWorkspaceWorkflowSettings,
+  type WorkspaceConfig,
+} from '@pi-factory/shared';
 
-describe('getWorkspaceAutomationSettings', () => {
+describe('workflow settings resolution', () => {
   function createBaseConfig(overrides: Partial<WorkspaceConfig> = {}): WorkspaceConfig {
     return {
       taskLocations: ['.pi/tasks'],
@@ -10,38 +18,111 @@ describe('getWorkspaceAutomationSettings', () => {
     };
   }
 
-  it('defaults both automation flags to false when unset', () => {
-    const settings = getWorkspaceAutomationSettings(createBaseConfig());
+  it('falls back to built-in global workflow defaults when unset', () => {
+    const defaults = resolveGlobalWorkflowSettings(undefined);
 
-    expect(settings).toEqual({
-      backlogToReady: false,
+    expect(defaults).toEqual(DEFAULT_WORKFLOW_SETTINGS);
+  });
+
+  it('resolves global workflow defaults from settings payload values', () => {
+    const defaults = resolveGlobalWorkflowSettings({
+      readyLimit: 9,
+      executingLimit: 3,
+      backlogToReady: true,
+      readyToExecuting: false,
+    });
+
+    expect(defaults).toEqual({
+      readyLimit: 9,
+      executingLimit: 3,
+      backlogToReady: true,
       readyToExecuting: false,
     });
   });
 
-  it('keeps backward compatibility by reading ready→executing from legacy queueProcessing', () => {
-    const settings = getWorkspaceAutomationSettings(createBaseConfig({
-      queueProcessing: { enabled: true },
-    }));
+  it('inherits workspace workflow values from global defaults when overrides are unset', () => {
+    const settings = resolveWorkspaceWorkflowSettings(
+      createBaseConfig(),
+      {
+        readyLimit: 7,
+        executingLimit: 2,
+        backlogToReady: true,
+        readyToExecuting: false,
+      },
+    );
 
     expect(settings).toEqual({
+      readyLimit: 7,
+      executingLimit: 2,
+      backlogToReady: true,
+      readyToExecuting: false,
+    });
+  });
+
+  it('prefers workspace overrides over global defaults for slots and automation', () => {
+    const settings = resolveWorkspaceWorkflowSettings(
+      createBaseConfig({
+        wipLimits: {
+          ready: 4,
+          executing: 1,
+        },
+        workflowAutomation: {
+          backlogToReady: false,
+          readyToExecuting: true,
+        },
+      }),
+      {
+        readyLimit: 9,
+        executingLimit: 3,
+        backlogToReady: true,
+        readyToExecuting: false,
+      },
+    );
+
+    expect(settings).toEqual({
+      readyLimit: 4,
+      executingLimit: 1,
       backlogToReady: false,
       readyToExecuting: true,
     });
   });
 
-  it('prefers explicit workflowAutomation values over legacy queueProcessing values', () => {
-    const settings = getWorkspaceAutomationSettings(createBaseConfig({
-      queueProcessing: { enabled: true },
-      workflowAutomation: {
-        backlogToReady: true,
-        readyToExecuting: false,
-      },
+  it('keeps backward compatibility by reading ready→executing from legacy queueProcessing', () => {
+    const overrides = getWorkspaceWorkflowOverrides(createBaseConfig({
+      queueProcessing: { enabled: false },
     }));
 
-    expect(settings).toEqual({
-      backlogToReady: true,
+    expect(overrides).toEqual({
+      readyLimit: undefined,
+      executingLimit: undefined,
+      backlogToReady: undefined,
       readyToExecuting: false,
     });
+
+    expect(getWorkspaceAutomationSettings(createBaseConfig({
+      queueProcessing: { enabled: false },
+    }))).toEqual({
+      backlogToReady: false,
+      readyToExecuting: false,
+    });
+  });
+
+  it('uses resolved ready/executing slot limits for WIP checks and preserves other phases', () => {
+    const config = createBaseConfig({
+      wipLimits: {
+        complete: null,
+      },
+    });
+
+    const globalDefaults = {
+      readyLimit: 8,
+      executingLimit: 2,
+      backlogToReady: false,
+      readyToExecuting: true,
+    };
+
+    expect(resolveWorkspaceWipLimit(config, 'ready', globalDefaults)).toBe(8);
+    expect(resolveWorkspaceWipLimit(config, 'executing', globalDefaults)).toBe(2);
+    expect(resolveWorkspaceWipLimit(config, 'complete', globalDefaults)).toBeNull();
   });
 });

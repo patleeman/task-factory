@@ -3,7 +3,7 @@ import { ArrowLeft, Check, CheckCircle2 } from 'lucide-react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { DEFAULT_PRE_EXECUTION_SKILLS, DEFAULT_POST_EXECUTION_SKILLS, type TaskDefaults } from '@pi-factory/shared'
 import type { PiSkill, PiExtension, PostExecutionSkill } from '../types/pi'
-import { api } from '../api'
+import { api, type WorkflowAutomationResponse, type WorkflowAutomationUpdate } from '../api'
 import { AppIcon } from './AppIcon'
 import { ThemeToggle } from './ThemeToggle'
 import { ModelSelector } from './ModelSelector'
@@ -28,6 +28,57 @@ const EMPTY_TASK_DEFAULTS: TaskDefaults = {
   postExecutionSkills: [...DEFAULT_POST_EXECUTION_SKILLS],
 }
 
+type OverrideMode = 'inherit' | 'override'
+
+interface WorkflowOverridesForm {
+  readyLimitMode: OverrideMode
+  readyLimit: number
+  executingLimitMode: OverrideMode
+  executingLimit: number
+  backlogToReadyMode: OverrideMode
+  backlogToReady: boolean
+  readyToExecutingMode: OverrideMode
+  readyToExecuting: boolean
+  globalReadyLimit: number
+  globalExecutingLimit: number
+  globalBacklogToReady: boolean
+  globalReadyToExecuting: boolean
+}
+
+function sanitizeSlotLimitInput(value: number): number {
+  if (!Number.isFinite(value)) return 1
+  const rounded = Math.floor(value)
+  if (rounded < 1) return 1
+  if (rounded > 100) return 100
+  return rounded
+}
+
+function buildWorkflowOverridesForm(settings: WorkflowAutomationResponse): WorkflowOverridesForm {
+  return {
+    readyLimitMode: settings.overrides.readyLimit !== undefined ? 'override' : 'inherit',
+    readyLimit: settings.overrides.readyLimit ?? settings.effective.readyLimit,
+    executingLimitMode: settings.overrides.executingLimit !== undefined ? 'override' : 'inherit',
+    executingLimit: settings.overrides.executingLimit ?? settings.effective.executingLimit,
+    backlogToReadyMode: settings.overrides.backlogToReady !== undefined ? 'override' : 'inherit',
+    backlogToReady: settings.overrides.backlogToReady ?? settings.effective.backlogToReady,
+    readyToExecutingMode: settings.overrides.readyToExecuting !== undefined ? 'override' : 'inherit',
+    readyToExecuting: settings.overrides.readyToExecuting ?? settings.effective.readyToExecuting,
+    globalReadyLimit: settings.globalDefaults.readyLimit,
+    globalExecutingLimit: settings.globalDefaults.executingLimit,
+    globalBacklogToReady: settings.globalDefaults.backlogToReady,
+    globalReadyToExecuting: settings.globalDefaults.readyToExecuting,
+  }
+}
+
+function buildWorkflowUpdateFromForm(form: WorkflowOverridesForm): WorkflowAutomationUpdate {
+  return {
+    readyLimit: form.readyLimitMode === 'override' ? sanitizeSlotLimitInput(form.readyLimit) : null,
+    executingLimit: form.executingLimitMode === 'override' ? sanitizeSlotLimitInput(form.executingLimit) : null,
+    backlogToReady: form.backlogToReadyMode === 'override' ? form.backlogToReady : null,
+    readyToExecuting: form.readyToExecutingMode === 'override' ? form.readyToExecuting : null,
+  }
+}
+
 export function WorkspaceConfigPage() {
   const { workspaceId } = useParams<{ workspaceId: string }>()
   const navigate = useNavigate()
@@ -41,7 +92,8 @@ export function WorkspaceConfigPage() {
   })
   const [sharedContext, setSharedContext] = useState('')
   const [sharedContextPath, setSharedContextPath] = useState('.pi/workspace-context.md')
-  const [activeTab, setActiveTab] = useState<'skills' | 'extensions' | 'task-defaults' | 'shared-context'>('skills')
+  const [workflowForm, setWorkflowForm] = useState<WorkflowOverridesForm | null>(null)
+  const [activeTab, setActiveTab] = useState<'skills' | 'extensions' | 'task-defaults' | 'workflow' | 'shared-context'>('skills')
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'error'>('idle')
@@ -60,6 +112,7 @@ export function WorkspaceConfigPage() {
     let cancelled = false
     setIsLoading(true)
     setSaveError('')
+    setWorkflowForm(null)
 
     Promise.all([
       fetch('/api/pi/skills').then(r => r.json()),
@@ -69,6 +122,7 @@ export function WorkspaceConfigPage() {
       fetch(`/api/workspaces/${workspaceId}/shared-context`).then(r => r.json()),
       api.getWorkspace(workspaceId),
       api.getWorkspaceTaskDefaults(workspaceId),
+      api.getWorkflowAutomation(workspaceId),
     ])
       .then(([
         skillsData,
@@ -78,6 +132,7 @@ export function WorkspaceConfigPage() {
         sharedContextData,
         workspace,
         workspaceTaskDefaults,
+        workflowSettings,
       ]) => {
         if (cancelled) return
 
@@ -102,6 +157,7 @@ export function WorkspaceConfigPage() {
           skills: configData.skills || { enabled: [], config: {} },
           extensions: configData.extensions || { enabled: [], config: {} },
         })
+        setWorkflowForm(buildWorkflowOverridesForm(workflowSettings))
         setSharedContext(sharedContextData.content || '')
         setSharedContextPath(sharedContextData.relativePath || '.pi/workspace-context.md')
         // Use folder name from path as the display name
@@ -218,7 +274,11 @@ export function WorkspaceConfigPage() {
     setSaveError('')
 
     try {
-      const [configRes, sharedContextRes] = await Promise.all([
+      const workflowUpdate = workflowForm
+        ? buildWorkflowUpdateFromForm(workflowForm)
+        : null
+
+      const [configRes, sharedContextRes, savedTaskDefaults, workflowResult] = await Promise.all([
         fetch(`/api/workspaces/${workspaceId}/pi-config`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -230,10 +290,18 @@ export function WorkspaceConfigPage() {
           body: JSON.stringify({ content: sharedContext }),
         }),
         api.saveWorkspaceTaskDefaults(workspaceId, taskDefaults),
+        workflowUpdate
+          ? api.updateWorkflowAutomation(workspaceId, workflowUpdate)
+          : Promise.resolve<WorkflowAutomationResponse | null>(null),
       ])
 
       if (!configRes.ok || !sharedContextRes.ok) {
         throw new Error('Save failed')
+      }
+
+      setTaskDefaults(savedTaskDefaults)
+      if (workflowResult) {
+        setWorkflowForm(buildWorkflowOverridesForm(workflowResult))
       }
 
       setSaveStatus('saved')
@@ -338,6 +406,16 @@ export function WorkspaceConfigPage() {
               }`}
             >
               Task Defaults
+            </button>
+            <button
+              onClick={() => setActiveTab('workflow')}
+              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === 'workflow'
+                  ? 'border-safety-orange text-safety-orange'
+                  : 'border-transparent text-slate-600 hover:text-slate-800'
+              }`}
+            >
+              Workflow
             </button>
             <button
               onClick={() => setActiveTab('shared-context')}
@@ -538,6 +616,222 @@ export function WorkspaceConfigPage() {
                   }}
                   showSkillConfigControls={false}
                 />
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'workflow' && workflowForm && (
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-800">Workflow Overrides</h3>
+                <p className="text-xs text-slate-500">Override global workflow defaults for this workspace. Disable an override to inherit the global value.</p>
+              </div>
+
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+                <div>Global defaults → Ready slots: <span className="font-mono">{workflowForm.globalReadyLimit}</span>, Executing slots: <span className="font-mono">{workflowForm.globalExecutingLimit}</span></div>
+                <div className="mt-1">Global automation → Backlog→Ready: <span className="font-mono">{workflowForm.globalBacklogToReady ? 'on' : 'off'}</span>, Ready→Exec: <span className="font-mono">{workflowForm.globalReadyToExecuting ? 'on' : 'off'}</span></div>
+              </div>
+
+              <div className="rounded-lg border border-slate-200 bg-white p-4 space-y-4">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm font-medium text-slate-700">Ready WIP slots</label>
+                    <label className="text-xs text-slate-600 inline-flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={workflowForm.readyLimitMode === 'override'}
+                        onChange={(event) => {
+                          const checked = event.target.checked
+                          setWorkflowForm((current) => {
+                            if (!current) return current
+                            return {
+                              ...current,
+                              readyLimitMode: checked ? 'override' : 'inherit',
+                              readyLimit: checked ? current.readyLimit : current.globalReadyLimit,
+                            }
+                          })
+                          setSaveStatus('idle')
+                          setSaveError('')
+                        }}
+                      />
+                      Override for workspace
+                    </label>
+                  </div>
+                  <input
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={workflowForm.readyLimit}
+                    disabled={workflowForm.readyLimitMode !== 'override'}
+                    onChange={(event) => {
+                      const value = Number.parseInt(event.target.value, 10)
+                      setWorkflowForm((current) => {
+                        if (!current) return current
+                        return {
+                          ...current,
+                          readyLimit: Number.isFinite(value)
+                            ? sanitizeSlotLimitInput(value)
+                            : current.readyLimit,
+                        }
+                      })
+                      setSaveStatus('idle')
+                      setSaveError('')
+                    }}
+                    className="w-40 text-sm border border-slate-300 bg-white text-slate-800 rounded px-2 py-1.5 disabled:bg-slate-100 disabled:text-slate-500"
+                  />
+                  {workflowForm.readyLimitMode !== 'override' && (
+                    <p className="text-xs text-slate-500">Inherited from global default: {workflowForm.globalReadyLimit}</p>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm font-medium text-slate-700">Executing slots</label>
+                    <label className="text-xs text-slate-600 inline-flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={workflowForm.executingLimitMode === 'override'}
+                        onChange={(event) => {
+                          const checked = event.target.checked
+                          setWorkflowForm((current) => {
+                            if (!current) return current
+                            return {
+                              ...current,
+                              executingLimitMode: checked ? 'override' : 'inherit',
+                              executingLimit: checked ? current.executingLimit : current.globalExecutingLimit,
+                            }
+                          })
+                          setSaveStatus('idle')
+                          setSaveError('')
+                        }}
+                      />
+                      Override for workspace
+                    </label>
+                  </div>
+                  <input
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={workflowForm.executingLimit}
+                    disabled={workflowForm.executingLimitMode !== 'override'}
+                    onChange={(event) => {
+                      const value = Number.parseInt(event.target.value, 10)
+                      setWorkflowForm((current) => {
+                        if (!current) return current
+                        return {
+                          ...current,
+                          executingLimit: Number.isFinite(value)
+                            ? sanitizeSlotLimitInput(value)
+                            : current.executingLimit,
+                        }
+                      })
+                      setSaveStatus('idle')
+                      setSaveError('')
+                    }}
+                    className="w-40 text-sm border border-slate-300 bg-white text-slate-800 rounded px-2 py-1.5 disabled:bg-slate-100 disabled:text-slate-500"
+                  />
+                  {workflowForm.executingLimitMode !== 'override' && (
+                    <p className="text-xs text-slate-500">Inherited from global default: {workflowForm.globalExecutingLimit}</p>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm font-medium text-slate-700">Backlog→Ready auto-promote</label>
+                    <label className="text-xs text-slate-600 inline-flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={workflowForm.backlogToReadyMode === 'override'}
+                        onChange={(event) => {
+                          const checked = event.target.checked
+                          setWorkflowForm((current) => {
+                            if (!current) return current
+                            return {
+                              ...current,
+                              backlogToReadyMode: checked ? 'override' : 'inherit',
+                              backlogToReady: checked ? current.backlogToReady : current.globalBacklogToReady,
+                            }
+                          })
+                          setSaveStatus('idle')
+                          setSaveError('')
+                        }}
+                      />
+                      Override for workspace
+                    </label>
+                  </div>
+                  <label className="text-xs text-slate-700 inline-flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={workflowForm.backlogToReady}
+                      disabled={workflowForm.backlogToReadyMode !== 'override'}
+                      onChange={(event) => {
+                        const checked = event.target.checked
+                        setWorkflowForm((current) => {
+                          if (!current) return current
+                          return {
+                            ...current,
+                            backlogToReady: checked,
+                          }
+                        })
+                        setSaveStatus('idle')
+                        setSaveError('')
+                      }}
+                    />
+                    Enabled
+                  </label>
+                  {workflowForm.backlogToReadyMode !== 'override' && (
+                    <p className="text-xs text-slate-500">Inherited from global default: {workflowForm.globalBacklogToReady ? 'enabled' : 'disabled'}</p>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm font-medium text-slate-700">Ready→Executing auto-run</label>
+                    <label className="text-xs text-slate-600 inline-flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={workflowForm.readyToExecutingMode === 'override'}
+                        onChange={(event) => {
+                          const checked = event.target.checked
+                          setWorkflowForm((current) => {
+                            if (!current) return current
+                            return {
+                              ...current,
+                              readyToExecutingMode: checked ? 'override' : 'inherit',
+                              readyToExecuting: checked ? current.readyToExecuting : current.globalReadyToExecuting,
+                            }
+                          })
+                          setSaveStatus('idle')
+                          setSaveError('')
+                        }}
+                      />
+                      Override for workspace
+                    </label>
+                  </div>
+                  <label className="text-xs text-slate-700 inline-flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={workflowForm.readyToExecuting}
+                      disabled={workflowForm.readyToExecutingMode !== 'override'}
+                      onChange={(event) => {
+                        const checked = event.target.checked
+                        setWorkflowForm((current) => {
+                          if (!current) return current
+                          return {
+                            ...current,
+                            readyToExecuting: checked,
+                          }
+                        })
+                        setSaveStatus('idle')
+                        setSaveError('')
+                      }}
+                    />
+                    Enabled
+                  </label>
+                  {workflowForm.readyToExecutingMode !== 'override' && (
+                    <p className="text-xs text-slate-500">Inherited from global default: {workflowForm.globalReadyToExecuting ? 'enabled' : 'disabled'}</p>
+                  )}
+                </div>
               </div>
             </div>
           )}

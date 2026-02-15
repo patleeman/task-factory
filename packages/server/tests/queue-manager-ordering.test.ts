@@ -6,6 +6,12 @@ const discoverTasksMock = vi.fn();
 const moveTaskToPhaseMock = vi.fn();
 const executeTaskMock = vi.fn();
 const hasRunningSessionMock = vi.fn(() => false);
+const loadGlobalWorkflowSettingsMock = vi.fn(() => ({
+  readyLimit: 5,
+  executingLimit: 1,
+  backlogToReady: false,
+  readyToExecuting: true,
+}));
 
 vi.mock('../src/workspace-service.js', () => ({
   getWorkspaceById: (...args: any[]) => getWorkspaceByIdMock(...args),
@@ -42,6 +48,10 @@ vi.mock('../src/state-transition.js', () => ({
 
 vi.mock('../src/state-contract.js', () => ({
   buildTaskStateSnapshot: vi.fn(() => ({})),
+}));
+
+vi.mock('../src/workflow-settings-service.js', () => ({
+  loadGlobalWorkflowSettings: (...args: any[]) => loadGlobalWorkflowSettingsMock(...args),
 }));
 
 function createWorkspace(executingWipLimit = 1) {
@@ -93,8 +103,15 @@ describe('queue manager ordering', () => {
     moveTaskToPhaseMock.mockReset();
     executeTaskMock.mockReset();
     hasRunningSessionMock.mockReset();
+    loadGlobalWorkflowSettingsMock.mockReset();
 
     hasRunningSessionMock.mockImplementation(() => false);
+    loadGlobalWorkflowSettingsMock.mockImplementation(() => ({
+      readyLimit: 5,
+      executingLimit: 1,
+      backlogToReady: false,
+      readyToExecuting: true,
+    }));
 
     moveTaskToPhaseMock.mockImplementation((task: any, newPhase: string, _actor: string, _reason?: string, allTasks?: any[]) => {
       if (allTasks) {

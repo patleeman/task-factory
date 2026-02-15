@@ -22,7 +22,12 @@ import type {
   ClientEvent,
   TaskDefaults,
 } from '@pi-factory/shared';
-import { PHASES, DEFAULT_WIP_LIMITS, getWorkspaceAutomationSettings } from '@pi-factory/shared';
+import {
+  PHASES,
+  getWorkspaceWorkflowOverrides,
+  resolveWorkspaceWipLimit,
+  resolveWorkspaceWorkflowSettings,
+} from '@pi-factory/shared';
 
 
 import {
@@ -82,10 +87,8 @@ function buildAutomationResponse(
   workspaceConfig: import('@pi-factory/shared').WorkspaceConfig,
   queueStatus: import('@pi-factory/shared').QueueStatus,
 ) {
-  return {
-    settings: getWorkspaceAutomationSettings(workspaceConfig),
-    queueStatus,
-  };
+  const globalDefaults = loadGlobalWorkflowSettings();
+  return buildWorkspaceWorkflowSettingsResponse(workspaceConfig, queueStatus, globalDefaults);
 }
 
 // =============================================================================
@@ -519,7 +522,8 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/move', async (req, res) => 
   }
 
   // Check WIP limits
-  const wipLimit = workspace.config.wipLimits?.[toPhase] ?? DEFAULT_WIP_LIMITS[toPhase];
+  const globalWorkflowDefaults = loadGlobalWorkflowSettings();
+  const wipLimit = resolveWorkspaceWipLimit(workspace.config, toPhase, globalWorkflowDefaults);
   if (wipLimit !== null && wipLimit !== undefined) {
     const tasksInPhase = tasks.filter((t) => t.frontmatter.phase === toPhase);
     if (tasksInPhase.length >= wipLimit && task.frontmatter.phase !== toPhase) {
@@ -1197,6 +1201,13 @@ import {
   validateTaskDefaults,
   loadAvailableModelsForDefaults,
 } from './task-defaults-service.js';
+import {
+  applyWorkflowPatchToWorkspaceConfig,
+  buildWorkspaceWorkflowSettingsResponse,
+  loadGlobalWorkflowSettings,
+  normalizePiFactorySettingsPayload,
+  parseWorkspaceWorkflowPatch,
+} from './workflow-settings-service.js';
 
 // Get Task Factory settings
 app.get('/api/pi-factory/settings', (_req, res) => {
@@ -1205,10 +1216,68 @@ app.get('/api/pi-factory/settings', (_req, res) => {
 });
 
 // Save Task Factory settings
-app.post('/api/pi-factory/settings', (req, res) => {
+app.post('/api/pi-factory/settings', async (req, res) => {
   try {
+    const previousGlobalDefaults = loadGlobalWorkflowSettings();
+
     const settings = req.body as PiFactorySettings;
-    savePiFactorySettings(settings);
+    const normalizedResult = normalizePiFactorySettingsPayload(settings);
+
+    if (!normalizedResult.ok) {
+      res.status(400).json({ error: normalizedResult.error });
+      return;
+    }
+
+    savePiFactorySettings(normalizedResult.value);
+
+    const nextGlobalDefaults = loadGlobalWorkflowSettings();
+
+    const globalDefaultsChanged = (
+      previousGlobalDefaults.readyLimit !== nextGlobalDefaults.readyLimit
+      || previousGlobalDefaults.executingLimit !== nextGlobalDefaults.executingLimit
+      || previousGlobalDefaults.backlogToReady !== nextGlobalDefaults.backlogToReady
+      || previousGlobalDefaults.readyToExecuting !== nextGlobalDefaults.readyToExecuting
+    );
+
+    if (globalDefaultsChanged) {
+      const workspaces = await listWorkspaces();
+
+      for (const workspace of workspaces) {
+        const overrides = getWorkspaceWorkflowOverrides(workspace.config);
+
+        if (previousGlobalDefaults.readyToExecuting !== nextGlobalDefaults.readyToExecuting) {
+          const effective = resolveWorkspaceWorkflowSettings(workspace.config, nextGlobalDefaults);
+
+          if (overrides.readyToExecuting === undefined) {
+            if (effective.readyToExecuting) {
+              await startQueueProcessing(
+                workspace.id,
+                (event) => broadcastToWorkspace(workspace.id, event),
+                { persist: false },
+              );
+            } else {
+              await stopQueueProcessing(workspace.id, { persist: false });
+            }
+          }
+        }
+
+        const updatedQueueStatus = await getQueueStatus(workspace.id);
+        const automationResponse = buildWorkspaceWorkflowSettingsResponse(
+          workspace.config,
+          updatedQueueStatus,
+          nextGlobalDefaults,
+        );
+
+        broadcastToWorkspace(workspace.id, {
+          type: 'workspace:automation_updated',
+          workspaceId: workspace.id,
+          settings: automationResponse.effective,
+          overrides: automationResponse.overrides,
+          globalDefaults: automationResponse.globalDefaults,
+        });
+      }
+    }
+
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: String(err) });
@@ -1802,74 +1871,74 @@ app.patch('/api/workspaces/:workspaceId/automation', async (req, res) => {
     return;
   }
 
-  const { backlogToReady, readyToExecuting } = req.body as {
-    backlogToReady?: unknown;
-    readyToExecuting?: unknown;
-  };
-
-  if (backlogToReady !== undefined && typeof backlogToReady !== 'boolean') {
-    res.status(400).json({ error: 'backlogToReady must be a boolean when provided' });
-    return;
-  }
-
-  if (readyToExecuting !== undefined && typeof readyToExecuting !== 'boolean') {
-    res.status(400).json({ error: 'readyToExecuting must be a boolean when provided' });
-    return;
-  }
-
-  if (backlogToReady === undefined && readyToExecuting === undefined) {
-    res.status(400).json({ error: 'At least one automation setting must be provided' });
+  const parsedPatch = parseWorkspaceWorkflowPatch(req.body);
+  if (!parsedPatch.ok) {
+    res.status(400).json({ error: parsedPatch.error });
     return;
   }
 
   try {
-    const current = getWorkspaceAutomationSettings(workspace.config);
-    const next = {
-      backlogToReady: backlogToReady ?? current.backlogToReady,
-      readyToExecuting: readyToExecuting ?? current.readyToExecuting,
-    };
+    const globalDefaults = loadGlobalWorkflowSettings();
+    const currentEffective = resolveWorkspaceWorkflowSettings(workspace.config, globalDefaults);
+
+    const patchResult = applyWorkflowPatchToWorkspaceConfig(
+      workspace.config,
+      parsedPatch.value,
+      globalDefaults,
+    );
 
     const updatedWorkspace = await updateWorkspaceConfig(workspace, {
-      workflowAutomation: next,
-      queueProcessing: { enabled: next.readyToExecuting },
+      wipLimits: patchResult.nextConfig.wipLimits,
+      workflowAutomation: patchResult.nextConfig.workflowAutomation,
+      queueProcessing: patchResult.nextConfig.queueProcessing,
     });
 
+    const nextEffective = patchResult.effective;
+
     let queueStatus = await getQueueStatus(updatedWorkspace.id);
-    if (readyToExecuting !== undefined) {
-      queueStatus = readyToExecuting
+    if (currentEffective.readyToExecuting !== nextEffective.readyToExecuting) {
+      queueStatus = nextEffective.readyToExecuting
         ? await startQueueProcessing(
           updatedWorkspace.id,
           (event) => broadcastToWorkspace(updatedWorkspace.id, event),
+          { persist: false },
         )
-        : await stopQueueProcessing(updatedWorkspace.id);
+        : await stopQueueProcessing(updatedWorkspace.id, { persist: false });
 
       await createSystemEvent(
         updatedWorkspace.id,
         '',
         'phase-change',
-        readyToExecuting ? 'Auto-execution enabled' : 'Auto-execution paused',
+        nextEffective.readyToExecuting ? 'Auto-execution enabled' : 'Auto-execution paused',
       );
     }
 
-    if (backlogToReady !== undefined) {
+    if (currentEffective.backlogToReady !== nextEffective.backlogToReady) {
       await createSystemEvent(
         updatedWorkspace.id,
         '',
         'phase-change',
-        backlogToReady
+        nextEffective.backlogToReady
           ? 'Backlog auto-promotion enabled (planning completion → ready)'
           : 'Backlog auto-promotion paused',
       );
     }
 
-    const settings = getWorkspaceAutomationSettings(updatedWorkspace.config);
+    const response = buildWorkspaceWorkflowSettingsResponse(
+      updatedWorkspace.config,
+      queueStatus,
+      globalDefaults,
+    );
+
     broadcastToWorkspace(updatedWorkspace.id, {
       type: 'workspace:automation_updated',
       workspaceId: updatedWorkspace.id,
-      settings,
+      settings: response.effective,
+      overrides: response.overrides,
+      globalDefaults: response.globalDefaults,
     });
 
-    res.json({ settings, queueStatus });
+    res.json(response);
   } catch (err) {
     logger.error('Failed to update workflow automation settings', err);
     res.status(500).json({ error: 'Failed to update workflow automation settings' });
@@ -1907,6 +1976,18 @@ app.post('/api/workspaces/:workspaceId/queue/start', async (req, res) => {
     'Auto-execution enabled'
   );
 
+  const updatedWorkspace = await getWorkspaceById(workspace.id);
+  if (updatedWorkspace) {
+    const response = buildAutomationResponse(updatedWorkspace.config, status);
+    broadcastToWorkspace(updatedWorkspace.id, {
+      type: 'workspace:automation_updated',
+      workspaceId: updatedWorkspace.id,
+      settings: response.effective,
+      overrides: response.overrides,
+      globalDefaults: response.globalDefaults,
+    });
+  }
+
   res.json(status);
 });
 
@@ -1926,6 +2007,18 @@ app.post('/api/workspaces/:workspaceId/queue/stop', async (req, res) => {
     'phase-change',
     'Auto-execution paused'
   );
+
+  const updatedWorkspace = await getWorkspaceById(workspace.id);
+  if (updatedWorkspace) {
+    const response = buildAutomationResponse(updatedWorkspace.config, status);
+    broadcastToWorkspace(updatedWorkspace.id, {
+      type: 'workspace:automation_updated',
+      workspaceId: updatedWorkspace.id,
+      settings: response.effective,
+      overrides: response.overrides,
+      globalDefaults: response.globalDefaults,
+    });
+  }
 
   res.json(status);
 });
