@@ -48,15 +48,15 @@ function writeLegacyFactorySettings(homePath: string, settings: Record<string, u
 }
 
 function writeWorkspaceConfig(workspacePath: string): void {
-  const piDir = join(workspacePath, '.pi');
-  mkdirSync(piDir, { recursive: true });
+  const taskfactoryDir = join(workspacePath, '.taskfactory');
+  mkdirSync(taskfactoryDir, { recursive: true });
 
   const config = {
-    taskLocations: ['.pi/tasks'],
-    defaultTaskLocation: '.pi/tasks',
+    taskLocations: ['.taskfactory/tasks'],
+    defaultTaskLocation: '.taskfactory/tasks',
   };
 
-  writeFileSync(join(piDir, 'factory.json'), JSON.stringify(config, null, 2), 'utf-8');
+  writeFileSync(join(taskfactoryDir, 'factory.json'), JSON.stringify(config, null, 2), 'utf-8');
 }
 
 function writeGlobalAgentsMd(homePath: string, content: string): void {
@@ -79,7 +79,7 @@ afterEach(() => {
 });
 
 describe('workspace shared context', () => {
-  it('loads content from .pi/workspace-context.md when present', async () => {
+  it('loads content from .taskfactory/workspace-context.md when present', async () => {
     setTempHome();
     const workspacePath = createTempDir('pi-factory-workspace-');
 
@@ -88,6 +88,19 @@ describe('workspace shared context', () => {
 
     const loaded = loadWorkspaceSharedContext(workspacePath);
     expect(loaded).toBe('workspace context');
+  });
+
+  it('falls back to legacy .pi/workspace-context.md when .taskfactory file is absent', async () => {
+    setTempHome();
+    const workspacePath = createTempDir('pi-factory-workspace-');
+    const legacyContextPath = join(workspacePath, '.pi', 'workspace-context.md');
+
+    mkdirSync(join(workspacePath, '.pi'), { recursive: true });
+    writeFileSync(legacyContextPath, 'legacy context', 'utf-8');
+
+    const { loadWorkspaceSharedContext } = await import('../src/pi-integration.js');
+
+    expect(loadWorkspaceSharedContext(workspacePath)).toBe('legacy context');
   });
 
   it('returns null and warns when shared context path is unreadable', async () => {

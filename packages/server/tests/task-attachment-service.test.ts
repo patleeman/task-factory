@@ -12,7 +12,7 @@ function createTempWorkspace(): { workspacePath: string; tasksDir: string } {
   tempRoots.push(root);
 
   const workspacePath = join(root, 'workspace');
-  const tasksDir = join(workspacePath, '.pi', 'tasks');
+  const tasksDir = join(workspacePath, '.taskfactory', 'tasks');
   mkdirSync(tasksDir, { recursive: true });
 
   return { workspacePath, tasksDir };
@@ -51,7 +51,7 @@ describe('attachTaskFileToTask', () => {
 
     const attachmentPath = join(
       workspacePath,
-      '.pi',
+      '.taskfactory',
       'tasks',
       task.id.toLowerCase(),
       'attachments',

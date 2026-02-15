@@ -2,11 +2,11 @@
 // Activity Log Service
 // =============================================================================
 // Manages the unified timeline of agent activity across all tasks.
-// Activity is stored as a JSONL file per workspace at .pi/factory/activity.jsonl.
+// Activity is stored as a JSONL file per workspace at .taskfactory/factory/activity.jsonl.
 // At typical agent usage, this file stays small (thousands of lines max).
 
 import { mkdir, readFile, appendFile } from 'fs/promises';
-import { join, dirname } from 'path';
+import { dirname } from 'path';
 import type {
   ActivityEntry,
   TaskSeparatorEntry,
@@ -15,6 +15,7 @@ import type {
   Phase,
 } from '@pi-factory/shared';
 import { getWorkspaceById } from './workspace-service.js';
+import { getWorkspaceStoragePath, resolveWorkspaceStoragePathForRead } from './workspace-storage.js';
 
 // =============================================================================
 // File Operations
@@ -23,7 +24,13 @@ import { getWorkspaceById } from './workspace-service.js';
 async function activityFilePath(workspaceId: string): Promise<string> {
   const workspace = await getWorkspaceById(workspaceId);
   if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`);
-  return join(workspace.path, '.pi', 'factory', 'activity.jsonl');
+  return getWorkspaceStoragePath(workspace.path, 'factory', 'activity.jsonl');
+}
+
+async function activityReadFilePath(workspaceId: string): Promise<string> {
+  const workspace = await getWorkspaceById(workspaceId);
+  if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`);
+  return resolveWorkspaceStoragePathForRead(workspace.path, 'factory', 'activity.jsonl');
 }
 
 async function ensureActivityDir(filePath: string): Promise<void> {
@@ -57,7 +64,7 @@ async function appendEntry(workspaceId: string, entry: ActivityEntry): Promise<v
 
 async function readAllEntries(workspaceId: string): Promise<ActivityEntry[]> {
   try {
-    const filePath = await activityFilePath(workspaceId);
+    const filePath = await activityReadFilePath(workspaceId);
     const content = await readFile(filePath, 'utf-8');
     const lines = content.trim().split('\n').filter(Boolean);
     const entries: ActivityEntry[] = [];

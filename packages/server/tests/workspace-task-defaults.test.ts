@@ -217,7 +217,7 @@ describe('workspace task defaults', () => {
   it('createTask resolves defaults by workspace path using explicit > workspace > global precedence', async () => {
     const homePath = setTempHome();
     const workspacePath = createTempDir('pi-factory-workspace-');
-    const tasksDir = join(workspacePath, '.pi', 'tasks');
+    const tasksDir = join(workspacePath, '.taskfactory', 'tasks');
     mkdirSync(tasksDir, { recursive: true });
 
     registerWorkspace(homePath, 'ws-create', workspacePath);
@@ -266,7 +266,7 @@ describe('workspace task defaults', () => {
   it('keeps explicit request models and skills over workspace/global defaults during task creation', async () => {
     const homePath = setTempHome();
     const workspacePath = createTempDir('pi-factory-workspace-');
-    const tasksDir = join(workspacePath, '.pi', 'tasks');
+    const tasksDir = join(workspacePath, '.taskfactory', 'tasks');
     mkdirSync(tasksDir, { recursive: true });
 
     registerWorkspace(homePath, 'ws-explicit', workspacePath);

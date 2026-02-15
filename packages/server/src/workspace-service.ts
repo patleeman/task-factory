@@ -1,17 +1,22 @@
 // =============================================================================
 // Workspace Service
 // =============================================================================
-// Manages workspace configuration and discovery
-// Workspaces are stored as .pi/factory.json files in the workspace directory.
+// Manages workspace configuration and discovery.
+// Workspace metadata lives in <workspace>/.taskfactory/factory.json.
 // A registry at ~/.taskfactory/workspaces.json tracks known workspace paths.
 
-import { mkdir, readFile, writeFile, rm } from 'fs/promises';
-import { join, basename } from 'path';
+import { existsSync } from 'fs';
+import { mkdir, readFile, writeFile, rm, rename, copyFile, cp, stat } from 'fs/promises';
+import { basename, dirname, join } from 'path';
 import type { Workspace, WorkspaceConfig } from '@pi-factory/shared';
 import { getTaskFactoryHomeDir } from './taskfactory-home.js';
-// discoverTasks is likely sync, but we are just importing it here.
-// If discoverTasks is used in the future it might need to be async too,
-// but for now we focus on workspace service functions.
+import {
+  DEFAULT_WORKSPACE_TASK_LOCATION,
+  LEGACY_WORKSPACE_TASK_LOCATION,
+  getWorkspaceStoragePath,
+  getLegacyWorkspaceStoragePath,
+  resolveExistingTasksDirFromWorkspacePath,
+} from './workspace-storage.js';
 
 // =============================================================================
 // Constants
@@ -21,8 +26,8 @@ const REGISTRY_DIR = getTaskFactoryHomeDir();
 const REGISTRY_PATH = join(REGISTRY_DIR, 'workspaces.json');
 
 const DEFAULT_CONFIG: WorkspaceConfig = {
-  taskLocations: ['.pi/tasks'],
-  defaultTaskLocation: '.pi/tasks',
+  taskLocations: [DEFAULT_WORKSPACE_TASK_LOCATION],
+  defaultTaskLocation: DEFAULT_WORKSPACE_TASK_LOCATION,
   wipLimits: {},
   gitIntegration: {
     enabled: true,
@@ -69,23 +74,202 @@ async function removeFromRegistry(id: string): Promise<void> {
 }
 
 // =============================================================================
-// Read workspace config from disk
+// Workspace config normalization + migration
 // =============================================================================
 
-async function readWorkspaceConfig(workspacePath: string): Promise<WorkspaceConfig | null> {
-  const configPath = join(workspacePath, '.pi', 'factory.json');
+function sanitizeTaskLocations(raw: unknown): string[] {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+
+  return raw
+    .map((value) => (typeof value === 'string' ? value.trim() : ''))
+    .filter((value): value is string => value.length > 0);
+}
+
+function normalizeWorkspaceConfig(config: Partial<WorkspaceConfig>): WorkspaceConfig {
+  const taskLocations = sanitizeTaskLocations(config.taskLocations);
+
+  const defaultTaskLocation = typeof config.defaultTaskLocation === 'string'
+    ? config.defaultTaskLocation.trim()
+    : '';
+
+  const resolvedTaskLocations = taskLocations.length > 0
+    ? taskLocations
+    : [...DEFAULT_CONFIG.taskLocations];
+
+  const resolvedDefaultTaskLocation = defaultTaskLocation
+    || resolvedTaskLocations[0]
+    || DEFAULT_WORKSPACE_TASK_LOCATION;
+
+  if (!resolvedTaskLocations.includes(resolvedDefaultTaskLocation)) {
+    resolvedTaskLocations.unshift(resolvedDefaultTaskLocation);
+  }
+
+  return {
+    ...DEFAULT_CONFIG,
+    ...config,
+    taskLocations: resolvedTaskLocations,
+    defaultTaskLocation: resolvedDefaultTaskLocation,
+  };
+}
+
+function migrateLegacyTaskLocations(config: WorkspaceConfig): WorkspaceConfig {
+  const migratedTaskLocations = config.taskLocations.map((location) => (
+    location === LEGACY_WORKSPACE_TASK_LOCATION
+      ? DEFAULT_WORKSPACE_TASK_LOCATION
+      : location
+  ));
+
+  const migratedDefaultTaskLocation = config.defaultTaskLocation === LEGACY_WORKSPACE_TASK_LOCATION
+    ? DEFAULT_WORKSPACE_TASK_LOCATION
+    : config.defaultTaskLocation;
+
+  return normalizeWorkspaceConfig({
+    ...config,
+    taskLocations: migratedTaskLocations,
+    defaultTaskLocation: migratedDefaultTaskLocation,
+  });
+}
+
+async function movePathIfDestinationMissing(fromPath: string, toPath: string): Promise<void> {
+  if (!existsSync(fromPath)) {
+    return;
+  }
+
+  if (existsSync(toPath)) {
+    // Destination already exists. For directories, merge missing legacy content
+    // into the preferred path so tasks/attachments do not get stranded.
+    try {
+      const sourceStats = await stat(fromPath);
+      const destinationStats = await stat(toPath);
+
+      if (sourceStats.isDirectory() && destinationStats.isDirectory()) {
+        await cp(fromPath, toPath, {
+          recursive: true,
+          force: false,
+          errorOnExist: false,
+        });
+        await rm(fromPath, { recursive: true, force: true });
+      }
+    } catch {
+      // Best-effort merge only.
+    }
+
+    return;
+  }
+
+  await mkdir(dirname(toPath), { recursive: true });
+
+  try {
+    await rename(fromPath, toPath);
+    return;
+  } catch {
+    // Fall back to copy + remove when rename is unavailable.
+  }
+
+  const sourceStats = await stat(fromPath);
+  if (sourceStats.isDirectory()) {
+    await cp(fromPath, toPath, { recursive: true });
+    await rm(fromPath, { recursive: true, force: true });
+    return;
+  }
+
+  await copyFile(fromPath, toPath);
+  await rm(fromPath, { force: true });
+}
+
+async function migrateLegacyWorkspaceStorage(workspacePath: string): Promise<void> {
+  const moves: Array<{ from: string; to: string }> = [
+    {
+      from: getLegacyWorkspaceStoragePath(workspacePath, 'tasks'),
+      to: getWorkspaceStoragePath(workspacePath, 'tasks'),
+    },
+    {
+      from: getLegacyWorkspaceStoragePath(workspacePath, 'planning-attachments'),
+      to: getWorkspaceStoragePath(workspacePath, 'planning-attachments'),
+    },
+    {
+      from: getLegacyWorkspaceStoragePath(workspacePath, 'planning-session-id.txt'),
+      to: getWorkspaceStoragePath(workspacePath, 'planning-session-id.txt'),
+    },
+    {
+      from: getLegacyWorkspaceStoragePath(workspacePath, 'planning-messages.json'),
+      to: getWorkspaceStoragePath(workspacePath, 'planning-messages.json'),
+    },
+    {
+      from: getLegacyWorkspaceStoragePath(workspacePath, 'planning-sessions'),
+      to: getWorkspaceStoragePath(workspacePath, 'planning-sessions'),
+    },
+    {
+      from: getLegacyWorkspaceStoragePath(workspacePath, 'shelf.json'),
+      to: getWorkspaceStoragePath(workspacePath, 'shelf.json'),
+    },
+    {
+      from: getLegacyWorkspaceStoragePath(workspacePath, 'idea-backlog.json'),
+      to: getWorkspaceStoragePath(workspacePath, 'idea-backlog.json'),
+    },
+    {
+      from: getLegacyWorkspaceStoragePath(workspacePath, 'workspace-context.md'),
+      to: getWorkspaceStoragePath(workspacePath, 'workspace-context.md'),
+    },
+    {
+      from: getLegacyWorkspaceStoragePath(workspacePath, 'factory', 'activity.jsonl'),
+      to: getWorkspaceStoragePath(workspacePath, 'factory', 'activity.jsonl'),
+    },
+  ];
+
+  for (const move of moves) {
+    try {
+      await movePathIfDestinationMissing(move.from, move.to);
+    } catch (err) {
+      console.warn(`[WorkspaceService] Failed to migrate ${move.from} -> ${move.to}:`, err);
+    }
+  }
+}
+
+async function tryReadWorkspaceConfig(configPath: string): Promise<WorkspaceConfig | null> {
   try {
     const content = await readFile(configPath, 'utf-8');
-    return JSON.parse(content);
+    return normalizeWorkspaceConfig(JSON.parse(content));
   } catch {
     return null;
   }
 }
 
+// =============================================================================
+// Read workspace config from disk
+// =============================================================================
+
+async function readWorkspaceConfig(workspacePath: string): Promise<WorkspaceConfig | null> {
+  const primaryConfigPath = getWorkspaceStoragePath(workspacePath, 'factory.json');
+  const primaryConfig = await tryReadWorkspaceConfig(primaryConfigPath);
+  if (primaryConfig) {
+    return primaryConfig;
+  }
+
+  const legacyConfigPath = getLegacyWorkspaceStoragePath(workspacePath, 'factory.json');
+  const legacyConfig = await tryReadWorkspaceConfig(legacyConfigPath);
+  if (!legacyConfig) {
+    return null;
+  }
+
+  const migratedLegacyConfig = migrateLegacyTaskLocations(legacyConfig);
+
+  await migrateLegacyWorkspaceStorage(workspacePath);
+  await writeWorkspaceConfig(workspacePath, migratedLegacyConfig);
+
+  return migratedLegacyConfig;
+}
+
 async function writeWorkspaceConfig(workspacePath: string, config: WorkspaceConfig): Promise<void> {
-  const piDir = join(workspacePath, '.pi');
-  await mkdir(piDir, { recursive: true });
-  await writeFile(join(piDir, 'factory.json'), JSON.stringify(config, null, 2), 'utf-8');
+  const storageDir = getWorkspaceStoragePath(workspacePath);
+  await mkdir(storageDir, { recursive: true });
+  await writeFile(
+    getWorkspaceStoragePath(workspacePath, 'factory.json'),
+    JSON.stringify(normalizeWorkspaceConfig(config), null, 2),
+    'utf-8',
+  );
 }
 
 // =============================================================================
@@ -100,10 +284,10 @@ export async function createWorkspace(
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  const mergedConfig: WorkspaceConfig = {
+  const mergedConfig = normalizeWorkspaceConfig({
     ...DEFAULT_CONFIG,
     ...config,
-  };
+  });
 
   const workspace: Workspace = {
     id,
@@ -197,10 +381,10 @@ export async function updateWorkspaceConfig(
   workspace: Workspace,
   config: Partial<WorkspaceConfig>
 ): Promise<Workspace> {
-  workspace.config = {
+  workspace.config = normalizeWorkspaceConfig({
     ...workspace.config,
     ...config,
-  };
+  });
   workspace.updatedAt = new Date().toISOString();
 
   await writeWorkspaceConfig(workspace.path, workspace.config);
@@ -213,60 +397,37 @@ export async function updateWorkspaceConfig(
 // =============================================================================
 
 /**
- * Delete a workspace: remove from registry and clean up .pi/factory data.
- * Does NOT delete the user's project files — only Task Factory metadata.
+ * Delete a workspace: remove from registry and clean up Task Factory metadata.
+ * Does NOT delete the user's project files.
  */
 export async function deleteWorkspace(id: string): Promise<boolean> {
   const entries = await loadRegistry();
   const entry = entries.find((e) => e.id === id);
   if (!entry) return false;
 
-  // Remove factory config file (.pi/factory.json)
-  const configPath = join(entry.path, '.pi', 'factory.json');
-  try {
-    await rm(configPath);
-  } catch {
-    // Best-effort cleanup
-  }
+  const cleanupTargets = [
+    // Preferred storage root.
+    getWorkspaceStoragePath(entry.path),
 
-  // Remove factory data directory (.pi/factory/) — activity logs, etc.
-  const factoryDir = join(entry.path, '.pi', 'factory');
-  try {
-    await rm(factoryDir, { recursive: true });
-  } catch {
-    // Best-effort cleanup
-  }
+    // Legacy storage paths retained for backward compatibility cleanup.
+    getLegacyWorkspaceStoragePath(entry.path, 'factory.json'),
+    getLegacyWorkspaceStoragePath(entry.path, 'factory'),
+    getLegacyWorkspaceStoragePath(entry.path, 'tasks'),
+    getLegacyWorkspaceStoragePath(entry.path, 'shelf.json'),
+    getLegacyWorkspaceStoragePath(entry.path, 'idea-backlog.json'),
+    getLegacyWorkspaceStoragePath(entry.path, 'planning-attachments'),
+    getLegacyWorkspaceStoragePath(entry.path, 'planning-session-id.txt'),
+    getLegacyWorkspaceStoragePath(entry.path, 'planning-messages.json'),
+    getLegacyWorkspaceStoragePath(entry.path, 'planning-sessions'),
+    getLegacyWorkspaceStoragePath(entry.path, 'workspace-context.md'),
+  ];
 
-  // Remove task files (.pi/tasks/)
-  const tasksDir = join(entry.path, '.pi', 'tasks');
-  try {
-    await rm(tasksDir, { recursive: true });
-  } catch {
-    // Best-effort cleanup
-  }
-
-  // Remove shelf data (.pi/shelf.json)
-  const shelfPath = join(entry.path, '.pi', 'shelf.json');
-  try {
-    await rm(shelfPath);
-  } catch {
-    // Best-effort cleanup
-  }
-
-  // Remove idea backlog data (.pi/idea-backlog.json)
-  const ideaBacklogPath = join(entry.path, '.pi', 'idea-backlog.json');
-  try {
-    await rm(ideaBacklogPath);
-  } catch {
-    // Best-effort cleanup
-  }
-
-  // Remove planning attachments (.pi/planning-attachments/)
-  const planningAttDir = join(entry.path, '.pi', 'planning-attachments');
-  try {
-    await rm(planningAttDir, { recursive: true });
-  } catch {
-    // Best-effort cleanup
+  for (const target of cleanupTargets) {
+    try {
+      await rm(target, { recursive: true, force: true });
+    } catch {
+      // Best-effort cleanup
+    }
   }
 
   // Remove from registry
@@ -280,11 +441,5 @@ export async function deleteWorkspace(id: string): Promise<boolean> {
 // =============================================================================
 
 export function getTasksDir(workspace: Workspace): string {
-  const location = workspace.config.defaultTaskLocation;
-
-  if (location.startsWith('/')) {
-    return location;
-  }
-
-  return join(workspace.path, location);
+  return resolveExistingTasksDirFromWorkspacePath(workspace.path, workspace.config);
 }

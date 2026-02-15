@@ -76,6 +76,7 @@ describe('resetPlanningSession', () => {
     registerWorkspace(homePath, workspaceId, workspacePath);
 
     const piDir = join(workspacePath, '.pi');
+    const taskfactoryDir = join(workspacePath, '.taskfactory');
 
     const oldMessages: PlanningMessage[] = [
       {
@@ -148,23 +149,23 @@ describe('resetPlanningSession', () => {
     expect(newSessionId).toBeTruthy();
     expect(newSessionId).not.toBe(oldSessionId);
 
-    expect(readFileSync(join(piDir, 'planning-session-id.txt'), 'utf-8').trim()).toBe(newSessionId);
-    expect(JSON.parse(readFileSync(join(piDir, 'planning-messages.json'), 'utf-8'))).toEqual([]);
+    expect(readFileSync(join(taskfactoryDir, 'planning-session-id.txt'), 'utf-8').trim()).toBe(newSessionId);
+    expect(JSON.parse(readFileSync(join(taskfactoryDir, 'planning-messages.json'), 'utf-8'))).toEqual([]);
 
-    const archivePath = join(piDir, 'planning-sessions', `${oldSessionId}.json`);
+    const archivePath = join(taskfactoryDir, 'planning-sessions', `${oldSessionId}.json`);
     expect(existsSync(archivePath)).toBe(true);
     expect(JSON.parse(readFileSync(archivePath, 'utf-8'))).toEqual(oldMessages);
 
     const shelfInMemory = await getShelf(workspaceId);
     expect(shelfInMemory.items).toEqual([]);
 
-    const shelfOnDisk = JSON.parse(readFileSync(join(piDir, 'shelf.json'), 'utf-8')) as Shelf;
+    const shelfOnDisk = JSON.parse(readFileSync(join(taskfactoryDir, 'shelf.json'), 'utf-8')) as Shelf;
     expect(shelfOnDisk.items).toEqual([]);
 
     const ideaBacklogInMemory = await getIdeaBacklog(workspaceId);
     expect(ideaBacklogInMemory).toEqual(initialIdeaBacklog);
 
-    const ideaBacklogOnDisk = JSON.parse(readFileSync(join(piDir, 'idea-backlog.json'), 'utf-8')) as IdeaBacklog;
+    const ideaBacklogOnDisk = JSON.parse(readFileSync(join(taskfactoryDir, 'idea-backlog.json'), 'utf-8')) as IdeaBacklog;
     expect(ideaBacklogOnDisk).toEqual(initialIdeaBacklog);
 
     const resetEvent = events.find((event) => event.type === 'planning:session_reset');

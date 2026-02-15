@@ -90,7 +90,7 @@ export function WorkspaceConfigPage() {
     extensions: { enabled: [], config: {} },
   })
   const [sharedContext, setSharedContext] = useState('')
-  const [sharedContextPath, setSharedContextPath] = useState('.pi/workspace-context.md')
+  const [sharedContextPath, setSharedContextPath] = useState('.taskfactory/workspace-context.md')
   const [workflowForm, setWorkflowForm] = useState<WorkflowOverridesForm | null>(null)
   const [activeTab, setActiveTab] = useState<'skills' | 'extensions' | 'task-defaults' | 'workflow' | 'shared-context'>('skills')
   const [isLoading, setIsLoading] = useState(true)
@@ -158,7 +158,7 @@ export function WorkspaceConfigPage() {
         })
         setWorkflowForm(buildWorkflowOverridesForm(workflowSettings))
         setSharedContext(sharedContextData.content || '')
-        setSharedContextPath(sharedContextData.relativePath || '.pi/workspace-context.md')
+        setSharedContextPath(sharedContextData.relativePath || '.taskfactory/workspace-context.md')
         // Use folder name from path as the display name
         const folderName = workspace.path.split('/').filter(Boolean).pop() || workspace.name
         setWorkspaceName(folderName)

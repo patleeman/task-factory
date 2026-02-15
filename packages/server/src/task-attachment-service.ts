@@ -9,6 +9,10 @@ import { copyFile, mkdir, stat, unlink } from 'fs/promises';
 import { basename, extname, isAbsolute, join, resolve } from 'path';
 import type { Attachment, Task } from '@pi-factory/shared';
 import { parseTaskFile, saveTaskFile, getTaskFilePath, getTaskAttachmentsDir as getTaskAttachmentsDirFromService } from './task-service.js';
+import {
+  loadWorkspaceConfigFromDiskSync,
+  resolveExistingTasksDirFromWorkspacePath,
+} from './workspace-storage.js';
 
 export interface AttachTaskFileRequest {
   path: string;
@@ -34,13 +38,18 @@ const MIME_BY_EXTENSION: Record<string, string> = {
   '.pdf': 'application/pdf',
 };
 
+function resolveWorkspaceTasksDir(workspacePath: string): string {
+  const workspaceConfig = loadWorkspaceConfigFromDiskSync(workspacePath);
+  return resolveExistingTasksDirFromWorkspacePath(workspacePath, workspaceConfig);
+}
+
 function resolveTaskFilePath(workspacePath: string, taskId: string): string {
-  const tasksDir = join(workspacePath, '.pi', 'tasks');
+  const tasksDir = resolveWorkspaceTasksDir(workspacePath);
   return getTaskFilePath(tasksDir, taskId);
 }
 
 function resolveTaskAttachmentsDir(workspacePath: string, taskId: string): string {
-  const tasksDir = join(workspacePath, '.pi', 'tasks');
+  const tasksDir = resolveWorkspaceTasksDir(workspacePath);
   return getTaskAttachmentsDirFromService(tasksDir, taskId);
 }
 

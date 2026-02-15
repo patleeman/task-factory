@@ -32,5 +32,6 @@ Thumbs.db
 
 # Pi-factory specific
 .pi/
+.taskfactory/
 *.db
 *.db-journal

@@ -54,6 +54,10 @@ import {
   stripStateContractEcho,
 } from './state-contract.js';
 import { resolveTaskFactoryHomePath } from './taskfactory-home.js';
+import {
+  getWorkspaceStoragePath,
+  resolveWorkspaceStoragePathForRead,
+} from './workspace-storage.js';
 
 // =============================================================================
 // Shelf callback registry — used by extension tools
@@ -412,29 +416,42 @@ function getWorkspacePath(workspaceId: string): string | null {
 function sessionIdPath(workspaceId: string): string | null {
   const workspacePath = getWorkspacePath(workspaceId);
   if (!workspacePath) return null;
-  const dir = join(workspacePath, '.pi');
+
+  const dir = getWorkspaceStoragePath(workspacePath);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  return join(dir, 'planning-session-id.txt');
+
+  return getWorkspaceStoragePath(workspacePath, 'planning-session-id.txt');
+}
+
+function sessionIdPathForRead(workspaceId: string): string | null {
+  const workspacePath = getWorkspacePath(workspaceId);
+  if (!workspacePath) return null;
+  return resolveWorkspaceStoragePathForRead(workspacePath, 'planning-session-id.txt');
 }
 
 function sessionsDir(workspaceId: string): string | null {
   const workspacePath = getWorkspacePath(workspaceId);
   if (!workspacePath) return null;
-  const dir = join(workspacePath, '.pi', 'planning-sessions');
+
+  const dir = getWorkspaceStoragePath(workspacePath, 'planning-sessions');
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+
   return dir;
 }
 
 function getOrCreateSessionId(workspaceId: string): string {
-  const path = sessionIdPath(workspaceId);
-  if (path && existsSync(path)) {
-    const existing = readFileSync(path, 'utf-8').trim();
+  const existingPath = sessionIdPathForRead(workspaceId);
+  if (existingPath && existsSync(existingPath)) {
+    const existing = readFileSync(existingPath, 'utf-8').trim();
     if (existing) return existing;
   }
+
   const newId = crypto.randomUUID();
-  if (path) {
-    writeFileSync(path, newId);
+  const writePath = sessionIdPath(workspaceId);
+  if (writePath) {
+    writeFileSync(writePath, newId);
   }
+
   return newId;
 }
 
@@ -459,13 +476,21 @@ function archiveSession(workspaceId: string, sessionId: string, messages: Planni
 function messagesPath(workspaceId: string): string | null {
   const workspacePath = getWorkspacePath(workspaceId);
   if (!workspacePath) return null;
-  const dir = join(workspacePath, '.pi');
+
+  const dir = getWorkspaceStoragePath(workspacePath);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  return join(dir, 'planning-messages.json');
+
+  return getWorkspaceStoragePath(workspacePath, 'planning-messages.json');
+}
+
+function messagesPathForRead(workspaceId: string): string | null {
+  const workspacePath = getWorkspacePath(workspaceId);
+  if (!workspacePath) return null;
+  return resolveWorkspaceStoragePathForRead(workspacePath, 'planning-messages.json');
 }
 
 function loadPersistedMessages(workspaceId: string): PlanningMessage[] {
-  const path = messagesPath(workspaceId);
+  const path = messagesPathForRead(workspaceId);
   if (!path || !existsSync(path)) return [];
   try {
     return JSON.parse(readFileSync(path, 'utf-8'));

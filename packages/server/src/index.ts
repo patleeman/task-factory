@@ -2265,7 +2265,7 @@ import {
 // ─── Planning Attachments ────────────────────────────────────────────────────
 
 function getPlanningAttachmentsDir(workspace: import('@pi-factory/shared').Workspace): string {
-  return join(workspace.path, '.pi', 'planning-attachments');
+  return join(workspace.path, '.taskfactory', 'planning-attachments');
 }
 
 const planningUpload = multer({

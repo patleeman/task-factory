@@ -59,6 +59,11 @@ import {
   stripStateContractEcho,
 } from './state-contract.js';
 import { requestQueueKick } from './queue-kick-coordinator.js';
+import {
+  DEFAULT_WORKSPACE_TASK_LOCATION,
+  loadWorkspaceConfigFromDiskSync,
+  resolveExistingTasksDirFromWorkspacePath,
+} from './workspace-storage.js';
 
 // =============================================================================
 // Repo-local Extension Discovery
@@ -181,10 +186,21 @@ interface LoadedAttachments {
 }
 
 /**
+ * Resolve the active workspace tasks directory.
+ *
+ * Reads workspace config from disk and falls back to legacy `.pi/tasks` when
+ * only legacy metadata exists.
+ */
+function resolveWorkspaceTasksDir(workspacePath: string): string {
+  const workspaceConfig = loadWorkspaceConfigFromDiskSync(workspacePath);
+  return resolveExistingTasksDirFromWorkspacePath(workspacePath, workspaceConfig);
+}
+
+/**
  * Get the on-disk directory for a task's attachments.
  */
 function getAttachmentsDir(workspacePath: string, taskId: string): string {
-  return join(workspacePath, '.pi', 'tasks', taskId.toLowerCase(), 'attachments');
+  return join(resolveWorkspaceTasksDir(workspacePath), taskId.toLowerCase(), 'attachments');
 }
 
 /**
@@ -1986,7 +2002,7 @@ export function buildPlanningPrompt(
   prompt += `## Instructions\n\n`;
   prompt += `1. Research the codebase to understand the current state. Read relevant files, understand architecture, and trace call sites.\n`;
   prompt += `2. You are in planning-only mode. Do not edit files, do not run write/edit tools, and do not implement code changes.\n`;
-  prompt += `3. Do NOT read other task files in .pi/tasks/. They are irrelevant to your investigation and waste your tool budget.\n`;
+  prompt += `3. Do NOT read other task files in .taskfactory/tasks/ (or legacy .pi/tasks/). They are irrelevant to your investigation and waste your tool budget.\n`;
   prompt += `4. From your investigation, produce 3-7 specific, testable acceptance criteria for this task.\n`;
   prompt += `5. Then produce a plan that directly satisfies those acceptance criteria.\n`;
   prompt += `6. The plan is a high-level task summary for humans. Keep it concise and easy to parse.\n`;
@@ -2043,7 +2059,7 @@ export function buildPlanningResumePrompt(
   prompt += `## Instructions\n\n`;
   prompt += `1. Continue from prior context and investigation.\n`;
   prompt += `2. Fill only remaining gaps needed to produce a strong plan package.\n`;
-  prompt += `3. Do NOT read other task files in .pi/tasks/. They are irrelevant and waste your tool budget.\n`;
+  prompt += `3. Do NOT read other task files in .taskfactory/tasks/ (or legacy .pi/tasks/). They are irrelevant and waste your tool budget.\n`;
   prompt += `4. Produce 3-7 specific, testable acceptance criteria.\n`;
   prompt += `5. Produce a concise high-level plan aligned to those criteria.\n`;
   prompt += `6. Keep wording short and easy to scan: goal should be 1-2 short sentences, and each step/validation/cleanup item should be one short line when possible. Avoid walls of text.\n`;
@@ -2616,30 +2632,16 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
 function readWorkspaceConfigForTask(task: Task): WorkspaceConfig | null {
   const workspacePath = task.frontmatter.workspace?.trim();
   if (!workspacePath) return null;
-
-  const configPath = join(workspacePath, '.pi', 'factory.json');
-  try {
-    const raw = readFileSync(configPath, 'utf-8');
-    const parsed = JSON.parse(raw) as WorkspaceConfig;
-    return parsed;
-  } catch {
-    return null;
-  }
+  return loadWorkspaceConfigFromDiskSync(workspacePath);
 }
 
 function resolveTasksDirForTask(task: Task, workspaceConfig: WorkspaceConfig | null): string {
   const workspacePath = task.frontmatter.workspace?.trim();
-  const location = workspaceConfig?.defaultTaskLocation || '.pi/tasks';
-
-  if (location.startsWith('/')) {
-    return location;
-  }
-
   if (!workspacePath) {
-    return location;
+    return workspaceConfig?.defaultTaskLocation || DEFAULT_WORKSPACE_TASK_LOCATION;
   }
 
-  return join(workspacePath, location);
+  return resolveExistingTasksDirFromWorkspacePath(workspacePath, workspaceConfig);
 }
 
 function maybeAutoPromoteBacklogTaskAfterPlanning(

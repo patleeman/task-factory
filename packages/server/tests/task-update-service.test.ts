@@ -26,7 +26,7 @@ function createTask(overrides: Partial<Task> = {}): Task {
     },
     content: 'Original description',
     history: [],
-    filePath: '/tmp/workspace/.pi/tasks/task-1.md',
+    filePath: '/tmp/workspace/.taskfactory/tasks/task-1.md',
     ...overrides,
   };
 }

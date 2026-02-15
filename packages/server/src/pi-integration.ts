@@ -307,7 +307,8 @@ export function loadPiSkill(skillId: string): PiSkill | null {
 // Global Rules + Workspace Shared Context
 // =============================================================================
 
-export const WORKSPACE_SHARED_CONTEXT_REL_PATH = '.pi/workspace-context.md';
+export const WORKSPACE_SHARED_CONTEXT_REL_PATH = '.taskfactory/workspace-context.md';
+export const LEGACY_WORKSPACE_SHARED_CONTEXT_REL_PATH = '.pi/workspace-context.md';
 
 export function loadGlobalAgentsMd(): string | null {
   const agentsPath = join(PI_AGENT_DIR, 'AGENTS.md');
@@ -328,18 +329,29 @@ export function getWorkspaceSharedContextPath(workspacePath: string): string {
   return join(workspacePath, WORKSPACE_SHARED_CONTEXT_REL_PATH);
 }
 
+export function getLegacyWorkspaceSharedContextPath(workspacePath: string): string {
+  return join(workspacePath, LEGACY_WORKSPACE_SHARED_CONTEXT_REL_PATH);
+}
+
 export function loadWorkspaceSharedContext(workspacePath: string): string | null {
   const contextPath = getWorkspaceSharedContextPath(workspacePath);
+  const legacyContextPath = getLegacyWorkspaceSharedContextPath(workspacePath);
 
-  if (!existsSync(contextPath)) {
+  const readablePath = existsSync(contextPath)
+    ? contextPath
+    : existsSync(legacyContextPath)
+      ? legacyContextPath
+      : null;
+
+  if (!readablePath) {
     return null;
   }
 
   try {
-    return readFileSync(contextPath, 'utf-8');
+    return readFileSync(readablePath, 'utf-8');
   } catch (err) {
     console.warn(
-      `[PiIntegration] Failed to load workspace shared context: ${contextPath} (${String(err)})`,
+      `[PiIntegration] Failed to load workspace shared context: ${readablePath} (${String(err)})`,
     );
     return null;
   }

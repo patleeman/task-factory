@@ -98,7 +98,7 @@ describe('idea backlog service', () => {
     expect(backlogB.items.map((item) => item.text)).toEqual(['Workspace B idea']);
 
     // Verify persisted on disk for workspace A.
-    const diskBacklogA = JSON.parse(readFileSync(join(workspacePathA, '.pi', 'idea-backlog.json'), 'utf-8')) as IdeaBacklog;
+    const diskBacklogA = JSON.parse(readFileSync(join(workspacePathA, '.taskfactory', 'idea-backlog.json'), 'utf-8')) as IdeaBacklog;
     expect(diskBacklogA.items.map((item) => item.text)).toEqual(['First idea']);
 
     // Verify persisted survives module reload.

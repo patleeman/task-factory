@@ -2,21 +2,28 @@
 // Workspace Idea Backlog Service
 // =============================================================================
 // A lightweight workspace-scoped scratch pad for short ideas.
-// Persisted to .pi/idea-backlog.json and cached in-memory.
+// Persisted to .taskfactory/idea-backlog.json and cached in-memory.
 
 import { mkdir, readFile, writeFile } from 'fs/promises';
-import { join } from 'path';
 import type { IdeaBacklog, IdeaBacklogItem } from '@pi-factory/shared';
 import { getWorkspaceById } from './workspace-service.js';
+import {
+  getWorkspaceStoragePath,
+  resolveWorkspaceStoragePathForRead,
+} from './workspace-storage.js';
 
 const backlogCache = new Map<string, IdeaBacklog>();
 
 function getIdeaBacklogPath(workspacePath: string): string {
-  return join(workspacePath, '.pi', 'idea-backlog.json');
+  return getWorkspaceStoragePath(workspacePath, 'idea-backlog.json');
 }
 
-async function ensurePiDir(workspacePath: string): Promise<void> {
-  await mkdir(join(workspacePath, '.pi'), { recursive: true });
+function resolveIdeaBacklogPathForRead(workspacePath: string): string {
+  return resolveWorkspaceStoragePathForRead(workspacePath, 'idea-backlog.json');
+}
+
+async function ensureWorkspaceStorageDir(workspacePath: string): Promise<void> {
+  await mkdir(getWorkspaceStoragePath(workspacePath), { recursive: true });
 }
 
 function normalizeIdeaBacklog(raw: unknown): IdeaBacklog {
@@ -45,7 +52,7 @@ function normalizeIdeaBacklog(raw: unknown): IdeaBacklog {
 }
 
 async function loadIdeaBacklogFromDisk(workspacePath: string): Promise<IdeaBacklog> {
-  const path = getIdeaBacklogPath(workspacePath);
+  const path = resolveIdeaBacklogPathForRead(workspacePath);
   try {
     const raw = await readFile(path, 'utf-8');
     return normalizeIdeaBacklog(JSON.parse(raw));
@@ -55,7 +62,7 @@ async function loadIdeaBacklogFromDisk(workspacePath: string): Promise<IdeaBackl
 }
 
 async function saveIdeaBacklogToDisk(workspacePath: string, backlog: IdeaBacklog): Promise<void> {
-  await ensurePiDir(workspacePath);
+  await ensureWorkspaceStorageDir(workspacePath);
   const path = getIdeaBacklogPath(workspacePath);
   await writeFile(path, JSON.stringify(backlog, null, 2), 'utf-8');
 }

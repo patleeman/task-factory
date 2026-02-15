@@ -2,27 +2,33 @@
 // Shelf Service — Draft tasks and artifacts staging area
 // =============================================================================
 // Draft tasks and artifacts live on a shelf per workspace.
-// Persisted to JSON in the workspace's .pi directory.
+// Persisted to JSON in the workspace's .taskfactory directory.
 
 import { mkdir, readFile, writeFile } from 'fs/promises';
-import { join } from 'path';
 import type { DraftTask, Artifact, Shelf } from '@pi-factory/shared';
 import { getWorkspaceById } from './workspace-service.js';
+import {
+  getWorkspaceStoragePath,
+  resolveWorkspaceStoragePathForRead,
+} from './workspace-storage.js';
 
 // In-memory cache: workspaceId -> Shelf
 const shelfCache = new Map<string, Shelf>();
 
 function getShelfPath(workspacePath: string): string {
-  return join(workspacePath, '.pi', 'shelf.json');
+  return getWorkspaceStoragePath(workspacePath, 'shelf.json');
 }
 
-async function ensurePiDir(workspacePath: string): Promise<void> {
-  const piDir = join(workspacePath, '.pi');
-  await mkdir(piDir, { recursive: true });
+function resolveShelfPathForRead(workspacePath: string): string {
+  return resolveWorkspaceStoragePathForRead(workspacePath, 'shelf.json');
+}
+
+async function ensureWorkspaceStorageDir(workspacePath: string): Promise<void> {
+  await mkdir(getWorkspaceStoragePath(workspacePath), { recursive: true });
 }
 
 async function loadShelfFromDisk(workspacePath: string): Promise<Shelf> {
-  const path = getShelfPath(workspacePath);
+  const path = resolveShelfPathForRead(workspacePath);
   try {
     const raw = await readFile(path, 'utf-8');
     return JSON.parse(raw) as Shelf;
@@ -32,7 +38,7 @@ async function loadShelfFromDisk(workspacePath: string): Promise<Shelf> {
 }
 
 async function saveShelfToDisk(workspacePath: string, shelf: Shelf): Promise<void> {
-  await ensurePiDir(workspacePath);
+  await ensureWorkspaceStorageDir(workspacePath);
   const path = getShelfPath(workspacePath);
   await writeFile(path, JSON.stringify(shelf, null, 2), 'utf-8');
 }

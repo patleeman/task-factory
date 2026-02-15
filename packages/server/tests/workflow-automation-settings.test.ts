@@ -12,8 +12,8 @@ import {
 describe('workflow settings resolution', () => {
   function createBaseConfig(overrides: Partial<WorkspaceConfig> = {}): WorkspaceConfig {
     return {
-      taskLocations: ['.pi/tasks'],
-      defaultTaskLocation: '.pi/tasks',
+      taskLocations: ['.taskfactory/tasks'],
+      defaultTaskLocation: '.taskfactory/tasks',
       ...overrides,
     };
   }
