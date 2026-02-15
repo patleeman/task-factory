@@ -345,13 +345,24 @@ export function getActiveSession(taskId: string): TaskSession | undefined {
   return activeSessions.get(taskId);
 }
 
-/** Returns true if the task has an actively running session (not completed/error). */
-/** Returns true if the task has an active session (running or waiting for input). */
+/** Returns true if the task has an active execution session (running or awaiting input). */
 export function hasRunningSession(taskId: string): boolean {
   const session = activeSessions.get(taskId);
   if (!session) return false;
-  // 'idle' means the agent is waiting for user input — the session is still alive
   return session.status === 'running' || session.status === 'idle';
+}
+
+/** Returns true when the task still has a live execution session. */
+export function hasLiveExecutionSession(taskId: string): boolean {
+  const session = activeSessions.get(taskId);
+  if (!session) return false;
+
+  // Idle sessions can still be live when the agent is awaiting user input.
+  if (session.status === 'idle' && session.awaitingUserInput) {
+    return true;
+  }
+
+  return session.status === 'running';
 }
 
 export function getAllActiveSessions(): TaskSession[] {

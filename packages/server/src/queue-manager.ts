@@ -20,7 +20,7 @@ import { resolveWorkspaceWorkflowSettings } from '@pi-factory/shared';
 import { getWorkspaceById, getTasksDir, listWorkspaces, updateWorkspaceConfig } from './workspace-service.js';
 import { discoverTasks, moveTaskToPhase } from './task-service.js';
 import { loadGlobalWorkflowSettings } from './workflow-settings-service.js';
-import { executeTask, hasRunningSession, stopTaskExecution } from './agent-execution-service.js';
+import { executeTask, hasLiveExecutionSession, stopTaskExecution } from './agent-execution-service.js';
 import { createSystemEvent } from './activity-service.js';
 import { logger } from './logger.js';
 import { buildTaskStateSnapshot } from './state-contract.js';
@@ -47,6 +47,7 @@ class QueueManager {
   private pollTimer: NodeJS.Timeout | null = null;
   private broadcastFn: (event: ServerEvent) => void;
   private executionAttempts = new Map<string, string>();
+  private lifecycleGeneration = 0;
 
   constructor(workspaceId: string, broadcastFn: (event: ServerEvent) => void) {
     this.workspaceId = workspaceId;
@@ -56,6 +57,7 @@ class QueueManager {
   async start(): Promise<void> {
     if (this.enabled) return;
     this.enabled = true;
+    this.advanceLifecycleGeneration();
     logger.info(`[QueueManager] Started for workspace ${this.workspaceId}`);
     await this.broadcastStatus();
 
@@ -68,6 +70,7 @@ class QueueManager {
 
   async stop(): Promise<void> {
     this.enabled = false;
+    this.advanceLifecycleGeneration();
     if (this.pollTimer) {
       clearInterval(this.pollTimer);
       this.pollTimer = null;
@@ -79,7 +82,8 @@ class QueueManager {
   /** Trigger queue processing. Idempotent — safe to call frequently. */
   kick(): void {
     if (!this.enabled || this.processing) return;
-    void this.processNext();
+    const generation = this.lifecycleGeneration;
+    void this.processNext(generation);
   }
 
   isEnabled(): boolean {
@@ -127,95 +131,138 @@ class QueueManager {
     }
   }
 
-  private async processNext(): Promise<void> {
-    if (!this.enabled || this.processing) return;
+  private advanceLifecycleGeneration(): void {
+    this.lifecycleGeneration += 1;
+  }
+
+  private isGenerationActive(generation: number): boolean {
+    return this.enabled && this.lifecycleGeneration === generation;
+  }
+
+  private wasTaskStartedRecently(task: Task): boolean {
+    const startedAt = task.frontmatter.started ? new Date(task.frontmatter.started).getTime() : 0;
+    if (!startedAt) {
+      return false;
+    }
+
+    return Date.now() - startedAt < 2 * 60 * 1000;
+  }
+
+  private async processNext(generation: number): Promise<void> {
+    if (!this.isGenerationActive(generation) || this.processing) return;
     this.processing = true;
 
     try {
       const workspace = await getWorkspaceById(this.workspaceId);
-      if (!workspace) return;
+      if (!workspace || !this.isGenerationActive(generation)) return;
 
       const tasksDir = getTasksDir(workspace);
       const tasks = discoverTasks(tasksDir);
+      if (!this.isGenerationActive(generation)) return;
 
       const executingTasks = tasks.filter(t => t.frontmatter.phase === 'executing');
       const globalWorkflowDefaults = loadGlobalWorkflowSettings();
       const workflowSettings = resolveWorkspaceWorkflowSettings(workspace.config, globalWorkflowDefaults);
       const wipLimit = workflowSettings.executingLimit;
 
-      // Check for orphaned executing tasks (no active session — e.g. after server restart)
-      // Only resume orphans that haven't been attempted recently (avoid infinite retry loops
-      // for tasks that keep failing). Orphans are tasks in 'executing' with no running session.
-      const orphanedTasks = executingTasks.filter(t => !hasRunningSession(t.id));
+      // Check for orphaned executing tasks (no live execution session — e.g. after
+      // stop/start cycles, restart, or interrupted/idle executions). Recover every
+      // orphan in this cycle by either resuming one task or moving tasks back to ready.
+      const orphanedTasks = executingTasks.filter(t => !hasLiveExecutionSession(t.id));
+      const activeTaskCount = executingTasks.length - orphanedTasks.length;
+      const availableResumeSlots = Math.max(0, wipLimit - activeTaskCount);
 
-      // Count active (running) tasks toward WIP limit
-      const activeTasks = executingTasks.filter(t => hasRunningSession(t.id));
+      const resumableOrphan = availableResumeSlots > 0
+        ? orphanedTasks.find((task) => !this.wasTaskStartedRecently(task)) || null
+        : null;
 
-      if (orphanedTasks.length > 0 && activeTasks.length < wipLimit) {
-        const orphan = orphanedTasks[0];
-
-        // If the orphan was recently started (within last 2 minutes), it likely failed —
-        // move it back to ready instead of endlessly retrying
-        const lastStarted = orphan.frontmatter.started
-          ? new Date(orphan.frontmatter.started).getTime()
-          : 0;
-        const recentlyStarted = Date.now() - lastStarted < 2 * 60 * 1000;
-
-        if (recentlyStarted) {
-          logger.info(`[QueueManager] Orphaned task ${orphan.id} failed recently — moving back to ready`);
-
-          this.executionAttempts.delete(orphan.id);
-          const stoppedLingeringSession = await stopTaskExecution(orphan.id);
-          if (stoppedLingeringSession) {
-            logger.info(`[QueueManager] Stopped lingering session before orphan reset for ${orphan.id}`);
-          }
-
-          const fromState = buildTaskStateSnapshot(orphan.frontmatter);
-          moveTaskToPhase(orphan, 'ready', 'system', 'Moved back to ready after execution failure', tasks);
-
-          await logTaskStateTransition({
-            workspaceId: this.workspaceId,
-            taskId: orphan.id,
-            from: fromState,
-            to: buildTaskStateSnapshot(orphan.frontmatter),
-            source: 'queue:orphan-reset',
-            reason: 'Moved back to ready after execution failure',
-            broadcastToWorkspace: (event) => this.broadcastFn(event),
-          });
-
-          this.broadcastFn({
-            type: 'task:moved',
-            task: orphan,
-            from: 'executing',
-            to: 'ready',
-          });
-          createSystemEvent(
-            this.workspaceId,
-            orphan.id,
-            'phase-change',
-            'Task moved back to ready after execution failure (will retry from queue)'
-          );
-          // Fall through to pick up next ready task below
-        } else {
-          logger.info(`[QueueManager] Resuming orphaned task: ${orphan.id}`);
-          this.currentTaskId = orphan.id;
-          await this.broadcastStatus();
-
-          createSystemEvent(
-            this.workspaceId,
-            orphan.id,
-            'phase-change',
-            'Queue manager resuming orphaned task after server restart'
-          );
-
-          const attemptId = this.beginExecutionAttempt(orphan.id);
-          await this.startExecution(orphan, workspace, attemptId);
+      for (const orphan of orphanedTasks) {
+        if (!this.isGenerationActive(generation)) {
           return;
         }
+
+        this.executionAttempts.delete(orphan.id);
+        const stoppedLingeringSession = await stopTaskExecution(orphan.id);
+        if (stoppedLingeringSession) {
+          logger.info(`[QueueManager] Stopped lingering session before orphan recovery for ${orphan.id}`);
+        }
+
+        if (!this.isGenerationActive(generation)) {
+          return;
+        }
+
+        if (resumableOrphan?.id === orphan.id) {
+          continue;
+        }
+
+        const recentlyStarted = this.wasTaskStartedRecently(orphan);
+        const resetReason = recentlyStarted
+          ? 'Moved back to ready after execution failure'
+          : 'Moved back to ready for orphan recovery';
+
+        logger.info(
+          recentlyStarted
+            ? `[QueueManager] Orphaned task ${orphan.id} failed recently — moving back to ready`
+            : `[QueueManager] Orphaned task ${orphan.id} has no live session — moving back to ready`,
+        );
+
+        const fromState = buildTaskStateSnapshot(orphan.frontmatter);
+        moveTaskToPhase(orphan, 'ready', 'system', resetReason, tasks);
+
+        await logTaskStateTransition({
+          workspaceId: this.workspaceId,
+          taskId: orphan.id,
+          from: fromState,
+          to: buildTaskStateSnapshot(orphan.frontmatter),
+          source: 'queue:orphan-reset',
+          reason: resetReason,
+          broadcastToWorkspace: (event) => this.broadcastFn(event),
+        });
+
+        this.broadcastFn({
+          type: 'task:moved',
+          task: orphan,
+          from: 'executing',
+          to: 'ready',
+        });
+
+        createSystemEvent(
+          this.workspaceId,
+          orphan.id,
+          'phase-change',
+          recentlyStarted
+            ? 'Task moved back to ready after execution failure (will retry from queue)'
+            : 'Task moved back to ready for orphan recovery',
+        );
+      }
+
+      if (resumableOrphan) {
+        if (!this.isGenerationActive(generation)) {
+          return;
+        }
+
+        logger.info(`[QueueManager] Resuming orphaned task: ${resumableOrphan.id}`);
+        this.currentTaskId = resumableOrphan.id;
+        await this.broadcastStatus();
+
+        createSystemEvent(
+          this.workspaceId,
+          resumableOrphan.id,
+          'phase-change',
+          'Queue manager resuming orphaned task after interruption',
+        );
+
+        const attemptId = this.beginExecutionAttempt(resumableOrphan.id);
+        await this.startExecution(resumableOrphan, workspace, attemptId, generation);
+        return;
       }
 
       // Check if we're at WIP capacity
-      if (activeTasks.length >= wipLimit) {
+      const runningExecutingTasks = tasks.filter((candidate) => (
+        candidate.frontmatter.phase === 'executing' && hasLiveExecutionSession(candidate.id)
+      ));
+
+      if (runningExecutingTasks.length >= wipLimit) {
         return; // At capacity — wait for current to finish
       }
 
@@ -236,6 +283,10 @@ class QueueManager {
 
       if (readyTasks.length === 0) {
         return; // Nothing to do
+      }
+
+      if (!this.isGenerationActive(generation)) {
+        return;
       }
 
       const nextTask = readyTasks[readyTasks.length - 1];
@@ -272,7 +323,7 @@ class QueueManager {
 
       await this.broadcastStatus();
       const attemptId = this.beginExecutionAttempt(nextTask.id);
-      await this.startExecution(nextTask, workspace, attemptId);
+      await this.startExecution(nextTask, workspace, attemptId, generation);
     } catch (err) {
       logger.error('[QueueManager] Error processing queue:', err);
     } finally {
@@ -280,7 +331,15 @@ class QueueManager {
     }
   }
 
-  private async startExecution(task: Task, workspace: Workspace, attemptId: string): Promise<void> {
+  private async startExecution(task: Task, workspace: Workspace, attemptId: string, generation: number): Promise<void> {
+    if (!this.isGenerationActive(generation)) {
+      this.clearExecutionAttempt(task.id, attemptId);
+      if (this.currentTaskId === task.id) {
+        this.currentTaskId = null;
+      }
+      return;
+    }
+
     try {
       await executeTask({
         task,
@@ -297,6 +356,11 @@ class QueueManager {
       if (this.currentTaskId === task.id) {
         this.currentTaskId = null;
       }
+
+      if (!this.isGenerationActive(generation)) {
+        return;
+      }
+
       await this.broadcastStatus();
       // Retry after delay
       setTimeout(() => this.kick(), 5000);

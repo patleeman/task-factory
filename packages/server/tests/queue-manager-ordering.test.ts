@@ -2,10 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const updateWorkspaceConfigMock = vi.fn();
 const getWorkspaceByIdMock = vi.fn();
+const listWorkspacesMock = vi.fn();
 const discoverTasksMock = vi.fn();
 const moveTaskToPhaseMock = vi.fn();
 const executeTaskMock = vi.fn();
 const hasRunningSessionMock = vi.fn(() => false);
+const hasLiveExecutionSessionMock = vi.fn(() => false);
 const stopTaskExecutionMock = vi.fn(async () => false);
 const loadGlobalWorkflowSettingsMock = vi.fn(() => ({
   readyLimit: 25,
@@ -17,7 +19,7 @@ const loadGlobalWorkflowSettingsMock = vi.fn(() => ({
 vi.mock('../src/workspace-service.js', () => ({
   getWorkspaceById: (...args: any[]) => getWorkspaceByIdMock(...args),
   getTasksDir: () => '/tmp/tasks',
-  listWorkspaces: async () => [],
+  listWorkspaces: (...args: any[]) => listWorkspacesMock(...args),
   updateWorkspaceConfig: (...args: any[]) => updateWorkspaceConfigMock(...args),
 }));
 
@@ -29,6 +31,7 @@ vi.mock('../src/task-service.js', () => ({
 vi.mock('../src/agent-execution-service.js', () => ({
   executeTask: (...args: any[]) => executeTaskMock(...args),
   hasRunningSession: (...args: any[]) => hasRunningSessionMock(...args),
+  hasLiveExecutionSession: (...args: any[]) => hasLiveExecutionSessionMock(...args),
   stopTaskExecution: (...args: any[]) => stopTaskExecutionMock(...args),
 }));
 
@@ -101,14 +104,18 @@ describe('queue manager ordering', () => {
 
     updateWorkspaceConfigMock.mockReset();
     getWorkspaceByIdMock.mockReset();
+    listWorkspacesMock.mockReset();
     discoverTasksMock.mockReset();
     moveTaskToPhaseMock.mockReset();
     executeTaskMock.mockReset();
     hasRunningSessionMock.mockReset();
+    hasLiveExecutionSessionMock.mockReset();
     stopTaskExecutionMock.mockReset();
     loadGlobalWorkflowSettingsMock.mockReset();
 
     hasRunningSessionMock.mockImplementation(() => false);
+    hasLiveExecutionSessionMock.mockImplementation(() => false);
+    listWorkspacesMock.mockImplementation(async () => []);
     stopTaskExecutionMock.mockImplementation(async () => false);
     loadGlobalWorkflowSettingsMock.mockImplementation(() => ({
       readyLimit: 25,
@@ -298,6 +305,7 @@ describe('queue manager ordering', () => {
     getWorkspaceByIdMock.mockImplementation(async () => workspace);
     discoverTasksMock.mockImplementation(() => tasks);
     hasRunningSessionMock.mockImplementation((taskId: string) => taskId === 'TASK-EXECUTING');
+    hasLiveExecutionSessionMock.mockImplementation((taskId: string) => taskId === 'TASK-EXECUTING');
     updateWorkspaceConfigMock.mockImplementation(async (_workspace: any, config: any) => {
       workspace.config = {
         ...workspace.config,
@@ -321,6 +329,236 @@ describe('queue manager ordering', () => {
     ).toBe(false);
 
     await stopQueueProcessing(workspace.id);
+  });
+
+  it('treats awaiting-input executions as live sessions and does not orphan-reset them', async () => {
+    const workspace = createWorkspace(1);
+    const tasks = [
+      createTask('TASK-AWAITING', 'executing', 0, '2025-01-01T00:00:00.000Z'),
+      createTask('TASK-READY', 'ready', -1, '2025-01-01T00:00:10.000Z'),
+    ];
+
+    getWorkspaceByIdMock.mockImplementation(async () => workspace);
+    discoverTasksMock.mockImplementation(() => tasks);
+    hasRunningSessionMock.mockImplementation(() => false);
+    hasLiveExecutionSessionMock.mockImplementation((taskId: string) => taskId === 'TASK-AWAITING');
+    updateWorkspaceConfigMock.mockImplementation(async (_workspace: any, config: any) => {
+      workspace.config = {
+        ...workspace.config,
+        ...config,
+      };
+      return workspace;
+    });
+
+    const { startQueueProcessing, stopQueueProcessing } = await import('../src/queue-manager.js');
+
+    await startQueueProcessing(workspace.id, () => {}, { persist: false });
+
+    await vi.waitFor(() => {
+      expect(discoverTasksMock.mock.calls.length).toBeGreaterThanOrEqual(2);
+    });
+
+    expect(stopTaskExecutionMock).not.toHaveBeenCalledWith('TASK-AWAITING');
+    expect(
+      moveTaskToPhaseMock.mock.calls.some((call) => call[0]?.id === 'TASK-AWAITING' && call[1] === 'ready'),
+    ).toBe(false);
+    expect(
+      moveTaskToPhaseMock.mock.calls.some((call) => call[0]?.id === 'TASK-READY' && call[1] === 'executing'),
+    ).toBe(false);
+
+    await stopQueueProcessing(workspace.id, { persist: false });
+  });
+
+  it('continues ready→executing promotion across queue stop/start cycles', async () => {
+    const workspace = createWorkspace(1);
+    const tasks = [
+      createTask('TASK-READY', 'ready', 0, '2025-01-01T00:00:00.000Z'),
+    ];
+
+    getWorkspaceByIdMock.mockImplementation(async () => workspace);
+    discoverTasksMock.mockImplementation(() => tasks);
+    updateWorkspaceConfigMock.mockImplementation(async (_workspace: any, config: any) => {
+      workspace.config = {
+        ...workspace.config,
+        ...config,
+      };
+      return workspace;
+    });
+
+    const { startQueueProcessing, stopQueueProcessing } = await import('../src/queue-manager.js');
+
+    await startQueueProcessing(workspace.id, () => {}, { persist: false });
+    await vi.waitFor(() => {
+      expect(executeTaskMock).toHaveBeenCalledTimes(1);
+    });
+
+    await stopQueueProcessing(workspace.id, { persist: false });
+
+    tasks[0].frontmatter.phase = 'ready';
+
+    await startQueueProcessing(workspace.id, () => {}, { persist: false });
+    await vi.waitFor(() => {
+      expect(executeTaskMock).toHaveBeenCalledTimes(2);
+    });
+
+    await stopQueueProcessing(workspace.id, { persist: false });
+  });
+
+  it('reconciles orphaned executing tasks even when executing WIP is currently full', async () => {
+    const workspace = createWorkspace(1);
+    const tasks = [
+      createTask('TASK-RUNNING', 'executing', 1, '2025-01-01T00:00:00.000Z'),
+      createTask(
+        'TASK-ORPHAN',
+        'executing',
+        0,
+        '2025-01-01T00:00:00.000Z',
+        { started: '2024-12-31T23:55:00.000Z' },
+      ),
+      createTask('TASK-READY', 'ready', -1, '2025-01-01T00:00:10.000Z'),
+    ];
+
+    getWorkspaceByIdMock.mockImplementation(async () => workspace);
+    discoverTasksMock.mockImplementation(() => tasks);
+    hasRunningSessionMock.mockImplementation((taskId: string) => taskId === 'TASK-RUNNING');
+    hasLiveExecutionSessionMock.mockImplementation((taskId: string) => taskId === 'TASK-RUNNING');
+    updateWorkspaceConfigMock.mockImplementation(async (_workspace: any, config: any) => {
+      workspace.config = {
+        ...workspace.config,
+        ...config,
+      };
+      return workspace;
+    });
+
+    const { startQueueProcessing, stopQueueProcessing } = await import('../src/queue-manager.js');
+
+    await startQueueProcessing(workspace.id, () => {}, { persist: false });
+
+    await vi.waitFor(() => {
+      expect(
+        moveTaskToPhaseMock.mock.calls.some((call) => call[0]?.id === 'TASK-ORPHAN' && call[1] === 'ready'),
+      ).toBe(true);
+    });
+
+    expect(executeTaskMock).not.toHaveBeenCalled();
+
+    await stopQueueProcessing(workspace.id, { persist: false });
+  });
+
+  it('does not auto-assign ready work if queue stop completes before delayed pickup resumes', async () => {
+    const workspace = createWorkspace(1);
+    const tasks = [
+      createTask('TASK-READY', 'ready', 0, '2025-01-01T00:00:00.000Z'),
+    ];
+
+    let resolveDelayedLookup: (() => void) | undefined;
+    const delayedLookup = new Promise<typeof workspace>((resolve) => {
+      resolveDelayedLookup = () => resolve(workspace);
+    });
+
+    let workspaceLookupCount = 0;
+    getWorkspaceByIdMock.mockImplementation(async () => {
+      workspaceLookupCount += 1;
+      if (workspaceLookupCount === 2) {
+        return delayedLookup;
+      }
+      return workspace;
+    });
+
+    discoverTasksMock.mockImplementation(() => tasks);
+    updateWorkspaceConfigMock.mockImplementation(async (_workspace: any, config: any) => {
+      workspace.config = {
+        ...workspace.config,
+        ...config,
+      };
+      return workspace;
+    });
+
+    const { startQueueProcessing, stopQueueProcessing } = await import('../src/queue-manager.js');
+
+    await startQueueProcessing(workspace.id, () => {}, { persist: false });
+
+    await vi.waitFor(() => {
+      expect(workspaceLookupCount).toBeGreaterThanOrEqual(2);
+    });
+
+    await stopQueueProcessing(workspace.id, { persist: false });
+
+    resolveDelayedLookup?.();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    expect(executeTaskMock).not.toHaveBeenCalled();
+    expect(
+      moveTaskToPhaseMock.mock.calls.some((call) => call[0]?.id === 'TASK-READY' && call[1] === 'executing'),
+    ).toBe(false);
+  });
+
+  it('recovers orphaned executions during startup before promoting regular ready work', async () => {
+    const workspace = createWorkspace(1);
+    workspace.config.workflowAutomation.readyToExecuting = true;
+    workspace.config.queueProcessing = { enabled: true };
+
+    const tasks = [
+      createTask(
+        'TASK-ORPHAN',
+        'executing',
+        1,
+        '2025-01-01T00:00:00.000Z',
+        { started: '2024-12-31T23:55:00.000Z' },
+      ),
+      createTask('TASK-READY', 'ready', 0, '2025-01-01T00:00:10.000Z'),
+    ];
+
+    listWorkspacesMock.mockImplementation(async () => [workspace]);
+    getWorkspaceByIdMock.mockImplementation(async () => workspace);
+    discoverTasksMock.mockImplementation(() => tasks);
+
+    const { initializeQueueManagers, stopQueueProcessing } = await import('../src/queue-manager.js');
+
+    await initializeQueueManagers(() => {});
+
+    await vi.waitFor(() => {
+      expect(executeTaskMock).toHaveBeenCalledTimes(1);
+    });
+
+    expect(executeTaskMock.mock.calls[0]?.[0]?.task?.id).toBe('TASK-ORPHAN');
+    expect(
+      moveTaskToPhaseMock.mock.calls.some((call) => call[0]?.id === 'TASK-READY' && call[1] === 'executing'),
+    ).toBe(false);
+
+    await stopQueueProcessing(workspace.id, { persist: false });
+  });
+
+  it('can recover the same orphaned execution after repeated stop/start cycles without manual edits', async () => {
+    const workspace = createWorkspace(1);
+    const tasks = [
+      createTask(
+        'TASK-ORPHAN',
+        'executing',
+        0,
+        '2025-01-01T00:00:00.000Z',
+        { started: '2024-12-31T23:55:00.000Z' },
+      ),
+    ];
+
+    getWorkspaceByIdMock.mockImplementation(async () => workspace);
+    discoverTasksMock.mockImplementation(() => tasks);
+
+    const { startQueueProcessing, stopQueueProcessing } = await import('../src/queue-manager.js');
+
+    await startQueueProcessing(workspace.id, () => {}, { persist: false });
+    await vi.waitFor(() => {
+      expect(executeTaskMock).toHaveBeenCalledTimes(1);
+    });
+
+    await stopQueueProcessing(workspace.id, { persist: false });
+
+    await startQueueProcessing(workspace.id, () => {}, { persist: false });
+    await vi.waitFor(() => {
+      expect(executeTaskMock).toHaveBeenCalledTimes(2);
+    });
+
+    await stopQueueProcessing(workspace.id, { persist: false });
   });
 
   it('ignores stale completion callbacks from superseded execution attempts', async () => {

@@ -12,9 +12,9 @@ import { Type } from '@sinclair/typebox';
 
 declare global {
   var __piFactoryControlCallbacks: Map<string, {
-    getStatus: () => any;
-    start: () => any;
-    stop: () => any;
+    getStatus: () => Promise<any>;
+    start: () => Promise<any>;
+    stop: () => Promise<any>;
   }> | undefined;
 }
 
@@ -47,7 +47,7 @@ export default function (pi: ExtensionAPI) {
       const [, cb] = callbacks.entries().next().value!;
 
       if (action === 'status') {
-        const status = cb.getStatus();
+        const status = await cb.getStatus();
         const lines = [
           `**Factory:** ${status.enabled ? 'Running' : 'Stopped'}`,
           `**Tasks in ready queue:** ${status.tasksInReady}`,
@@ -63,7 +63,7 @@ export default function (pi: ExtensionAPI) {
       }
 
       if (action === 'start') {
-        const status = cb.start();
+        const status = await cb.start();
         return {
           content: [{ type: 'text' as const, text: `Factory started. ${status.tasksInReady} task(s) in ready queue.` }],
           details: {} as Record<string, unknown>,
@@ -71,7 +71,7 @@ export default function (pi: ExtensionAPI) {
       }
 
       if (action === 'stop') {
-        const status = cb.stop();
+        const status = await cb.stop();
         return {
           content: [{ type: 'text' as const, text: `Factory stopped.${status.currentTaskId ? ` Task ${status.currentTaskId} is still executing and will finish.` : ''}` }],
           details: {} as Record<string, unknown>,

@@ -24,6 +24,7 @@ vi.mock('../src/task-service.js', () => ({
 vi.mock('../src/agent-execution-service.js', () => ({
   executeTask: vi.fn(async () => {}),
   hasRunningSession: vi.fn(() => false),
+  hasLiveExecutionSession: vi.fn(() => false),
   stopTaskExecution: vi.fn(async () => false),
 }));
 

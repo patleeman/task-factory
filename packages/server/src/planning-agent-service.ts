@@ -1565,9 +1565,9 @@ export interface TaskFormCallbacks {
 declare global {
   var __piFactoryTaskFormCallbacks: Map<string, TaskFormCallbacks> | undefined;
   var __piFactoryControlCallbacks: Map<string, {
-    getStatus: () => any;
-    start: () => any;
-    stop: () => any;
+    getStatus: () => Promise<any>;
+    start: () => Promise<any>;
+    stop: () => Promise<any>;
   }> | undefined;
 }
 
@@ -1590,7 +1590,11 @@ export function unregisterTaskFormCallbacks(workspaceId: string): void {
 // Factory Control Callbacks (start/stop queue from planning agent)
 // =============================================================================
 
-function ensureControlRegistry(): Map<string, { getStatus: () => any; start: () => any; stop: () => any }> {
+function ensureControlRegistry(): Map<string, {
+  getStatus: () => Promise<any>;
+  start: () => Promise<any>;
+  stop: () => Promise<any>;
+}> {
   if (!globalThis.__piFactoryControlCallbacks) {
     globalThis.__piFactoryControlCallbacks = new Map();
   }
@@ -1602,15 +1606,9 @@ function registerFactoryControlCallbacks(
   broadcast: (event: ServerEvent) => void,
 ): void {
   ensureControlRegistry().set(workspaceId, {
-    getStatus: () => getQueueStatus(workspaceId),
-    start: () => {
-      const status = startQueueProcessing(workspaceId, broadcast);
-      return status;
-    },
-    stop: () => {
-      const status = stopQueueProcessing(workspaceId);
-      return status;
-    },
+    getStatus: async () => getQueueStatus(workspaceId),
+    start: async () => startQueueProcessing(workspaceId, broadcast),
+    stop: async () => stopQueueProcessing(workspaceId),
   });
 }
 
