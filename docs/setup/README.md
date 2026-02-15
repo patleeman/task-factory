@@ -1,18 +1,12 @@
 # Setup
 
-Use this section to document developer onboarding and local environment setup.
+Start here for day-1 local development onboarding.
 
-## What to include
+## Guides
 
-- Required tools and versions
-- Install and bootstrap steps
-- Environment variables and secrets loading
-- Local verification steps
+- [Getting Started](./getting-started.md) — prerequisites, install, first successful local run, and monorepo map.
 
-## Starter outline
+## Related docs
 
-1. Prerequisites
-2. Clone and install dependencies
-3. Configure environment
-4. Start services
-5. Validate setup
+- [Developer Commands Reference](../contribution/developer-commands.md)
+- [Documentation Home](../README.md)
