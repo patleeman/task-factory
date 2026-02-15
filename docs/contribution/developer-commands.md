@@ -45,3 +45,17 @@ npm run build -w @pi-factory/shared
 2. Make changes
 3. `npm run lint && npm run typecheck && npm run test`
 4. Before merge/release-sensitive changes: `npm run build` and optionally `npm run check:release`
+
+## Lifecycle-focused test shortcuts
+
+```bash
+npm run test -w @pi-factory/server -- state-contract.test.ts
+npm run test -w @pi-factory/server -- state-transition.test.ts
+npm run test -w @pi-factory/server -- queue-manager-automation.test.ts
+```
+
+## Related architecture docs
+
+- [System Architecture](../architecture/system-architecture.md)
+- [Runtime Flows](../architecture/runtime-flows.md)
+- [State Contract (canonical)](../architecture/state-contract.md)

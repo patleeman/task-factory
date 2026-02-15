@@ -91,3 +91,10 @@ PORT=3100 npm start
 - **`EADDRINUSE` on port `3000`**: another process is using the server port; stop that process and rerun.
 - **Client starts on `3002+` instead of `3001`**: expected when `3001` is busy; use the URL Vite prints.
 - **Auth/model errors in the app**: verify Pi auth/provider config under `~/.pi/agent/`.
+
+## Next docs
+
+- [System Architecture](../architecture/system-architecture.md)
+- [Runtime Flows](../architecture/runtime-flows.md)
+- [State Contract (canonical)](../architecture/state-contract.md)
+- [Developer Commands Reference](../contribution/developer-commands.md)

@@ -7,6 +7,9 @@ This directory contains developer-facing documentation for this repository.
 1. [Setup](./setup/README.md) — local onboarding and environment setup.
    - [Getting Started](./setup/getting-started.md) — prerequisites, install, first successful run, monorepo map.
 2. [Architecture](./architecture/README.md) — system design, boundaries, and decisions.
+   - [System Architecture](./architecture/system-architecture.md) — responsibilities of client, server, shared types, and extension layer.
+   - [Runtime Flows](./architecture/runtime-flows.md) — planning, execution, and queue coordination lifecycle.
+   - [State Contract (canonical)](./architecture/state-contract.md) — modes/phases and transition rules.
    - [ADRs](./architecture/adrs/README.md) — architecture decision records.
 3. [API](./api/README.md) — contracts, request/response shapes, and integration notes.
 4. [Operations](./operations/README.md) — deploy/observe/maintain guidance.
