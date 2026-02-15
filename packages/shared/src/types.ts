@@ -94,7 +94,7 @@ export interface PlanningGuardrails {
 }
 
 export const DEFAULT_PLANNING_GUARDRAILS: PlanningGuardrails = {
-  timeoutMs: 5 * 60 * 1000,
+  timeoutMs: 30 * 60 * 1000,
   maxToolCalls: 40,
   maxReadBytes: 180_000,
 };

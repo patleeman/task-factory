@@ -7,6 +7,7 @@ import { DEFAULT_PLANNING_GUARDRAILS } from '@pi-factory/shared';
 const createAgentSessionMock = vi.fn();
 const sessionManagerCreateMock = vi.fn(() => ({}));
 const sessionManagerOpenMock = vi.fn(() => ({}));
+const withTimeoutMock = vi.fn();
 
 vi.mock('@mariozechner/pi-coding-agent', () => ({
   createAgentSession: (...args: any[]) => createAgentSessionMock(...args),
@@ -54,6 +55,17 @@ vi.mock('../src/activity-service.js', () => ({
   })),
 }));
 
+vi.mock('../src/with-timeout.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/with-timeout.js')>();
+  return {
+    ...actual,
+    withTimeout: (...args: any[]) => {
+      withTimeoutMock(...args);
+      return actual.withTimeout(...args);
+    },
+  };
+});
+
 let mockedFactorySettings: Record<string, unknown> | null = null;
 
 vi.mock('../src/pi-integration.js', async (importOriginal) => {
@@ -72,6 +84,7 @@ describe('planTask', () => {
     createAgentSessionMock.mockReset();
     sessionManagerCreateMock.mockClear();
     sessionManagerOpenMock.mockClear();
+    withTimeoutMock.mockReset();
   });
 
   afterEach(() => {
@@ -174,6 +187,139 @@ describe('planTask', () => {
     });
 
     expect(broadcasts.some((event) => event.type === 'task:plan_generated')).toBe(false);
+  });
+
+  it('falls back to the 30-minute timeout and 1800-second message when timeout setting is invalid', async () => {
+    mockedFactorySettings = {
+      planningGuardrails: {
+        timeoutMs: -1,
+      },
+    };
+
+    const workspacePath = mkdtempSync(join(tmpdir(), 'pi-factory-plan-task-'));
+    tempDirs.push(workspacePath);
+
+    const tasksDir = join(workspacePath, '.pi', 'tasks');
+    mkdirSync(tasksDir, { recursive: true });
+
+    const { createTask } = await import('../src/task-service.js');
+    const { planTask } = await import('../src/agent-execution-service.js');
+
+    const task = createTask(workspacePath, tasksDir, {
+      content: 'Use timeout fallback when setting is invalid',
+      acceptanceCriteria: [],
+    });
+
+    createAgentSessionMock.mockResolvedValue({
+      session: {
+        subscribe: () => () => {},
+        prompt: async () => {
+          const callback = (globalThis as any).__piFactoryPlanCallbacks?.get(task.id);
+          if (!callback) {
+            throw new Error('save_plan callback not registered');
+          }
+
+          callback({
+            acceptanceCriteria: ['Criterion one'],
+            plan: {
+              goal: 'Goal',
+              steps: ['Step one'],
+              validation: ['Validate one'],
+              cleanup: [],
+              generatedAt: new Date().toISOString(),
+            },
+          });
+        },
+        abort: async () => {},
+      },
+    });
+
+    const result = await planTask({
+      task,
+      workspaceId: 'workspace-test',
+      workspacePath,
+      broadcastToWorkspace: () => {},
+    });
+
+    expect(result).not.toBeNull();
+    expect(DEFAULT_PLANNING_GUARDRAILS.timeoutMs).toBe(1_800_000);
+
+    const planningTimeoutCall = withTimeoutMock.mock.calls.find((call) => (
+      typeof call[2] === 'string' && String(call[2]).startsWith('Planning timed out after')
+    ));
+
+    if (!planningTimeoutCall) {
+      throw new Error('Expected planning timeout wrapper call');
+    }
+
+    expect(planningTimeoutCall[1]).toBe(DEFAULT_PLANNING_GUARDRAILS.timeoutMs);
+    expect(planningTimeoutCall[2]).toBe('Planning timed out after 1800 seconds');
+  });
+
+  it('uses explicit timeout overrides from planning guardrail settings', async () => {
+    mockedFactorySettings = {
+      planningGuardrails: {
+        timeoutMs: 120_000,
+      },
+    };
+
+    const workspacePath = mkdtempSync(join(tmpdir(), 'pi-factory-plan-task-'));
+    tempDirs.push(workspacePath);
+
+    const tasksDir = join(workspacePath, '.pi', 'tasks');
+    mkdirSync(tasksDir, { recursive: true });
+
+    const { createTask } = await import('../src/task-service.js');
+    const { planTask } = await import('../src/agent-execution-service.js');
+
+    const task = createTask(workspacePath, tasksDir, {
+      content: 'Respect explicit timeout override settings',
+      acceptanceCriteria: [],
+    });
+
+    createAgentSessionMock.mockResolvedValue({
+      session: {
+        subscribe: () => () => {},
+        prompt: async () => {
+          const callback = (globalThis as any).__piFactoryPlanCallbacks?.get(task.id);
+          if (!callback) {
+            throw new Error('save_plan callback not registered');
+          }
+
+          callback({
+            acceptanceCriteria: ['Criterion one'],
+            plan: {
+              goal: 'Goal',
+              steps: ['Step one'],
+              validation: ['Validate one'],
+              cleanup: [],
+              generatedAt: new Date().toISOString(),
+            },
+          });
+        },
+        abort: async () => {},
+      },
+    });
+
+    const result = await planTask({
+      task,
+      workspaceId: 'workspace-test',
+      workspacePath,
+      broadcastToWorkspace: () => {},
+    });
+
+    expect(result).not.toBeNull();
+
+    const planningTimeoutCall = withTimeoutMock.mock.calls.find((call) => (
+      typeof call[2] === 'string' && String(call[2]).startsWith('Planning timed out after')
+    ));
+
+    if (!planningTimeoutCall) {
+      throw new Error('Expected planning timeout wrapper call');
+    }
+
+    expect(planningTimeoutCall[1]).toBe(120_000);
+    expect(planningTimeoutCall[2]).toBe('Planning timed out after 120 seconds');
   });
 
   it('aborts the planning turn right after save_plan persists a plan', async () => {

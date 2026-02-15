@@ -2,6 +2,16 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_PLANNING_GUARDRAILS } from '@pi-factory/shared';
 import { buildPlanningPrompt, resolvePlanningGuardrails } from '../src/agent-execution-service.js';
 
+describe('DEFAULT_PLANNING_GUARDRAILS', () => {
+  it('uses a 30-minute timeout without changing tool/read budgets', () => {
+    expect(DEFAULT_PLANNING_GUARDRAILS).toEqual({
+      timeoutMs: 1_800_000,
+      maxToolCalls: 40,
+      maxReadBytes: 180_000,
+    });
+  });
+});
+
 describe('resolvePlanningGuardrails', () => {
   it('returns defaults when settings are missing', () => {
     expect(resolvePlanningGuardrails(undefined)).toEqual(DEFAULT_PLANNING_GUARDRAILS);
@@ -19,12 +29,17 @@ describe('resolvePlanningGuardrails', () => {
     });
   });
 
-  it('falls back for invalid values', () => {
-    expect(resolvePlanningGuardrails({
+  it('falls back for invalid values and formats timeout messaging from the fallback', () => {
+    const resolved = resolvePlanningGuardrails({
       timeoutMs: -1,
       maxToolCalls: 0,
       maxReadBytes: Number.NaN,
-    })).toEqual(DEFAULT_PLANNING_GUARDRAILS);
+    });
+
+    expect(resolved).toEqual(DEFAULT_PLANNING_GUARDRAILS);
+    expect(`Planning timed out after ${Math.round(resolved.timeoutMs / 1000)} seconds`).toBe(
+      'Planning timed out after 1800 seconds',
+    );
   });
 });
 
