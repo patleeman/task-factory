@@ -1085,8 +1085,6 @@ export function WorkspacePage() {
     }, []),
     voiceInputHotkey,
     onVoiceHotkeyDown: useCallback(() => {
-      const textarea = document.querySelector('[data-chat-input]') as HTMLTextAreaElement | null
-      textarea?.focus()
       setIsVoiceHotkeyPressed(true)
     }, []),
     onVoiceHotkeyUp: useCallback(() => {

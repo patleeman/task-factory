@@ -677,7 +677,7 @@ export function TaskChat({
     start: startDictation,
     stop: stopDictation,
     clearError: clearDictationError,
-  } = useVoiceDictation({ setInput })
+  } = useVoiceDictation()
 
   const resizeComposer = useCallback(() => {
     const textarea = textareaRef.current
