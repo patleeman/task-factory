@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const updateWorkspaceConfigMock = vi.fn();
 const getWorkspaceByIdMock = vi.fn();
 const loadGlobalWorkflowSettingsMock = vi.fn(() => ({
+  readyLimit: 25,
   executingLimit: 1,
   backlogToReady: false,
   readyToExecuting: true,
@@ -56,6 +57,7 @@ describe('queue manager automation persistence', () => {
     getWorkspaceByIdMock.mockReset();
     loadGlobalWorkflowSettingsMock.mockReset();
     loadGlobalWorkflowSettingsMock.mockImplementation(() => ({
+      readyLimit: 25,
       executingLimit: 1,
       backlogToReady: false,
       readyToExecuting: true,

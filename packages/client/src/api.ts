@@ -111,6 +111,7 @@ export interface WorkflowAutomationResponse extends WorkspaceWorkflowSettingsRes
 }
 
 export interface WorkflowAutomationUpdate {
+  readyLimit?: number | null
   backlogToReady?: boolean | null
   readyToExecuting?: boolean | null
   executingLimit?: number | null

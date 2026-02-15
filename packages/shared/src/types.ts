@@ -57,7 +57,7 @@ export function getDemotePhase(current: Phase): Phase | null {
 // WIP limits for each phase (null = unlimited)
 export const DEFAULT_WIP_LIMITS: Record<Phase, number | null> = {
   backlog: null,
-  ready: null,
+  ready: 25,
   executing: 1,
   complete: null,
   archived: null,
@@ -508,6 +508,7 @@ export interface WorkspaceAutomationSettings {
 
 /** Global workflow defaults persisted in ~/.pi/factory/settings.json. */
 export interface WorkflowDefaultsConfig {
+  readyLimit?: number;
   executingLimit?: number;
   backlogToReady?: boolean;
   readyToExecuting?: boolean;
@@ -515,6 +516,7 @@ export interface WorkflowDefaultsConfig {
 
 /** Workspace-level override values (undefined = inherit from global defaults). */
 export interface WorkspaceWorkflowOverrides {
+  readyLimit?: number;
   executingLimit?: number;
   backlogToReady?: boolean;
   readyToExecuting?: boolean;
@@ -522,6 +524,7 @@ export interface WorkspaceWorkflowOverrides {
 
 /** Fully-resolved workflow settings used at runtime. */
 export interface WorkspaceWorkflowSettings extends WorkspaceAutomationSettings {
+  readyLimit: number;
   executingLimit: number;
 }
 
@@ -549,11 +552,16 @@ export interface WorkspaceConfig {
   workflowAutomation?: WorkspaceAutomationConfig;
 }
 
+const BUILT_IN_READY_LIMIT = typeof DEFAULT_WIP_LIMITS.ready === 'number' && DEFAULT_WIP_LIMITS.ready > 0
+  ? DEFAULT_WIP_LIMITS.ready
+  : 25;
+
 const BUILT_IN_EXECUTING_LIMIT = typeof DEFAULT_WIP_LIMITS.executing === 'number' && DEFAULT_WIP_LIMITS.executing > 0
   ? DEFAULT_WIP_LIMITS.executing
   : 1;
 
 export const DEFAULT_WORKFLOW_SETTINGS: WorkspaceWorkflowSettings = {
+  readyLimit: BUILT_IN_READY_LIMIT,
   executingLimit: BUILT_IN_EXECUTING_LIMIT,
   backlogToReady: false,
   readyToExecuting: true,
@@ -572,6 +580,7 @@ export function resolveGlobalWorkflowSettings(
   defaults: WorkflowDefaultsConfig | null | undefined,
 ): WorkspaceWorkflowSettings {
   return {
+    readyLimit: sanitizeWorkflowSlotLimit(defaults?.readyLimit) ?? DEFAULT_WORKFLOW_SETTINGS.readyLimit,
     executingLimit: sanitizeWorkflowSlotLimit(defaults?.executingLimit) ?? DEFAULT_WORKFLOW_SETTINGS.executingLimit,
     backlogToReady: typeof defaults?.backlogToReady === 'boolean'
       ? defaults.backlogToReady
@@ -583,6 +592,7 @@ export function resolveGlobalWorkflowSettings(
 }
 
 export function getWorkspaceWorkflowOverrides(config: WorkspaceConfig): WorkspaceWorkflowOverrides {
+  const readyLimit = sanitizeWorkflowSlotLimit(config.wipLimits?.ready);
   const executingLimit = sanitizeWorkflowSlotLimit(config.wipLimits?.executing);
 
   const backlogToReady = typeof config.workflowAutomation?.backlogToReady === 'boolean'
@@ -596,6 +606,7 @@ export function getWorkspaceWorkflowOverrides(config: WorkspaceConfig): Workspac
       : undefined;
 
   return {
+    readyLimit,
     executingLimit,
     backlogToReady,
     readyToExecuting,
@@ -610,6 +621,7 @@ export function resolveWorkspaceWorkflowSettings(
   const overrides = getWorkspaceWorkflowOverrides(config);
 
   return {
+    readyLimit: overrides.readyLimit ?? defaults.readyLimit,
     executingLimit: overrides.executingLimit ?? defaults.executingLimit,
     backlogToReady: overrides.backlogToReady ?? defaults.backlogToReady,
     readyToExecuting: overrides.readyToExecuting ?? defaults.readyToExecuting,
@@ -622,7 +634,7 @@ export function resolveWorkspaceWipLimit(
   globalDefaults?: WorkflowDefaultsConfig | null,
 ): number | null {
   if (phase === 'ready') {
-    return null;
+    return resolveWorkspaceWorkflowSettings(config, globalDefaults).readyLimit;
   }
 
   if (phase === 'executing') {

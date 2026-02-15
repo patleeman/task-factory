@@ -185,6 +185,10 @@ export function PipelineBar({
   }
 
   const getPhaseLimit = (phase: Phase): number | null => {
+    if (phase === 'ready') {
+      return automationSettings.readyLimit
+    }
+
     if (phase === 'executing') {
       return automationSettings.executingLimit
     }

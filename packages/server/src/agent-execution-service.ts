@@ -2554,6 +2554,11 @@ function maybeAutoPromoteBacklogTaskAfterPlanning(
     return latestTask;
   }
 
+  const readyTasks = tasks.filter((candidate) => candidate.frontmatter.phase === 'ready');
+  if (readyTasks.length >= workflowSettings.readyLimit && latestTask.frontmatter.phase !== 'ready') {
+    return latestTask;
+  }
+
   const fromPhase = latestTask.frontmatter.phase;
   const fromState = buildTaskStateSnapshot(latestTask.frontmatter);
 

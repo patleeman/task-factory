@@ -16,24 +16,35 @@ function createWorkspaceConfig(overrides: Partial<WorkspaceConfig> = {}): Worksp
 }
 
 describe('workflow-settings-service', () => {
-  it('validates global workflow defaults payload ranges and strips legacy ready limits', () => {
+  it('validates global workflow defaults payload ranges and types', () => {
     const invalidBody = normalizePiFactorySettingsPayload('bad' as unknown as Record<string, unknown>);
     expect(invalidBody.ok).toBe(false);
 
     const invalid = normalizePiFactorySettingsPayload({
       workflowDefaults: {
-        executingLimit: '2' as unknown as number,
+        readyLimit: '2' as unknown as number,
       },
     });
 
     expect(invalid.ok).toBe(false);
     if (!invalid.ok) {
-      expect(invalid.error).toContain('workflowDefaults.executingLimit');
+      expect(invalid.error).toContain('workflowDefaults.readyLimit');
+    }
+
+    const invalidExecuting = normalizePiFactorySettingsPayload({
+      workflowDefaults: {
+        executingLimit: '2' as unknown as number,
+      },
+    });
+
+    expect(invalidExecuting.ok).toBe(false);
+    if (!invalidExecuting.ok) {
+      expect(invalidExecuting.error).toContain('workflowDefaults.executingLimit');
     }
 
     const valid = normalizePiFactorySettingsPayload({
       workflowDefaults: {
-        readyLimit: 6,
+        readyLimit: 25,
         executingLimit: 2,
         backlogToReady: true,
         readyToExecuting: false,
@@ -44,6 +55,7 @@ describe('workflow-settings-service', () => {
       ok: true,
       value: {
         workflowDefaults: {
+          readyLimit: 25,
           executingLimit: 2,
           backlogToReady: true,
           readyToExecuting: false,
@@ -63,6 +75,7 @@ describe('workflow-settings-service', () => {
 
   it('accepts workspace workflow patch values and supports null to inherit', () => {
     const result = parseWorkspaceWorkflowPatch({
+      readyLimit: 3,
       executingLimit: null,
       backlogToReady: true,
       readyToExecuting: null,
@@ -71,6 +84,7 @@ describe('workflow-settings-service', () => {
     expect(result).toEqual({
       ok: true,
       value: {
+        readyLimit: 3,
         executingLimit: null,
         backlogToReady: true,
         readyToExecuting: null,
@@ -96,6 +110,7 @@ describe('workflow-settings-service', () => {
         tasksInExecuting: 0,
       },
       {
+        readyLimit: 25,
         executingLimit: 2,
         backlogToReady: false,
         readyToExecuting: true,
@@ -108,12 +123,14 @@ describe('workflow-settings-service', () => {
     });
 
     expect(response.effective).toEqual({
+      readyLimit: 4,
       executingLimit: 2,
       backlogToReady: true,
       readyToExecuting: true,
     });
 
     expect(response.overrides).toEqual({
+      readyLimit: 4,
       executingLimit: undefined,
       backlogToReady: true,
       readyToExecuting: undefined,
@@ -122,6 +139,7 @@ describe('workflow-settings-service', () => {
 
   it('applies patch overrides and clears legacy queueProcessing when ready→executing inherits global defaults', () => {
     const globalDefaults = {
+      readyLimit: 25,
       executingLimit: 2,
       backlogToReady: false,
       readyToExecuting: true,
@@ -140,6 +158,7 @@ describe('workflow-settings-service', () => {
         queueProcessing: { enabled: false },
       }),
       {
+        readyLimit: null,
         executingLimit: 5,
         backlogToReady: null,
         readyToExecuting: null,
@@ -154,6 +173,7 @@ describe('workflow-settings-service', () => {
     expect(patchResult.nextConfig.queueProcessing).toBeUndefined();
 
     expect(patchResult.effective).toEqual({
+      readyLimit: 25,
       executingLimit: 5,
       backlogToReady: false,
       readyToExecuting: true,

@@ -693,9 +693,10 @@ describe('planTask', () => {
     expect(persistedTask.frontmatter.phase).toBe('ready');
   });
 
-  it('auto-promotes even when Ready already has tasks under global defaults', async () => {
+  it('auto-promotes even when Ready has tasks under the inherited global ready limit', async () => {
     mockedFactorySettings = {
       workflowDefaults: {
+        readyLimit: 25,
         executingLimit: 1,
         backlogToReady: true,
         readyToExecuting: false,
@@ -774,7 +775,16 @@ describe('planTask', () => {
     expect(persistedTask.frontmatter.phase).toBe('ready');
   });
 
-  it('ignores legacy ready WIP overrides when auto-promoting after planning', async () => {
+  it('does not auto-promote when global ready WIP limit is reached', async () => {
+    mockedFactorySettings = {
+      workflowDefaults: {
+        readyLimit: 1,
+        executingLimit: 1,
+        backlogToReady: true,
+        readyToExecuting: false,
+      },
+    };
+
     const workspacePath = mkdtempSync(join(tmpdir(), 'pi-factory-plan-task-'));
     tempDirs.push(workspacePath);
 
@@ -787,7 +797,6 @@ describe('planTask', () => {
       JSON.stringify({
         taskLocations: ['.pi/tasks'],
         defaultTaskLocation: '.pi/tasks',
-        wipLimits: { ready: 1 },
         queueProcessing: { enabled: false },
         workflowAutomation: {
           backlogToReady: true,
@@ -812,7 +821,7 @@ describe('planTask', () => {
     moveTaskToPhase(existingReadyLive, 'ready', 'user', 'seed ready lane', liveTasks);
 
     const task = createTask(workspacePath, tasksDir, {
-      content: 'Should auto-promote even with legacy ready limit present',
+      content: 'Should stay backlog because global ready WIP is full',
       acceptanceCriteria: [],
     });
 
@@ -851,14 +860,14 @@ describe('planTask', () => {
     expect(result).not.toBeNull();
 
     const persistedTask = parseTaskFile(task.filePath);
-    expect(persistedTask.frontmatter.phase).toBe('ready');
+    expect(persistedTask.frontmatter.phase).toBe('backlog');
 
     expect(
       broadcasts.some((event) => (
         event.type === 'task:moved'
         && event.task?.id === task.id
       )),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it('does not auto-promote when planning saves no acceptance criteria', async () => {

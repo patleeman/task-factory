@@ -290,6 +290,9 @@ export function WorkspacePage() {
           ...(ws.config.wipLimits || {}),
         }
         delete nextWipLimits.ready
+        if (automationData.overrides.readyLimit !== undefined) {
+          nextWipLimits.ready = automationData.overrides.readyLimit
+        }
         if (automationData.overrides.executingLimit !== undefined) {
           nextWipLimits.executing = automationData.overrides.executingLimit
         }
@@ -471,6 +474,9 @@ export function WorkspacePage() {
             }
             delete nextWipLimits.ready
             delete nextWipLimits.executing
+            if (overrides.readyLimit !== undefined) {
+              nextWipLimits.ready = overrides.readyLimit
+            }
             if (overrides.executingLimit !== undefined) {
               nextWipLimits.executing = overrides.executingLimit
             }
@@ -617,6 +623,9 @@ export function WorkspacePage() {
       }
       delete nextWipLimits.ready
       delete nextWipLimits.executing
+      if (result.overrides.readyLimit !== undefined) {
+        nextWipLimits.ready = result.overrides.readyLimit
+      }
       if (result.overrides.executingLimit !== undefined) {
         nextWipLimits.executing = result.overrides.executingLimit
       }
