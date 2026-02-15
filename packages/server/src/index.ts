@@ -40,6 +40,7 @@ import {
   reorderTasks,
   saveTaskFile,
   shouldResumeInterruptedPlanning,
+  getTaskFilePath,
 } from './task-service.js';
 import { prepareTaskUpdateRequest } from './task-update-service.js';
 import {
@@ -90,6 +91,33 @@ function buildAutomationResponse(
 ) {
   const globalDefaults = loadGlobalWorkflowSettings();
   return buildWorkspaceWorkflowSettingsResponse(workspaceConfig, queueStatus, globalDefaults);
+}
+
+type TaskListScope = 'all' | 'active' | 'archived';
+
+function parseTaskListScope(value: unknown): TaskListScope | null {
+  if (value === undefined || value === null) {
+    return 'all';
+  }
+
+  if (Array.isArray(value)) {
+    return null;
+  }
+
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (normalized === '') {
+    return 'all';
+  }
+
+  if (normalized === 'all' || normalized === 'active' || normalized === 'archived') {
+    return normalized;
+  }
+
+  return null;
 }
 
 // =============================================================================
@@ -280,8 +308,14 @@ app.get('/api/workspaces/:id/tasks', async (req, res) => {
     return;
   }
 
+  const scope = parseTaskListScope(req.query.scope);
+  if (!scope) {
+    res.status(400).json({ error: 'scope must be one of: all, active, archived' });
+    return;
+  }
+
   const tasksDir = getTasksDir(workspace);
-  const tasks = discoverTasks(tasksDir);
+  const tasks = discoverTasks(tasksDir, { scope });
 
   res.json(tasks);
 });
@@ -346,15 +380,21 @@ app.get('/api/workspaces/:workspaceId/tasks/:taskId', async (req, res) => {
   }
 
   const tasksDir = getTasksDir(workspace);
-  const tasks = discoverTasks(tasksDir);
-  const task = tasks.find((t) => t.id === req.params.taskId);
+  const taskFilePath = getTaskFilePath(tasksDir, req.params.taskId);
 
-  if (!task) {
-    res.status(404).json({ error: 'Task not found' });
-    return;
+  try {
+    const task = parseTaskFile(taskFilePath);
+    res.json(task);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') {
+      res.status(404).json({ error: 'Task not found' });
+      return;
+    }
+
+    logger.error('Error reading task', err);
+    res.status(500).json({ error: 'Internal Server Error' });
   }
-
-  res.json(task);
 });
 
 // Update task

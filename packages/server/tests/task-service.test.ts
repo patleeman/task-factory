@@ -126,6 +126,118 @@ describe('shouldResumeInterruptedPlanning', () => {
   });
 });
 
+describe('discoverTasks scope filtering', () => {
+  it('returns active tasks without parsing malformed archived task files', () => {
+    const { workspacePath, tasksDir } = createTempWorkspace();
+
+    const activeTask = createTaskFile(workspacePath, tasksDir, {
+      title: 'Active task',
+      content: 'active body',
+      acceptanceCriteria: ['done'],
+    });
+
+    const malformedArchivedDir = join(tasksDir, 'broken-archived-task');
+    mkdirSync(malformedArchivedDir, { recursive: true });
+    writeFileSync(
+      join(malformedArchivedDir, 'task.yaml'),
+      [
+        'id: BROK-999',
+        'title: Broken archived task',
+        'phase: archived',
+        'description: |',
+        '  [this yaml is intentionally malformed',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      const tasks = discoverTasks(tasksDir, { scope: 'active' });
+
+      expect(tasks.some((task) => task.id === activeTask.id)).toBe(true);
+      expect(tasks.some((task) => task.frontmatter.phase === 'archived')).toBe(false);
+      expect(errorSpy).not.toHaveBeenCalled();
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it('does not misclassify active tasks when description text includes an indented phase field', () => {
+    const { tasksDir } = createTempWorkspace();
+
+    const taskId = 'TEXT-1';
+    const taskDir = join(tasksDir, taskId.toLowerCase());
+    mkdirSync(taskDir, { recursive: true });
+
+    writeFileSync(
+      join(taskDir, 'task.yaml'),
+      [
+        `id: ${taskId}`,
+        'title: Phase text task',
+        'phase: backlog',
+        'created: 2026-02-15T00:00:00.000Z',
+        'updated: 2026-02-15T00:00:00.000Z',
+        'workspace: /tmp/workspace',
+        'project: workspace',
+        'blockedCount: 0',
+        'blockedDuration: 0',
+        'order: 0',
+        'acceptanceCriteria: []',
+        'testingInstructions: []',
+        'commits: []',
+        'attachments: []',
+        'blocked:',
+        '  isBlocked: false',
+        'description: |',
+        '  Notes:',
+        '    phase: archived',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    const activeOnly = discoverTasks(tasksDir, { scope: 'active' });
+    const archivedOnly = discoverTasks(tasksDir, { scope: 'archived' });
+
+    expect(activeOnly.map((task) => task.id)).toContain(taskId);
+    expect(archivedOnly.map((task) => task.id)).not.toContain(taskId);
+  });
+
+  it('returns archived tasks only when archived scope is requested', () => {
+    const { workspacePath, tasksDir } = createTempWorkspace();
+
+    const activeTask = createTaskFile(workspacePath, tasksDir, {
+      title: 'Active task',
+      content: 'active body',
+      acceptanceCriteria: ['done'],
+    });
+
+    const archivedTask = createTaskFile(workspacePath, tasksDir, {
+      title: 'Archived task',
+      content: 'archived body',
+      acceptanceCriteria: ['done'],
+    });
+
+    const allTasks = discoverTasks(tasksDir);
+    moveTaskToPhase(
+      allTasks.find((task) => task.id === archivedTask.id)!,
+      'archived',
+      'user',
+      'archive for scope filtering',
+      allTasks,
+    );
+
+    const archivedOnly = discoverTasks(tasksDir, { scope: 'archived' });
+    const activeOnly = discoverTasks(tasksDir, { scope: 'active' });
+
+    expect(archivedOnly.map((task) => task.id)).toContain(archivedTask.id);
+    expect(archivedOnly.some((task) => task.frontmatter.phase !== 'archived')).toBe(false);
+
+    expect(activeOnly.map((task) => task.id)).toContain(activeTask.id);
+    expect(activeOnly.map((task) => task.id)).not.toContain(archivedTask.id);
+  });
+});
+
 describe('task ordering', () => {
   it('creates new backlog tasks at the start (left)', () => {
     const { workspacePath, tasksDir } = createTempWorkspace();

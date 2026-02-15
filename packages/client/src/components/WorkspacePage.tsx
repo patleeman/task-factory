@@ -101,7 +101,10 @@ export function WorkspacePage() {
   const [backlogAutomationToggling, setBacklogAutomationToggling] = useState(false)
   const [readyAutomationToggling, setReadyAutomationToggling] = useState(false)
   const [factoryToggling, setFactoryToggling] = useState(false)
+  const [archivedTasksLoaded, setArchivedTasksLoaded] = useState(false)
+  const [archivedTasksLoading, setArchivedTasksLoading] = useState(false)
   const toastTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const archivedLoadPromiseRef = useRef<Promise<void> | null>(null)
 
   const [selectedArtifact, setSelectedArtifact] = useState<Artifact | null>(null)
   const [ideaBacklog, setIdeaBacklog] = useState<IdeaBacklog | null>(null)
@@ -178,6 +181,58 @@ export function WorkspacePage() {
         .map((t) => t.id),
     )
   }, [tasks])
+
+  const mergeArchivedTasks = useCallback((existingTasks: Task[], archived: Task[]) => {
+    const activeTasks = existingTasks.filter((task) => task.frontmatter.phase !== 'archived')
+    const merged = [...activeTasks]
+    const seenIds = new Set(activeTasks.map((task) => task.id))
+
+    for (const task of archived) {
+      if (seenIds.has(task.id)) {
+        const existingIndex = merged.findIndex((candidate) => candidate.id === task.id)
+        if (existingIndex !== -1) {
+          merged[existingIndex] = task
+        }
+        continue
+      }
+
+      merged.push(task)
+      seenIds.add(task.id)
+    }
+
+    return merged
+  }, [])
+
+  const loadArchivedTasksIfNeeded = useCallback(async (options?: { force?: boolean }) => {
+    if (!workspaceId) return
+
+    const shouldForce = options?.force === true
+    if (!shouldForce && archivedTasksLoaded) {
+      return
+    }
+
+    if (!shouldForce && archivedLoadPromiseRef.current) {
+      return archivedLoadPromiseRef.current
+    }
+
+    setArchivedTasksLoading(true)
+
+    const loadPromise = api.getTasks(workspaceId, 'archived')
+      .then((archivedTasksData) => {
+        setTasks((prev) => mergeArchivedTasks(prev, archivedTasksData))
+        setArchivedTasksLoaded(true)
+      })
+      .catch((err) => {
+        console.error('Failed to load archived tasks:', err)
+      })
+      .finally(() => {
+        archivedLoadPromiseRef.current = null
+        setArchivedTasksLoading(false)
+      })
+
+    archivedLoadPromiseRef.current = loadPromise
+    return loadPromise
+  }, [workspaceId, archivedTasksLoaded, mergeArchivedTasks])
 
   useEffect(() => {
     tasksByIdRef.current = new Map(tasks.map((task) => [task.id, task]))
@@ -272,10 +327,13 @@ export function WorkspacePage() {
     setReadyAutomationToggling(false)
     setFactoryToggling(false)
     setAutomationSettings({ ...DEFAULT_WORKFLOW_SETTINGS })
+    setArchivedTasksLoaded(false)
+    setArchivedTasksLoading(false)
+    archivedLoadPromiseRef.current = null
 
     Promise.all([
       api.getWorkspace(workspaceId),
-      api.getTasks(workspaceId),
+      api.getTasks(workspaceId, 'active'),
       api.getActivity(workspaceId, 100),
       api.getWorkflowAutomation(workspaceId),
       api.getPlanningMessages(workspaceId),
@@ -371,6 +429,22 @@ export function WorkspacePage() {
       })
   }, [workspaceId])
 
+  // Lazy-load archived tasks only when the archive UI or archived task detail is needed.
+  useEffect(() => {
+    if (!workspaceId || isLoading) return
+
+    if (isArchiveRoute) {
+      void loadArchivedTasksIfNeeded()
+      return
+    }
+
+    if (!taskId || selectedTask) {
+      return
+    }
+
+    void loadArchivedTasksIfNeeded()
+  }, [workspaceId, isLoading, isArchiveRoute, taskId, selectedTask, loadArchivedTasksIfNeeded])
+
   // Load task-specific activity when opening a task route
   useEffect(() => {
     if (!workspaceId || !taskId) return
@@ -403,18 +477,47 @@ export function WorkspacePage() {
         case 'task:created':
           setTasks((prev) => {
             if (prev.some((t) => t.id === msg.task.id)) return prev
+            if (msg.task.frontmatter.phase === 'archived' && !archivedTasksLoaded) {
+              return prev
+            }
             return [msg.task, ...prev]
           })
           break
         case 'task:updated':
-          setTasks((prev) =>
-            prev.map((t) => (t.id === msg.task.id ? msg.task : t))
-          )
+          setTasks((prev) => {
+            const existingIndex = prev.findIndex((task) => task.id === msg.task.id)
+            if (existingIndex === -1) {
+              if (msg.task.frontmatter.phase === 'archived' && !archivedTasksLoaded) {
+                return prev
+              }
+              return prev
+            }
+
+            const updated = [...prev]
+            updated[existingIndex] = msg.task
+            return updated
+          })
           break
         case 'task:moved':
-          setTasks((prev) =>
-            prev.map((t) => (t.id === msg.task.id ? msg.task : t))
-          )
+          setTasks((prev) => {
+            const existingIndex = prev.findIndex((task) => task.id === msg.task.id)
+
+            if (msg.to === 'archived' && !archivedTasksLoaded) {
+              if (existingIndex === -1) return prev
+
+              const updated = [...prev]
+              updated[existingIndex] = msg.task
+              return updated
+            }
+
+            if (existingIndex === -1) {
+              return [msg.task, ...prev]
+            }
+
+            const updated = [...prev]
+            updated[existingIndex] = msg.task
+            return updated
+          })
           break
         case 'task:plan_generated': {
           setTasks((prev) =>
@@ -428,6 +531,10 @@ export function WorkspacePage() {
         }
         case 'task:reordered': {
           const { phase: reorderedPhase, taskIds: orderedIds } = msg
+          if (reorderedPhase === 'archived' && !archivedTasksLoaded) {
+            break
+          }
+
           setTasks((prev) => {
             const updated = [...prev]
             for (let i = 0; i < orderedIds.length; i++) {
@@ -564,7 +671,7 @@ export function WorkspacePage() {
           break
       }
     })
-  }, [subscribe])
+  }, [subscribe, archivedTasksLoaded])
 
   // Create task
   const handleCreateTask = async (data: CreateTaskData) => {
@@ -744,9 +851,22 @@ export function WorkspacePage() {
       await api.reorderTasks(workspaceId, phase, taskIds)
     } catch (err) {
       console.error('Failed to reorder tasks:', err)
-      // Reload tasks to restore correct order on failure
-      const freshTasks = await api.getTasks(workspaceId)
-      setTasks(freshTasks)
+
+      try {
+        // Reload active tasks to restore correct order on failure.
+        const freshActiveTasks = await api.getTasks(workspaceId, 'active')
+        setTasks((prev) => {
+          if (!archivedTasksLoaded) {
+            return freshActiveTasks
+          }
+
+          const knownArchivedTasks = prev.filter((task) => task.frontmatter.phase === 'archived')
+          return mergeArchivedTasks(freshActiveTasks, knownArchivedTasks)
+        })
+      } catch (reloadErr) {
+        console.error('Failed to reload tasks after reorder error:', reloadErr)
+      }
+
       showToast('Failed to reorder tasks')
     }
   }
@@ -1091,7 +1211,8 @@ export function WorkspacePage() {
     setActiveForemanPane('workspace')
     setSelectedArtifact(null)
     navigate(workspaceArchivePath)
-  }, [navigate, workspaceArchivePath])
+    void loadArchivedTasksIfNeeded()
+  }, [navigate, workspaceArchivePath, loadArchivedTasksIfNeeded])
 
   const handleRestoreArchivedTask = useCallback(async (
     targetTaskId: string,
@@ -1472,14 +1593,20 @@ export function WorkspacePage() {
                   prefillRequest={newTaskPrefill}
                 />
               ) : isArchiveRoute ? (
-                <ArchivePane
-                  archivedTasks={archivedTasks}
-                  onBack={() => navigate(workspaceRootPath)}
-                  onRestoreTask={handleRestoreArchivedTask}
-                  onDeleteTask={handleDeleteArchivedTask}
-                  onBulkRestoreTasks={handleBulkRestoreArchivedTasks}
-                  onBulkDeleteTasks={handleBulkDeleteArchivedTasks}
-                />
+                archivedTasksLoading && !archivedTasksLoaded ? (
+                  <div className="flex h-full items-center justify-center text-slate-500">
+                    <p className="text-sm font-medium">Loading archive…</p>
+                  </div>
+                ) : (
+                  <ArchivePane
+                    archivedTasks={archivedTasks}
+                    onBack={() => navigate(workspaceRootPath)}
+                    onRestoreTask={handleRestoreArchivedTask}
+                    onDeleteTask={handleDeleteArchivedTask}
+                    onBulkRestoreTasks={handleBulkRestoreArchivedTasks}
+                    onBulkDeleteTasks={handleBulkDeleteArchivedTasks}
+                  />
+                )
               ) : activeForemanPane === 'ideas' ? (
                 <IdeaBacklogPane
                   backlog={ideaBacklog}

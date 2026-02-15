@@ -45,6 +45,8 @@ export interface WorkspaceAttentionSummary {
   awaitingInputCount: number
 }
 
+export type TaskListScope = 'all' | 'active' | 'archived'
+
 export type PiProviderAuthState = 'none' | 'api_key' | 'oauth' | 'external'
 
 export interface PiAuthProviderOverview {
@@ -145,8 +147,13 @@ export const api = {
       throw new Error(err.error || `Delete failed (${res.status})`)
     }
   },
-  async getTasks(workspaceId: string): Promise<Task[]> {
-    const res = await fetch(`/api/workspaces/${workspaceId}/tasks`)
+  async getTasks(workspaceId: string, scope: TaskListScope = 'all'): Promise<Task[]> {
+    const query = scope === 'all' ? '' : `?scope=${scope}`
+    const res = await fetch(`/api/workspaces/${workspaceId}/tasks${query}`)
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to load tasks' }))
+      throw new Error(err.error || `Failed to load tasks (${res.status})`)
+    }
     return res.json()
   },
   async getActivity(workspaceId: string, limit = 100): Promise<ActivityEntry[]> {

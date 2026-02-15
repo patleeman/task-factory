@@ -3,7 +3,19 @@
 // =============================================================================
 // Manages task files, parsing, and operations
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, rmSync, statSync, copyFileSync } from 'fs';
+import {
+  readFileSync,
+  writeFileSync,
+  mkdirSync,
+  existsSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  copyFileSync,
+  openSync,
+  readSync,
+  closeSync,
+} from 'fs';
 import { join, basename, dirname } from 'path';
 import YAML from 'yaml';
 import {
@@ -536,11 +548,96 @@ export function moveTaskToPhase(
 // Task Discovery
 // =============================================================================
 
-export function discoverTasks(tasksDir: string): Task[] {
+const PHASE_HEADER_READ_BYTES = 4 * 1024;
+
+export type TaskDiscoveryScope = 'all' | 'active' | 'archived';
+
+export interface DiscoverTasksOptions {
+  scope?: TaskDiscoveryScope;
+}
+
+function normalizePhaseForDiscovery(value: string): Phase | null {
+  const normalized = value.trim().toLowerCase();
+
+  if (normalized === 'planning') {
+    return 'backlog';
+  }
+
+  if (
+    normalized === 'backlog'
+    || normalized === 'ready'
+    || normalized === 'executing'
+    || normalized === 'complete'
+    || normalized === 'archived'
+  ) {
+    return normalized;
+  }
+
+  return null;
+}
+
+function shouldIncludeTaskForScope(phase: Phase, scope: TaskDiscoveryScope): boolean {
+  if (scope === 'all') {
+    return true;
+  }
+
+  if (scope === 'archived') {
+    return phase === 'archived';
+  }
+
+  return phase !== 'archived';
+}
+
+function readTaskPhaseFromHeader(filePath: string): Phase | null {
+  let fd: number | null = null;
+
+  try {
+    fd = openSync(filePath, 'r');
+    const buffer = Buffer.alloc(PHASE_HEADER_READ_BYTES);
+    const bytesRead = readSync(fd, buffer, 0, PHASE_HEADER_READ_BYTES, 0);
+
+    if (bytesRead <= 0) {
+      return null;
+    }
+
+    const header = buffer.toString('utf-8', 0, bytesRead);
+    const phaseMatch = header.match(/^phase\s*:\s*([^\n\r#]+)/m);
+    if (!phaseMatch) {
+      return null;
+    }
+
+    let phaseValue = phaseMatch[1].trim();
+    if (!phaseValue) {
+      return null;
+    }
+
+    if (
+      (phaseValue.startsWith("'") && phaseValue.endsWith("'"))
+      || (phaseValue.startsWith('"') && phaseValue.endsWith('"'))
+    ) {
+      phaseValue = phaseValue.slice(1, -1).trim();
+    }
+
+    return normalizePhaseForDiscovery(phaseValue);
+  } catch {
+    return null;
+  } finally {
+    if (fd !== null) {
+      try {
+        closeSync(fd);
+      } catch {
+        // Ignore close errors.
+      }
+    }
+  }
+}
+
+export function discoverTasks(tasksDir: string, options: DiscoverTasksOptions = {}): Task[] {
   if (!existsSync(tasksDir)) {
     return [];
   }
 
+  const scope: TaskDiscoveryScope = options.scope || 'all';
   const entries = readdirSync(tasksDir);
   const tasks: Task[] = [];
 
@@ -550,13 +647,28 @@ export function discoverTasks(tasksDir: string): Task[] {
     try {
       const entryStat = statSync(entryPath);
 
-      if (entryStat.isDirectory()) {
-        const yamlPath = join(entryPath, 'task.yaml');
-        if (existsSync(yamlPath)) {
-          const task = parseTaskFile(yamlPath);
-          tasks.push(task);
+      if (!entryStat.isDirectory()) {
+        continue;
+      }
+
+      const yamlPath = join(entryPath, 'task.yaml');
+      if (!existsSync(yamlPath)) {
+        continue;
+      }
+
+      if (scope !== 'all') {
+        const phaseFromHeader = readTaskPhaseFromHeader(yamlPath);
+        if (phaseFromHeader && !shouldIncludeTaskForScope(phaseFromHeader, scope)) {
+          continue;
         }
       }
+
+      const task = parseTaskFile(yamlPath);
+      if (!shouldIncludeTaskForScope(task.frontmatter.phase, scope)) {
+        continue;
+      }
+
+      tasks.push(task);
     } catch (err) {
       console.error(`Failed to parse task entry: ${entry}`, err);
     }
