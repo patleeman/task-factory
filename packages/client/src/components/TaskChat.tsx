@@ -36,6 +36,8 @@ interface TaskChatProps {
   onStop?: () => Promise<void> | void
   isStopping?: boolean
   isVoiceHotkeyPressed?: boolean
+  /** Reports whether voice dictation is actively listening. */
+  onVoiceDictationStateChange?: (isDictating: boolean) => void
 
   onReset?: () => void
   onUploadFiles?: (files: File[]) => Promise<Attachment[]>
@@ -634,6 +636,7 @@ export function TaskChat({
   onStop,
   isStopping,
   isVoiceHotkeyPressed = false,
+  onVoiceDictationStateChange,
   onReset,
   onUploadFiles,
   getAttachmentUrl: getAttachmentUrlProp,
@@ -678,6 +681,16 @@ export function TaskChat({
     stop: stopDictation,
     clearError: clearDictationError,
   } = useVoiceDictation()
+
+  useEffect(() => {
+    onVoiceDictationStateChange?.(isDictating)
+  }, [isDictating, onVoiceDictationStateChange])
+
+  useEffect(() => {
+    return () => {
+      onVoiceDictationStateChange?.(false)
+    }
+  }, [onVoiceDictationStateChange])
 
   const resizeComposer = useCallback(() => {
     const textarea = textareaRef.current
@@ -1401,16 +1414,11 @@ export function TaskChat({
           </div>
         )}
 
-        {(isDictating || dictationError) && (
+        {dictationError && (
           <div className="px-3 pt-2 pb-0">
-            {isDictating && (
-              <p className="text-[11px] font-mono text-red-600">listening… speak now</p>
-            )}
-            {dictationError && (
-              <p className="text-xs text-red-600" role="status">
-                {dictationError}
-              </p>
-            )}
+            <p className="text-xs text-red-600" role="status">
+              {dictationError}
+            </p>
           </div>
         )}
 

@@ -1,6 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { ArrowLeft, ArrowRight, Check, ChevronDown, ChevronRight, ExternalLink, Plus, RotateCcw, Trash2, X } from 'lucide-react'
-import type { Task, Phase, ModelConfig, PostExecutionSummary as PostExecutionSummaryType } from '@pi-factory/shared'
+import type {
+  Task,
+  Phase,
+  ModelConfig,
+  PostExecutionSummary as PostExecutionSummaryType,
+  TaskModelUsage,
+} from '@pi-factory/shared'
 import { PHASES, PHASE_DISPLAY_NAMES, getPromotePhase, getDemotePhase } from '@pi-factory/shared'
 import { AppIcon } from './AppIcon'
 import { MarkdownEditor } from './MarkdownEditor'
@@ -871,6 +877,49 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
             <span className="font-mono">{formatDuration(frontmatter.leadTime)}</span>
           </div>
         )}
+        {(() => {
+          const usageMetrics = frontmatter.usageMetrics
+          if (!usageMetrics) return null
+
+          const usageTotals = usageMetrics.totals
+          const hasUsageMetrics =
+            usageTotals.totalTokens > 0
+            || usageTotals.cost > 0
+            || usageMetrics.byModel.length > 0
+
+          if (!hasUsageMetrics) return null
+
+          return (
+            <>
+              <div className="flex justify-between">
+                <span>Total Tokens</span>
+                <span className="font-mono">{formatTokenCount(usageTotals.totalTokens)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Input / Output</span>
+                <span className="font-mono">{formatTokenCount(usageTotals.inputTokens)} / {formatTokenCount(usageTotals.outputTokens)}</span>
+              </div>
+              {(usageTotals.cacheReadTokens > 0 || usageTotals.cacheWriteTokens > 0) && (
+                <div className="flex justify-between">
+                  <span>Cache Read / Write</span>
+                  <span className="font-mono">{formatTokenCount(usageTotals.cacheReadTokens)} / {formatTokenCount(usageTotals.cacheWriteTokens)}</span>
+                </div>
+              )}
+              {usageTotals.cost > 0 && (
+                <div className="flex justify-between">
+                  <span>Usage Cost</span>
+                  <span className="font-mono">${formatUsageCost(usageTotals.cost)}</span>
+                </div>
+              )}
+              {usageMetrics.byModel.length > 0 && (
+                <div className="flex justify-between gap-3">
+                  <span>Models Used</span>
+                  <span className="text-right break-all">{formatModelUsageList(usageMetrics.byModel)}</span>
+                </div>
+              )}
+            </>
+          )
+        })()}
         {frontmatter.branch && <div className="flex justify-between"><span>Branch</span><span className="font-mono">{frontmatter.branch}</span></div>}
         {frontmatter.prUrl && (
           <div className="flex justify-between">
@@ -1426,6 +1475,36 @@ async function parseResponseError(response: Response, fallback: string): Promise
   }
 
   return `${fallback} (${response.status})`
+}
+
+const TOKEN_COUNT_FORMATTER = new Intl.NumberFormat()
+
+function formatTokenCount(value: number): string {
+  if (!Number.isFinite(value)) {
+    return '0'
+  }
+
+  return TOKEN_COUNT_FORMATTER.format(Math.max(0, Math.round(value)))
+}
+
+function formatUsageCost(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) {
+    return '0.00'
+  }
+
+  if (value >= 1) return value.toFixed(2)
+  if (value >= 0.01) return value.toFixed(4)
+  return value.toFixed(6)
+}
+
+function formatModelUsageList(models: TaskModelUsage[]): string {
+  if (models.length === 0) {
+    return '—'
+  }
+
+  return models
+    .map((modelUsage) => `${modelUsage.provider}/${modelUsage.modelId}`)
+    .join(', ')
 }
 
 function formatDuration(seconds: number): string {

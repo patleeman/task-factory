@@ -1,28 +1,15 @@
 import { X } from 'lucide-react'
-import type { Artifact, WorkspaceAutomationSettings } from '@pi-factory/shared'
+import type { Artifact } from '@pi-factory/shared'
 import { AppIcon } from './AppIcon'
 import { ArtifactViewer } from './ArtifactViewer'
-import { WorkflowAutomationControls } from './WorkflowAutomationControls'
 
 interface ShelfPaneProps {
   activeArtifact: Artifact | null
-  automationSettings: WorkspaceAutomationSettings
-  readyTasksCount: number
-  backlogAutomationToggling: boolean
-  readyAutomationToggling: boolean
-  onToggleBacklogAutomation: () => void
-  onToggleReadyAutomation: () => void
   onCloseArtifact: () => void
 }
 
 export function ShelfPane({
   activeArtifact,
-  automationSettings,
-  readyTasksCount,
-  backlogAutomationToggling,
-  readyAutomationToggling,
-  onToggleBacklogAutomation,
-  onToggleReadyAutomation,
   onCloseArtifact,
 }: ShelfPaneProps) {
   return (
@@ -63,17 +50,6 @@ export function ShelfPane({
         )}
       </div>
 
-      <div className="px-3 py-2 border-t border-slate-200 bg-slate-50 shrink-0">
-        <WorkflowAutomationControls
-          settings={automationSettings}
-          readyTasksCount={readyTasksCount}
-          backlogAutomationToggling={backlogAutomationToggling}
-          readyAutomationToggling={readyAutomationToggling}
-          onToggleBacklogAutomation={onToggleBacklogAutomation}
-          onToggleReadyAutomation={onToggleReadyAutomation}
-          variant="shelf"
-        />
-      </div>
     </div>
   )
 }

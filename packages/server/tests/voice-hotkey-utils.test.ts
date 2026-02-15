@@ -10,7 +10,8 @@ import {
 
 describe('voice hotkey helpers', () => {
   it('normalizes saved settings values with a stable default', () => {
-    expect(normalizeVoiceInputHotkey(undefined)).toBe(DEFAULT_VOICE_INPUT_HOTKEY);
+    expect(DEFAULT_VOICE_INPUT_HOTKEY).toBe('Ctrl+Space');
+    expect(normalizeVoiceInputHotkey(undefined)).toBe('Ctrl+Space');
     expect(normalizeVoiceInputHotkey(' alt + space ')).toBe('Alt+Space');
   });
 

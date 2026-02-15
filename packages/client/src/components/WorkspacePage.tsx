@@ -95,6 +95,7 @@ export function WorkspacePage() {
   const [queueStatus, setQueueStatus] = useState<QueueStatus | null>(null)
   const [voiceInputHotkey, setVoiceInputHotkey] = useState(DEFAULT_VOICE_INPUT_HOTKEY)
   const [isVoiceHotkeyPressed, setIsVoiceHotkeyPressed] = useState(false)
+  const [isVoiceDictating, setIsVoiceDictating] = useState(false)
   const [automationSettings, setAutomationSettings] = useState<WorkspaceWorkflowSettings>({
     ...DEFAULT_WORKFLOW_SETTINGS,
   })
@@ -153,6 +154,7 @@ export function WorkspacePage() {
 
   useEffect(() => {
     setIsVoiceHotkeyPressed(false)
+    setIsVoiceDictating(false)
   }, [taskId])
 
   // Derived data
@@ -1348,6 +1350,10 @@ export function WorkspacePage() {
     setLeftPaneWidth((prev) => Math.min(LEFT_PANE_MAX, Math.max(LEFT_PANE_MIN, prev - delta)))
   }, [])
 
+  const handleVoiceDictationStateChange = useCallback((nextIsDictating: boolean) => {
+    setIsVoiceDictating(nextIsDictating)
+  }, [])
+
   // Keyboard shortcuts
   useKeyboardShortcuts({
     onEscape: useCallback(() => {
@@ -1412,6 +1418,26 @@ export function WorkspacePage() {
           </button>
           <div className="h-6 w-px bg-slate-700" />
           <span className="text-sm font-medium text-slate-300">{workspaceName}</span>
+          {nonArchivedTasks.length > 0 && (() => {
+            const counts = nonArchivedTasks.reduce((acc, t) => {
+              const p = t.frontmatter.phase
+              acc[p] = (acc[p] || 0) + 1
+              return acc
+            }, {} as Record<string, number>)
+            const runningCount = nonArchivedTasks.filter((task) => runningTaskIds.has(task.id)).length
+            return (
+              <>
+                <div className="h-5 w-px bg-slate-700" />
+                <span className="text-xs text-slate-500 font-mono">
+                  {awaitingInputCount > 0 && <span className="text-amber-500">{awaitingInputCount} needs input</span>}
+                  {runningCount > 0 && <span className={awaitingInputCount > 0 ? 'text-orange-400 ml-2' : 'text-orange-400'}>{runningCount} running</span>}
+                  {counts.ready > 0 && <span className="text-blue-400 ml-2">{counts.ready} ready</span>}
+                  {counts.complete > 0 && <span className="text-emerald-400 ml-2">{counts.complete} done</span>}
+                </span>
+              </>
+            )
+          })()}
+          <div className="h-5 w-px bg-slate-700" />
           <div className="flex items-center gap-2">
             <button
               onClick={handleOpenNewTask}
@@ -1438,22 +1464,6 @@ export function WorkspacePage() {
               Idea Backlog
             </button>
           </div>
-          {nonArchivedTasks.length > 0 && (() => {
-            const counts = nonArchivedTasks.reduce((acc, t) => {
-              const p = t.frontmatter.phase
-              acc[p] = (acc[p] || 0) + 1
-              return acc
-            }, {} as Record<string, number>)
-            const runningCount = nonArchivedTasks.filter((task) => runningTaskIds.has(task.id)).length
-            return (
-              <span className="text-xs text-slate-500 font-mono">
-                {awaitingInputCount > 0 && <span className="text-amber-500">{awaitingInputCount} needs input</span>}
-                {runningCount > 0 && <span className={awaitingInputCount > 0 ? 'text-orange-400 ml-2' : 'text-orange-400'}>{runningCount} running</span>}
-                {counts.ready > 0 && <span className="text-blue-400 ml-2">{counts.ready} ready</span>}
-                {counts.complete > 0 && <span className="text-emerald-400 ml-2">{counts.complete} done</span>}
-              </span>
-            )
-          })()}
         </div>
 
         <div className="flex items-center gap-3">
@@ -1474,6 +1484,16 @@ export function WorkspacePage() {
             )}
             {isFactoryRunning ? 'STOP FACTORY' : 'START FACTORY'}
           </button>
+          {isVoiceDictating && (
+            <span
+              className="inline-flex items-center gap-1.5 rounded-md border border-red-400/40 bg-red-500/20 px-2.5 py-1 text-xs font-mono text-red-100"
+              role="status"
+              aria-live="polite"
+            >
+              <span className="h-2 w-2 rounded-full bg-red-300 animate-pulse" />
+              Listening… speak now
+            </span>
+          )}
           <ThemeToggle />
           {isConnected ? (
             <span className="flex items-center gap-1.5 text-xs text-green-400">
@@ -1551,6 +1571,7 @@ export function WorkspacePage() {
                 draftTaskStates={draftTaskStates}
                 creatingDraftTaskIds={creatingDraftTaskIds}
                 isVoiceHotkeyPressed={isVoiceHotkeyPressed}
+                onVoiceDictationStateChange={handleVoiceDictationStateChange}
               />
             ) : (
               /* Task mode: show task chat in left pane */
@@ -1585,6 +1606,7 @@ export function WorkspacePage() {
                       onStop={() => handleStopTaskExecution(selectedTask.id)}
                       isStopping={stoppingTaskIds.has(selectedTask.id)}
                       isVoiceHotkeyPressed={isVoiceHotkeyPressed}
+                      onVoiceDictationStateChange={handleVoiceDictationStateChange}
                     />
                   ) : (
                     <TaskRouteMissingState onBack={() => navigate(workspaceRootPath)} />

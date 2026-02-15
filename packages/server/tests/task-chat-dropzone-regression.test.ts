@@ -9,18 +9,22 @@ const taskChatPath = resolve(currentDir, '../../client/src/components/TaskChat.t
 const taskChatSource = readFileSync(taskChatPath, 'utf-8');
 
 describe('task chat drag-drop regression checks', () => {
-  it('keeps message history pane free of drag-drop handlers and overlay styling', () => {
+  it('wires file drag-drop handlers to the full chat pane container', () => {
+    expect(taskChatSource).toContain('data-chat-dropzone');
+    expect(taskChatSource).toMatch(/data-chat-dropzone[\s\S]{0,520}onDragEnter=\{canUploadFiles \? handleDragEnter : undefined\}/);
+    expect(taskChatSource).toMatch(/data-chat-dropzone[\s\S]{0,520}onDrop=\{canUploadFiles \? handleDrop : undefined\}/);
+  });
+
+  it('keeps message history and composer free of direct drop handlers', () => {
     expect(taskChatSource).toContain('data-chat-message-history');
     expect(taskChatSource).not.toMatch(/data-chat-message-history[\s\S]{0,260}onDragOver=\{handleDragOver\}/);
     expect(taskChatSource).not.toMatch(/data-chat-message-history[\s\S]{0,260}onDrop=\{handleDrop\}/);
-    expect(taskChatSource).not.toContain('ring-2 ring-inset ring-blue-400 bg-blue-50/30');
-    expect(taskChatSource).not.toContain('absolute inset-0 flex items-center justify-center bg-blue-50/80 z-10 pointer-events-none');
+    expect(taskChatSource).not.toContain('data-chat-composer-dropzone');
   });
 
-  it('wires file drag-drop handlers to the composer drop zone', () => {
-    expect(taskChatSource).toContain('data-chat-composer-dropzone');
-    expect(taskChatSource).toMatch(/data-chat-composer-dropzone[\s\S]{0,520}onDragEnter=\{canUploadFiles \? handleDragEnter : undefined\}/);
-    expect(taskChatSource).toMatch(/data-chat-composer-dropzone[\s\S]{0,520}onDrop=\{canUploadFiles \? handleDrop : undefined\}/);
+  it('shows whole-pane drag-active styling and drop hint', () => {
+    expect(taskChatSource).toContain('ring-2 ring-inset ring-blue-400 bg-blue-50/30');
+    expect(taskChatSource).toContain('absolute inset-0 z-20 pointer-events-none flex items-center justify-center');
     expect(taskChatSource).toContain('Drop files to attach');
   });
 

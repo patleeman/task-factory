@@ -1,4 +1,4 @@
-export const DEFAULT_VOICE_INPUT_HOTKEY = 'Alt+Space'
+export const DEFAULT_VOICE_INPUT_HOTKEY = 'Ctrl+Space'
 
 export interface VoiceInputHotkeyConfig {
   ctrlKey: boolean

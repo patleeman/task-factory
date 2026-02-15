@@ -21,9 +21,10 @@ describe('task chat dictation regression checks', () => {
     expect(dictationHook).toMatch(/speechWindow\.SpeechRecognition\s*\|\|\s*speechWindow\.webkitSpeechRecognition\s*\|\|\s*null/);
   });
 
-  it('removes per-input dictation button while keeping listening/error feedback text', () => {
+  it('removes per-input dictation button while keeping inline error feedback text', () => {
     expect(taskChat).not.toContain("aria-label={isDictating ? 'Stop voice dictation' : 'Start voice dictation'}");
     expect(taskChat).not.toContain('AppIcon icon={Mic}');
+    expect(taskChat).not.toContain('className="text-[11px] font-mono text-red-600">listening… speak now');
     expect(taskChat).toContain('<p className="text-xs text-red-600" role="status">');
   });
 
@@ -49,6 +50,7 @@ describe('task chat dictation regression checks', () => {
     expect(workspacePage).toContain('voiceInputHotkey');
     expect(workspacePage).toContain('onVoiceHotkeyDown');
     expect(workspacePage).toContain('setIsVoiceHotkeyPressed(true)');
+    expect(workspacePage).toContain('Listening… speak now');
     expect(workspacePage).not.toContain("onVoiceHotkeyDown: useCallback(() => {\n      const textarea = document.querySelector('[data-chat-input]') as HTMLTextAreaElement | null");
   });
 
