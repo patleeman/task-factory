@@ -8,6 +8,7 @@ const createAgentSessionMock = vi.fn();
 const sessionManagerCreateMock = vi.fn(() => ({}));
 const sessionManagerOpenMock = vi.fn(() => ({}));
 const withTimeoutMock = vi.fn();
+const requestQueueKickMock = vi.fn();
 
 vi.mock('@mariozechner/pi-coding-agent', () => ({
   createAgentSession: (...args: any[]) => createAgentSessionMock(...args),
@@ -66,6 +67,10 @@ vi.mock('../src/with-timeout.js', async (importOriginal) => {
   };
 });
 
+vi.mock('../src/queue-kick-coordinator.js', () => ({
+  requestQueueKick: (...args: any[]) => requestQueueKickMock(...args),
+}));
+
 let mockedFactorySettings: Record<string, unknown> | null = null;
 
 vi.mock('../src/pi-integration.js', async (importOriginal) => {
@@ -85,6 +90,7 @@ describe('planTask', () => {
     sessionManagerCreateMock.mockClear();
     sessionManagerOpenMock.mockClear();
     withTimeoutMock.mockReset();
+    requestQueueKickMock.mockReset();
   });
 
   afterEach(() => {
@@ -621,6 +627,7 @@ describe('planTask', () => {
         && event.to === 'ready'
       )),
     ).toBe(true);
+    expect(requestQueueKickMock).toHaveBeenCalledWith('workspace-test');
   });
 
   it('auto-promotes backlog tasks using global workflow defaults when workspace overrides are unset', async () => {

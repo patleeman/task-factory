@@ -193,6 +193,50 @@ describe('queue manager ordering', () => {
     await stopQueueProcessing(workspace.id);
   });
 
+  it('picks up newly eligible ready work when kicked through the coordinator boundary', async () => {
+    const workspace = createWorkspace(1);
+    let planningComplete = false;
+
+    getWorkspaceByIdMock.mockImplementation(async () => workspace);
+    discoverTasksMock.mockImplementation(() => [
+      createTask(
+        'TASK-PLANNING',
+        'ready',
+        0,
+        '2025-01-01T00:00:00.000Z',
+        { planningStatus: planningComplete ? 'completed' : 'running' },
+      ),
+    ]);
+    updateWorkspaceConfigMock.mockImplementation(async (_workspace: any, config: any) => {
+      workspace.config = {
+        ...workspace.config,
+        ...config,
+      };
+      return workspace;
+    });
+
+    const { startQueueProcessing, stopQueueProcessing } = await import('../src/queue-manager.js');
+    const { requestQueueKick } = await import('../src/queue-kick-coordinator.js');
+
+    await startQueueProcessing(workspace.id, () => {});
+
+    await vi.waitFor(() => {
+      expect(discoverTasksMock.mock.calls.length).toBeGreaterThanOrEqual(2);
+    });
+    expect(executeTaskMock).not.toHaveBeenCalled();
+
+    planningComplete = true;
+    requestQueueKick(workspace.id);
+
+    await vi.waitFor(() => {
+      expect(executeTaskMock).toHaveBeenCalledTimes(1);
+    });
+
+    expect(executeTaskMock.mock.calls[0]?.[0]?.task?.id).toBe('TASK-PLANNING');
+
+    await stopQueueProcessing(workspace.id);
+  });
+
   it('passes destination context when moving orphaned executing tasks back to ready', async () => {
     const workspace = createWorkspace(1);
     const tasks = [

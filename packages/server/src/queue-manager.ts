@@ -24,6 +24,7 @@ import { createSystemEvent } from './activity-service.js';
 import { logger } from './logger.js';
 import { buildTaskStateSnapshot } from './state-contract.js';
 import { logTaskStateTransition } from './state-transition.js';
+import { registerQueueKickHandler } from './queue-kick-coordinator.js';
 
 // =============================================================================
 // Constants
@@ -407,6 +408,9 @@ export function kickQueue(workspaceId: string): void {
   const manager = managers.get(workspaceId);
   manager?.kick();
 }
+
+// Register queue kicks from other modules through an explicit coordination boundary.
+registerQueueKickHandler(kickQueue);
 
 /** Kick all active queue managers (e.g. after any execution completes). */
 export function kickAllQueues(): void {

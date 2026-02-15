@@ -57,6 +57,7 @@ import {
   isForbidden,
   stripStateContractEcho,
 } from './state-contract.js';
+import { requestQueueKick } from './queue-kick-coordinator.js';
 
 // =============================================================================
 // Repo-local Extension Discovery
@@ -2588,14 +2589,8 @@ function maybeAutoPromoteBacklogTaskAfterPlanning(
     to: 'ready',
   });
 
-  // Avoid a hard runtime import cycle with queue-manager by importing lazily.
-  void import('./queue-manager.js')
-    .then(({ kickQueue }) => {
-      kickQueue(workspaceId);
-    })
-    .catch((err) => {
-      console.error(`[finalizePlan] Failed to kick queue after auto-promotion for ${latestTask.id}:`, err);
-    });
+  // Notify the queue manager through the coordination boundary.
+  requestQueueKick(workspaceId);
 
   return latestTask;
 }
