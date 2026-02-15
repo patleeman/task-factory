@@ -1,0 +1,17 @@
+{
+  "fileExtensions": ["ts", "tsx"],
+  "excludeRegExp": [
+    "/dist/",
+    "\\.css$",
+    "^@excalidraw/excalidraw/types$",
+    "^@excalidraw/excalidraw/index\\.css$"
+  ],
+  "detectiveOptions": {
+    "ts": {
+      "skipTypeImports": true
+    },
+    "tsx": {
+      "skipTypeImports": true
+    }
+  }
+}

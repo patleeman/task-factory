@@ -1,0 +1,21 @@
+{
+  "$schema": "./node_modules/knip/schema.json",
+  "include": ["files", "dependencies", "devDependencies", "unlisted"],
+  "ignore": ["dist/**", "packages/**/dist/**", "packages/server/coverage/**"],
+  "workspaces": {
+    ".": {
+      "entry": ["scripts/**/*.js", "extensions/**/*.ts"],
+      "project": ["bin/**/*.js", "scripts/**/*.js", "extensions/**/*.ts"]
+    },
+    "packages/shared": {
+      "project": ["src/**/*.ts"]
+    },
+    "packages/server": {
+      "entry": ["tests/**/*.{ts,tsx}"],
+      "project": ["src/**/*.ts", "tests/**/*.{ts,tsx}"]
+    },
+    "packages/client": {
+      "project": ["src/**/*.{ts,tsx}"]
+    }
+  }
+}

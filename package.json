@@ -27,7 +27,11 @@
     "lint": "npm run lint --workspaces",
     "typecheck": "npm run typecheck --workspaces",
     "test": "npm run test --workspaces --if-present",
-    "test:coverage": "npm run test:coverage -w @pi-factory/server"
+    "test:coverage": "npm run test:coverage -w @pi-factory/server",
+    "check:deadcode": "npm run check:deadcode:knip && npm run check:deadcode:madge",
+    "check:deadcode:knip": "knip --config knip.json",
+    "check:deadcode:madge": "madge --circular packages/server/src/index.ts packages/client/src/main.tsx packages/shared/src/index.ts extensions",
+    "check:release": "npm run lint && npm run typecheck && npm run test && npm run build && npm run check:deadcode"
   },
   "dependencies": {
     "@mariozechner/pi-coding-agent": "^0.52.10",
@@ -41,6 +45,8 @@
     "esbuild": "^0.27.3",
     "eslint": "^9.35.0",
     "globals": "^16.4.0",
+    "knip": "^5.83.1",
+    "madge": "^8.0.0",
     "typescript": "^5.7.3"
   }
 }

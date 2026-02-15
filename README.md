@@ -102,6 +102,20 @@ Then open `http://localhost:3000`.
 npm run dev
 ```
 
+## Quality checks
+
+Run dead-code/dependency cleanliness checks (Knip + Madge). The config treats repo `extensions/` extension entrypoints as dynamically loaded to avoid false positives from runtime extension loading:
+
+```bash
+npm run check:deadcode
+```
+
+Run the full release gate (lint, typecheck, tests, build, then cleanliness checks):
+
+```bash
+npm run check:release
+```
+
 ## Configuration
 
 ### Environment variables
