@@ -38,7 +38,6 @@ import {
 } from './pi-integration.js';
 import {
   moveTaskToPhase,
-  updateTask,
   saveTaskFile,
   parseTaskFile,
   canMoveToPhase,
@@ -549,7 +548,6 @@ function buildTaskPrompt(
 
 function buildReworkPrompt(
   task: Task,
-  skills: PiSkill[],
   attachmentSection: string,
   workspaceSharedContext: string | null,
 ): string {
@@ -740,9 +738,9 @@ export async function executeTask(options: ExecuteTaskOptions): Promise<TaskSess
 
     // Build prompt — use a rework prompt if resuming, otherwise the full task prompt
     const prompt = isResumingSession
-      ? buildReworkPrompt(task, skills, attachmentSection, workspaceSharedContext)
+      ? buildReworkPrompt(task, attachmentSection, workspaceSharedContext)
       : buildTaskPrompt(task, skills, attachmentSection, workspaceSharedContext);
-    runAgentExecution(session, prompt, workspaceId, task, onOutput, onComplete, taskImages);
+    runAgentExecution(session, prompt, workspaceId, task, taskImages);
 
   } catch (err) {
     console.error('Failed to create Pi agent session:', err);
@@ -776,8 +774,6 @@ async function runAgentExecution(
   prompt: string,
   workspaceId: string,
   task: Task,
-  onOutput?: (output: string) => void,
-  onComplete?: (success: boolean) => void,
   images?: ImageContent[],
 ): Promise<void> {
   try {
@@ -2015,10 +2011,6 @@ function ensureAttachFileCallbackRegistry(): Map<string, (data: AttachTaskFileRe
     globalThis.__piFactoryAttachFileCallbacks = new Map();
   }
   return globalThis.__piFactoryAttachFileCallbacks;
-}
-
-function cleanupPlanCallback(taskId: string): void {
-  globalThis.__piFactoryPlanCallbacks?.delete(taskId);
 }
 
 function savePlanForTask(

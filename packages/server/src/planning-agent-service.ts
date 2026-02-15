@@ -6,11 +6,10 @@
 // It maintains one conversation per workspace and can create draft tasks
 // on the production queue.
 
-import { join, dirname } from 'path';
+import { join } from 'path';
 import { homedir } from 'os';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { writeFile } from 'fs/promises';
-import { fileURLToPath } from 'url';
 import {
   createAgentSession,
   AuthStorage,
@@ -28,7 +27,6 @@ import type {
   ServerEvent,
   Task,
   Shelf,
-  QAQuestion,
   QARequest,
   QAAnswer,
   QAResponse,

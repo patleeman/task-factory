@@ -8,7 +8,7 @@ import express from 'express';
 import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import cors from 'cors';
-import { join, dirname, resolve, normalize } from 'path';
+import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { readdir } from 'fs/promises';
 import { homedir } from 'os';
@@ -38,14 +38,12 @@ import {
   canMoveToPhase,
   parseTaskFile,
   reorderTasks,
-  saveTaskFile,
   shouldResumeInterruptedPlanning,
   getTaskFilePath,
 } from './task-service.js';
 import { prepareTaskUpdateRequest } from './task-update-service.js';
 import {
   createWorkspace,
-  loadWorkspace,
   getWorkspaceById,
   listWorkspaces,
   getTasksDir,
@@ -1626,7 +1624,7 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/execute', async (req, res) 
       workspaceId: workspace.id,
       workspacePath: workspace.path,
       broadcastToWorkspace: (event) => broadcastToWorkspace(workspace.id, event),
-      onOutput: (output) => {
+      onOutput: (_output) => {
         // Output callback is for legacy/simulation only
       },
       onComplete: (success) => {
@@ -2251,11 +2249,8 @@ import {
 
 import {
   getShelf,
-  addDraftTask,
   updateDraftTask,
   removeDraftTask,
-  addArtifact,
-  removeArtifact,
   removeShelfItem,
   clearShelf,
 } from './shelf-service.js';

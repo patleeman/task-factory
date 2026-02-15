@@ -23,13 +23,9 @@ import {
   normalizeTaskUsageMetrics,
   type Task,
   type TaskFrontmatter,
-  type TaskPlan,
   type CreateTaskRequest,
   type UpdateTaskRequest,
   type Phase,
-  type BlockedState,
-  type Attachment,
-  type ReorderTasksRequest,
 } from '@pi-factory/shared';
 import { applyTaskDefaultsToRequest, loadTaskDefaultsForWorkspacePath } from './task-defaults-service.js';
 

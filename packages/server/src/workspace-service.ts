@@ -5,7 +5,7 @@
 // Workspaces are stored as .pi/factory.json files in the workspace directory.
 // A registry at ~/.taskfactory/workspaces.json tracks known workspace paths.
 
-import { mkdir, readFile, writeFile, rm, stat } from 'fs/promises';
+import { mkdir, readFile, writeFile, rm } from 'fs/promises';
 import { join, basename } from 'path';
 import type { Workspace, WorkspaceConfig } from '@pi-factory/shared';
 import { getTaskFactoryHomeDir } from './taskfactory-home.js';
@@ -30,19 +30,6 @@ const DEFAULT_CONFIG: WorkspaceConfig = {
     branchPrefix: 'feat/',
   },
 };
-
-// =============================================================================
-// Helpers
-// =============================================================================
-
-async function exists(path: string): Promise<boolean> {
-  try {
-    await stat(path);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 // =============================================================================
 // Registry (lightweight index of known workspaces)

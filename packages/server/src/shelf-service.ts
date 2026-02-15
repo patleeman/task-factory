@@ -6,7 +6,7 @@
 
 import { mkdir, readFile, writeFile } from 'fs/promises';
 import { join } from 'path';
-import type { DraftTask, Artifact, Shelf, ShelfItem } from '@pi-factory/shared';
+import type { DraftTask, Artifact, Shelf } from '@pi-factory/shared';
 import { getWorkspaceById } from './workspace-service.js';
 
 // In-memory cache: workspaceId -> Shelf
