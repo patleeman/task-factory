@@ -59,6 +59,7 @@ import {
   getActivityForTask,
 } from './activity-service.js';
 import { logger } from './logger.js';
+import { getNonLoopbackBindWarning } from './network-host.js';
 import { buildTaskStateSnapshot } from './state-contract.js';
 import { logTaskStateTransition } from './state-transition.js';
 import { buildWorkspaceAttentionSummary } from './workspace-attention.js';
@@ -68,7 +69,7 @@ import { buildWorkspaceAttentionSummary } from './workspace-attention.js';
 // =============================================================================
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
-const HOST = process.env.HOST || '127.0.0.1';
+const HOST = process.env.HOST?.trim() || '127.0.0.1';
 const parsedHeartbeatInterval = process.env.WS_HEARTBEAT_INTERVAL_MS
   ? parseInt(process.env.WS_HEARTBEAT_INTERVAL_MS)
   : NaN;
@@ -2949,6 +2950,11 @@ async function resumeInterruptedPlanningRuns(): Promise<void> {
 
 async function main() {
   server.listen(PORT, HOST, () => {
+    const nonLoopbackWarning = getNonLoopbackBindWarning(HOST, PORT);
+    if (nonLoopbackWarning) {
+      logger.warn(nonLoopbackWarning.message, nonLoopbackWarning.data);
+    }
+
     logger.info(`
 ╔══════════════════════════════════════════════════════════╗
 ║  Task Factory Server                                     ║

@@ -84,6 +84,7 @@ pifactory --help
 pifactory --version
 pifactory --no-open
 PORT=8080 HOST=127.0.0.1 pifactory
+HOST=0.0.0.0 pifactory  # Expose on your network (explicit opt-in)
 ```
 
 ### Start from source (production build)
@@ -108,9 +109,11 @@ npm run dev
 | Variable | Default | Description |
 |---|---|---|
 | `PORT` | `3000` | HTTP/WebSocket server port |
-| `HOST` | `0.0.0.0` (CLI) | Bind host |
+| `HOST` | `127.0.0.1` | Bind host (set `HOST=0.0.0.0` to intentionally expose on your network) |
 | `DEBUG` | _(unset)_ | Enable debug-level server logs when set to any non-empty value |
 | `PI_FACTORY_SERVER_LOG_PATH` | `~/.pi/factory/logs/server.jsonl` | Override server log file destination |
+
+By default, Task Factory listens only on loopback. Use a non-loopback `HOST` value only when you intentionally want remote access.
 
 ### Server logging
 

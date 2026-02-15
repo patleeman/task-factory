@@ -17,7 +17,7 @@ const command = args.find((arg) => !arg.startsWith('-')) || 'start';
 
 const rawPort = process.env.PORT || '3000';
 const port = /^\d+$/.test(rawPort) ? rawPort : '3000';
-const host = process.env.HOST || '0.0.0.0';
+const host = process.env.HOST?.trim() || '127.0.0.1';
 const url = `http://localhost:${port}`;
 
 function shouldOpenBrowser() {
@@ -131,7 +131,7 @@ Options:
 
 Environment Variables:
   PORT            Server port (default: 3000)
-  HOST            Server host (default: 0.0.0.0)
+  HOST            Server host (default: 127.0.0.1)
 
 Keyboard Shortcuts (in UI):
   Esc             Deselect task (return to planning mode)
@@ -141,7 +141,8 @@ Keyboard Shortcuts (in UI):
 Examples:
   pifactory                           # Start server and auto-open browser
   pifactory --no-open                 # Start server without opening browser
-  PORT=8080 HOST=127.0.0.1 pifactory  # Start on port 8080
+  PORT=8080 HOST=127.0.0.1 pifactory  # Start on port 8080 (loopback only)
+  HOST=0.0.0.0 pifactory              # Expose on your network (explicit opt-in)
   pi-factory                          # Compatibility alias
 `);
 }
