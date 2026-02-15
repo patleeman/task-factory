@@ -109,6 +109,17 @@ npm run dev
 |---|---|---|
 | `PORT` | `3000` | HTTP/WebSocket server port |
 | `HOST` | `0.0.0.0` (CLI) | Bind host |
+| `DEBUG` | _(unset)_ | Enable debug-level server logs when set to any non-empty value |
+| `PI_FACTORY_SERVER_LOG_PATH` | `~/.pi/factory/logs/server.jsonl` | Override server log file destination |
+
+### Server logging
+
+The server writes JSON log lines to both console output (`stdout`/`stderr`) and a local log file.
+
+- Default log file: `~/.pi/factory/logs/server.jsonl`
+- Custom log file: set `PI_FACTORY_SERVER_LOG_PATH`
+
+For troubleshooting, inspect or tail that file directly.
 
 ## Keyboard shortcuts
 
