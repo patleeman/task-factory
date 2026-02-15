@@ -8,7 +8,7 @@ const workspacePagePath = resolve(currentDir, '../../client/src/components/Works
 const workspacePageSource = readFileSync(workspacePagePath, 'utf-8');
 
 function getHandleCreateTaskBlock(): string {
-  const match = workspacePageSource.match(/const handleCreateTask = async \(data: CreateTaskData\) => \{[\s\S]*?\n  \}\n\n  const handleSelectTask/);
+  const match = workspacePageSource.match(/const handleCreateTask = async \(data: CreateTaskData\) => \{[\s\S]*?\n\s{2}\}\n\n\s{2}const handleSelectTask/);
   return match?.[0] ?? '';
 }
 

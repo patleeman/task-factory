@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { ArrowLeft, Lightbulb, Power } from 'lucide-react'
+import { ArrowLeft, Lightbulb, Plus, Power } from 'lucide-react'
 import { useParams, useNavigate, useMatch, useOutletContext } from 'react-router-dom'
 import type { Task, Workspace, ActivityEntry, Phase, QueueStatus, PlanningMessage, QAAnswer, AgentExecutionStatus, WorkspaceWorkflowSettings, Artifact, DraftTask, IdeaBacklog, IdeaBacklogItem, NewTaskFormState } from '@pi-factory/shared'
 import { DEFAULT_WORKFLOW_SETTINGS } from '@pi-factory/shared'
@@ -10,6 +10,7 @@ import { TaskDetailPane } from './TaskDetailPane'
 import { CreateTaskPane, type CreateTaskData } from './CreateTaskPane'
 import { ShelfPane } from './ShelfPane'
 import { IdeaBacklogPane } from './IdeaBacklogPane'
+import { ArchivePane } from './ArchivePane'
 import { ResizeHandle } from './ResizeHandle'
 import type { WorkspaceWebSocketConnection } from '../hooks/useWebSocket'
 import { useAgentStreaming } from '../hooks/useAgentStreaming'
@@ -75,8 +76,10 @@ export function WorkspacePage() {
   const { workspaceId, taskId } = useParams<{ workspaceId: string; taskId?: string }>()
   const navigate = useNavigate()
   const isCreateRoute = useMatch('/workspace/:workspaceId/tasks/new') !== null
+  const isArchiveRoute = useMatch('/workspace/:workspaceId/archive') !== null
 
   const workspaceRootPath = workspaceId ? `/workspace/${workspaceId}` : '/'
+  const workspaceArchivePath = workspaceId ? `/workspace/${workspaceId}/archive` : '/'
   const workspaceConfigPath = workspaceId ? `/workspace/${workspaceId}/config` : '/'
 
   const [workspace, setWorkspace] = useState<Workspace | null>(null)
@@ -391,7 +394,7 @@ export function WorkspacePage() {
   // Clear move validation banners when switching routes
   useEffect(() => {
     setMoveError(null)
-  }, [taskId, isCreateRoute])
+  }, [taskId, isCreateRoute, isArchiveRoute])
 
   // Handle WebSocket messages
   useEffect(() => {
@@ -672,8 +675,8 @@ export function WorkspacePage() {
   }, [])
 
   // Move task
-  const handleMoveTask = async (task: Task, toPhase: Phase) => {
-    if (!workspaceId) return
+  const handleMoveTask = async (task: Task, toPhase: Phase): Promise<boolean> => {
+    if (!workspaceId) return false
 
     const updatedTask = {
       ...task,
@@ -707,12 +710,14 @@ export function WorkspacePage() {
         if (t.frontmatter.phase !== toPhase) return t
         return result
       }))
+      return true
     } catch (err) {
       setTasks((prev) => prev.map((t) => (t.id === task.id ? task : t)))
       const message = err instanceof Error ? err.message : 'Failed to move task'
       setMoveError(message)
       showToast(message)
       console.error('Failed to move task:', err)
+      return false
     }
   }
 
@@ -842,10 +847,10 @@ export function WorkspacePage() {
       createdAt: new Date().toISOString(),
     })
     setActiveForemanPane('workspace')
-    if (isCreateRoute) {
+    if (isCreateRoute || isArchiveRoute) {
       navigate(workspaceRootPath)
     }
-  }, [isCreateRoute, navigate, workspaceRootPath])
+  }, [isCreateRoute, isArchiveRoute, navigate, workspaceRootPath])
 
   const handleCloseArtifact = useCallback(() => {
     setSelectedArtifact(null)
@@ -1067,6 +1072,136 @@ export function WorkspacePage() {
     }
   }
 
+  const handleOpenNewTask = useCallback(() => {
+    setNewTaskPrefill(null)
+    setAgentTaskFormUpdates(null)
+    navigate(`${workspaceRootPath}/tasks/new`)
+  }, [navigate, workspaceRootPath])
+
+  const handleOpenIdeaBacklog = useCallback(() => {
+    setActiveForemanPane('ideas')
+    setSelectedArtifact(null)
+
+    if (isTaskRoute || isCreateRoute || isArchiveRoute) {
+      navigate(workspaceRootPath)
+    }
+  }, [isTaskRoute, isCreateRoute, isArchiveRoute, navigate, workspaceRootPath])
+
+  const handleOpenArchive = useCallback(() => {
+    setActiveForemanPane('workspace')
+    setSelectedArtifact(null)
+    navigate(workspaceArchivePath)
+  }, [navigate, workspaceArchivePath])
+
+  const handleRestoreArchivedTask = useCallback(async (
+    targetTaskId: string,
+    options?: { silent?: boolean },
+  ): Promise<boolean> => {
+    if (!workspaceId) return false
+    const task = tasksByIdRef.current.get(targetTaskId)
+    if (!task || task.frontmatter.phase !== 'archived') return false
+
+    const optimisticTask: Task = {
+      ...task,
+      frontmatter: {
+        ...task.frontmatter,
+        phase: 'complete',
+        updated: new Date().toISOString(),
+      },
+    }
+
+    setTasks((prev) => prev.map((candidate) => (candidate.id === targetTaskId ? optimisticTask : candidate)))
+
+    try {
+      const result = await api.moveTask(workspaceId, targetTaskId, 'complete', 'restore from archive')
+      setTasks((prev) => prev.map((candidate) => (candidate.id === targetTaskId ? result : candidate)))
+      return true
+    } catch (err) {
+      setTasks((prev) => prev.map((candidate) => (candidate.id === targetTaskId ? task : candidate)))
+      if (!options?.silent) {
+        const message = err instanceof Error ? err.message : 'Failed to restore archived task'
+        showToast(message)
+      }
+      console.error('Failed to restore archived task:', err)
+      return false
+    }
+  }, [workspaceId, showToast])
+
+  const handleDeleteArchivedTask = useCallback(async (
+    targetTaskId: string,
+    options?: { silent?: boolean },
+  ): Promise<boolean> => {
+    if (!workspaceId) return false
+
+    try {
+      await api.deleteTask(workspaceId, targetTaskId)
+      setTasks((prev) => prev.filter((candidate) => candidate.id !== targetTaskId))
+
+      if (taskId === targetTaskId) {
+        navigate(workspaceRootPath)
+      }
+
+      return true
+    } catch (err) {
+      if (!options?.silent) {
+        const message = err instanceof Error ? err.message : 'Failed to delete archived task'
+        showToast(message)
+      }
+      console.error('Failed to delete archived task:', err)
+      return false
+    }
+  }, [workspaceId, taskId, navigate, workspaceRootPath, showToast])
+
+  const handleBulkRestoreArchivedTasks = useCallback(async (taskIds: string[]) => {
+    const dedupedIds = Array.from(new Set(taskIds))
+    if (dedupedIds.length === 0) return
+
+    let restored = 0
+    let failed = 0
+
+    for (const taskId of dedupedIds) {
+      const success = await handleRestoreArchivedTask(taskId, { silent: true })
+      if (success) {
+        restored++
+      } else {
+        failed++
+      }
+    }
+
+    if (failed > 0 && restored > 0) {
+      showToast(`Restored ${restored} task${restored === 1 ? '' : 's'}; ${failed} failed`)
+    } else if (failed > 0) {
+      showToast(`Failed to restore ${failed} task${failed === 1 ? '' : 's'}`)
+    } else {
+      showToast(`Restored ${restored} task${restored === 1 ? '' : 's'} to complete`)
+    }
+  }, [handleRestoreArchivedTask, showToast])
+
+  const handleBulkDeleteArchivedTasks = useCallback(async (taskIds: string[]) => {
+    const dedupedIds = Array.from(new Set(taskIds))
+    if (dedupedIds.length === 0) return
+
+    let deleted = 0
+    let failed = 0
+
+    for (const taskId of dedupedIds) {
+      const success = await handleDeleteArchivedTask(taskId, { silent: true })
+      if (success) {
+        deleted++
+      } else {
+        failed++
+      }
+    }
+
+    if (failed > 0 && deleted > 0) {
+      showToast(`Deleted ${deleted} task${deleted === 1 ? '' : 's'}; ${failed} failed`)
+    } else if (failed > 0) {
+      showToast(`Failed to delete ${failed} task${failed === 1 ? '' : 's'}`)
+    } else {
+      showToast(`Deleted ${deleted} archived task${deleted === 1 ? '' : 's'}`)
+    }
+  }, [handleDeleteArchivedTask, showToast])
+
   const handleResize = useCallback((delta: number) => {
     // delta is positive when dragging right — expand the left pane
     setLeftPaneWidth((prev) => Math.min(LEFT_PANE_MAX, Math.max(LEFT_PANE_MIN, prev - delta)))
@@ -1075,10 +1210,10 @@ export function WorkspacePage() {
   // Keyboard shortcuts
   useKeyboardShortcuts({
     onEscape: useCallback(() => {
-      if (isTaskRoute || isCreateRoute) {
+      if (isTaskRoute || isCreateRoute || isArchiveRoute) {
         navigate(workspaceRootPath)
       }
-    }, [isTaskRoute, isCreateRoute, navigate, workspaceRootPath]),
+    }, [isTaskRoute, isCreateRoute, isArchiveRoute, navigate, workspaceRootPath]),
     onFocusChat: useCallback(() => {
       const textarea = document.querySelector('[data-chat-input]') as HTMLTextAreaElement | null
       textarea?.focus()
@@ -1121,6 +1256,7 @@ export function WorkspacePage() {
   }
 
   const workspaceName = workspace.path.split('/').filter(Boolean).pop() || workspace.name
+  const isIdeaBacklogActive = mode === 'foreman' && !isCreateRoute && !isArchiveRoute && activeForemanPane === 'ideas'
 
   return (
     <div className="flex flex-col h-full bg-slate-50">
@@ -1135,6 +1271,32 @@ export function WorkspacePage() {
           </button>
           <div className="h-6 w-px bg-slate-700" />
           <span className="text-sm font-medium text-slate-300">{workspaceName}</span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleOpenNewTask}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold border transition-colors ${
+                isCreateRoute
+                  ? 'bg-blue-500 text-white border-blue-400'
+                  : 'bg-slate-800 text-blue-200 border-slate-700 hover:bg-slate-700'
+              }`}
+              title="Create a new task"
+            >
+              <AppIcon icon={Plus} size="xs" />
+              New Task
+            </button>
+            <button
+              onClick={handleOpenIdeaBacklog}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold border transition-colors ${
+                isIdeaBacklogActive
+                  ? 'bg-amber-500 text-slate-900 border-amber-400'
+                  : 'bg-slate-800 text-amber-200 border-slate-700 hover:bg-slate-700'
+              }`}
+              title="Open workspace idea backlog"
+            >
+              <AppIcon icon={Lightbulb} size="xs" />
+              Idea Backlog
+            </button>
+          </div>
           {nonArchivedTasks.length > 0 && (() => {
             const counts = nonArchivedTasks.reduce((acc, t) => {
               const p = t.frontmatter.phase
@@ -1171,20 +1333,6 @@ export function WorkspacePage() {
             )}
             {isFactoryRunning ? 'STOP FACTORY' : 'START FACTORY'}
           </button>
-          {mode === 'foreman' && !isCreateRoute && (
-            <button
-              onClick={() => setActiveForemanPane('ideas')}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold border transition-colors ${
-                activeForemanPane === 'ideas'
-                  ? 'bg-amber-500 text-slate-900 border-amber-400'
-                  : 'bg-slate-800 text-amber-200 border-slate-700 hover:bg-slate-700'
-              }`}
-              title="Open workspace idea backlog"
-            >
-              <AppIcon icon={Lightbulb} size="xs" />
-              Idea Backlog
-            </button>
-          )}
           <ThemeToggle />
           {isConnected ? (
             <span className="flex items-center gap-1.5 text-xs text-green-400">
@@ -1323,6 +1471,15 @@ export function WorkspacePage() {
                   agentFormUpdates={agentTaskFormUpdates}
                   prefillRequest={newTaskPrefill}
                 />
+              ) : isArchiveRoute ? (
+                <ArchivePane
+                  archivedTasks={archivedTasks}
+                  onBack={() => navigate(workspaceRootPath)}
+                  onRestoreTask={handleRestoreArchivedTask}
+                  onDeleteTask={handleDeleteArchivedTask}
+                  onBulkRestoreTasks={handleBulkRestoreArchivedTasks}
+                  onBulkDeleteTasks={handleBulkDeleteArchivedTasks}
+                />
               ) : activeForemanPane === 'ideas' ? (
                 <IdeaBacklogPane
                   backlog={ideaBacklog}
@@ -1374,12 +1531,9 @@ export function WorkspacePage() {
             onTaskClick={handleSelectTask}
             onMoveTask={handleMoveTask}
             onReorderTasks={handleReorderTasks}
-            onCreateTask={() => {
-              setNewTaskPrefill(null)
-              setAgentTaskFormUpdates(null)
-              navigate(`${workspaceRootPath}/tasks/new`)
-            }}
-            archivedTasks={archivedTasks}
+            onCreateTask={handleOpenNewTask}
+            archivedCount={archivedTasks.length}
+            onOpenArchive={handleOpenArchive}
           />
         </div>
       </div>

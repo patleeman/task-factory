@@ -215,6 +215,16 @@ export const api = {
     return res.json()
   },
 
+  async deleteTask(workspaceId: string, taskId: string): Promise<void> {
+    const res = await fetch(`/api/workspaces/${workspaceId}/tasks/${taskId}`, {
+      method: 'DELETE',
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Delete failed' }))
+      throw new Error(err.error || `Delete failed (${res.status})`)
+    }
+  },
+
   async stopTaskExecution(workspaceId: string, taskId: string): Promise<{ stopped: boolean }> {
     const res = await fetch(`/api/workspaces/${workspaceId}/tasks/${taskId}/stop`, {
       method: 'POST',

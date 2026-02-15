@@ -14,6 +14,7 @@ function App() {
 
         <Route element={<WorkspaceLayout />}>
           <Route path="/workspace/:workspaceId" element={<WorkspacePage />} />
+          <Route path="/workspace/:workspaceId/archive" element={<WorkspacePage />} />
           <Route path="/workspace/:workspaceId/tasks/new" element={<WorkspacePage />} />
           <Route path="/workspace/:workspaceId/tasks/:taskId" element={<WorkspacePage />} />
           <Route path="/workspace/:workspaceId/config" element={<WorkspaceConfigPage />} />

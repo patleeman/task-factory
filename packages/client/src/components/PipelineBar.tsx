@@ -1,6 +1,5 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
-import { ArrowRight, ChevronLeft, ChevronRight, Undo2 } from 'lucide-react'
-import { createPortal } from 'react-dom'
+import { ArrowRight, ChevronLeft, ChevronRight } from 'lucide-react'
 import type { Task, Phase, WorkspaceWorkflowSettings } from '@pi-factory/shared'
 import { PHASE_DISPLAY_NAMES } from '@pi-factory/shared'
 import { AppIcon } from './AppIcon'
@@ -19,7 +18,8 @@ interface PipelineBarProps {
   onMoveTask: (task: Task, toPhase: Phase) => void
   onReorderTasks?: (phase: Phase, taskIds: string[]) => void
   onCreateTask: () => void
-  archivedTasks: Task[]
+  archivedCount: number
+  onOpenArchive: () => void
 }
 
 // Tracks where a dragged card would be inserted within the same phase
@@ -70,17 +70,16 @@ export function PipelineBar({
   onMoveTask,
   onReorderTasks,
   onCreateTask,
-  archivedTasks,
+  archivedCount,
+  onOpenArchive,
 }: PipelineBarProps) {
   const [dragOverPhase, setDragOverPhase] = useState<Phase | null>(null)
   const [dragOverArchive, setDragOverArchive] = useState(false)
-  const [showArchived, setShowArchived] = useState(false)
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null)
   const dragSourceRef = useRef<{ taskId: string; fromPhase: Phase } | null>(null)
   // Mirror dropTarget in a ref so the drop handler always reads the latest value,
   // avoiding stale-closure issues when React hasn't committed the latest re-render.
   const dropTargetRef = useRef<DropTarget | null>(null)
-  const archiveRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [hasOverflow, setHasOverflow] = useState(false)
@@ -148,7 +147,7 @@ export function PipelineBar({
 
   useEffect(() => {
     updateScrollState()
-  }, [updateScrollState, tasksByPhase, archivedTasks.length])
+  }, [updateScrollState, tasksByPhase, archivedCount])
 
   const getAdvanceAction = (task: Task): { label: string; toPhase: Phase } | null => {
     switch (task.frontmatter.phase) {
@@ -198,8 +197,8 @@ export function PipelineBar({
   }
 
   const findTask = useCallback((taskId: string) => {
-    return [...tasks, ...archivedTasks].find(t => t.id === taskId)
-  }, [tasks, archivedTasks])
+    return tasks.find(t => t.id === taskId)
+  }, [tasks])
 
   // Compute insertion index based on cursor X relative to cards (horizontal layout)
   const computeDropIndex = useCallback((e: React.DragEvent): number => {
@@ -446,7 +445,7 @@ export function PipelineBar({
             )
           })}
 
-          {/* Archive column — skeleton drop target + popover */}
+          {/* Archive column — drop target + route entry point */}
           <div
             onDragOver={(e) => { e.preventDefault(); setDragOverArchive(true) }}
             onDragLeave={(e) => {
@@ -455,16 +454,16 @@ export function PipelineBar({
               }
             }}
             onDrop={handleArchiveDrop}
-            className={`flex flex-col items-center py-2 px-2 relative transition-colors ${
+            className={`flex flex-col items-center py-2 px-2 transition-colors ${
               dragOverArchive ? 'bg-blue-50/60' : ''
             }`}
           >
             <div className="text-[10px] font-semibold uppercase tracking-wider mb-1.5 text-slate-400">
               Archived
             </div>
-            <div
-              ref={archiveRef}
-              onClick={() => setShowArchived(!showArchived)}
+            <button
+              type="button"
+              onClick={onOpenArchive}
               className={`w-[190px] h-[112px] rounded-xl border border-dashed flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors ${
                 dragOverArchive
                   ? 'border-blue-400 bg-blue-100/50'
@@ -473,20 +472,9 @@ export function PipelineBar({
             >
               <span className="text-xs text-slate-400 font-semibold uppercase">Archive</span>
               <span className={`text-xs ${dragOverArchive ? 'text-blue-500' : 'text-slate-400'}`}>
-                {dragOverArchive ? 'Drop to archive' : `${archivedTasks.length} archived`}
+                {dragOverArchive ? 'Drop to archive' : `${archivedCount} archived`}
               </span>
-            </div>
-
-            {/* Archived tasks popover — portal to escape overflow clipping */}
-            {showArchived && (
-              <ArchivedPopover
-                anchorRef={archiveRef}
-                archivedTasks={archivedTasks}
-                onTaskClick={(task) => { onTaskClick(task); setShowArchived(false) }}
-                onRestore={(task) => { onMoveTask(task, 'complete'); setShowArchived(false) }}
-                onClose={() => setShowArchived(false)}
-              />
-            )}
+            </button>
           </div>
         </div>
       </div>
@@ -661,89 +649,5 @@ function PipelineCard({
 
       </div>
     </div>
-  )
-}
-
-// =============================================================================
-// Archived Popover — portaled to body to escape overflow clipping
-// =============================================================================
-
-function ArchivedPopover({
-  anchorRef,
-  archivedTasks,
-  onTaskClick,
-  onRestore,
-  onClose,
-}: {
-  anchorRef: React.RefObject<HTMLDivElement | null>
-  archivedTasks: Task[]
-  onTaskClick: (task: Task) => void
-  onRestore: (task: Task) => void
-  onClose: () => void
-}) {
-  const [pos, setPos] = useState<{ right: number; bottom: number } | null>(null)
-
-  useEffect(() => {
-    const update = () => {
-      if (!anchorRef.current) return
-      const rect = anchorRef.current.getBoundingClientRect()
-      const right = Math.max(16, window.innerWidth - (rect.left + rect.width))
-      const bottom = Math.max(16, window.innerHeight - (rect.top - 8))
-      setPos({ right, bottom })
-    }
-    update()
-    window.addEventListener('resize', update)
-    return () => window.removeEventListener('resize', update)
-  }, [anchorRef])
-
-  if (!pos) return null
-
-  return createPortal(
-    <>
-      <div className="fixed inset-0 z-[9998]" onClick={onClose} />
-      <div
-        className="fixed z-[9999] w-72 max-h-80 bg-white border border-slate-200 rounded-lg shadow-xl overflow-hidden"
-        style={{
-          bottom: `${pos.bottom}px`,
-          right: `${pos.right}px`,
-        }}
-      >
-        <div className="px-3 py-2 border-b border-slate-100 bg-slate-50">
-          <span className="text-xs font-semibold text-slate-600">
-            Archived Tasks ({archivedTasks.length})
-          </span>
-        </div>
-        {archivedTasks.length === 0 ? (
-          <div className="px-3 py-6 text-center text-xs text-slate-400">
-            No archived tasks
-          </div>
-        ) : (
-          <div className="overflow-y-auto max-h-64">
-            {archivedTasks.map(task => (
-              <div
-                key={task.id}
-                className="flex items-center gap-1 px-3 py-2.5 hover:bg-slate-50 border-b border-slate-50 last:border-0 transition-colors"
-              >
-                <button
-                  onClick={() => onTaskClick(task)}
-                  className="flex-1 text-left min-w-0"
-                >
-                  <div className="text-[10px] font-mono text-slate-400">{task.id}</div>
-                  <div className="text-xs text-slate-700 truncate">{task.frontmatter.title}</div>
-                </button>
-                <button
-                  onClick={(e) => { e.stopPropagation(); onRestore(task) }}
-                  className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 hover:bg-blue-100 text-slate-500 hover:text-blue-600 transition-colors shrink-0 inline-flex items-center gap-1"
-                >
-                  <AppIcon icon={Undo2} size="xs" />
-                  Restore
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </>,
-    document.body
   )
 }
