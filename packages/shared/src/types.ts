@@ -100,6 +100,189 @@ export const DEFAULT_PLANNING_GUARDRAILS: PlanningGuardrails = {
 };
 
 // =============================================================================
+// Task Usage Metrics
+// =============================================================================
+
+export interface TaskUsageTotals {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  totalTokens: number;
+  cost: number;
+}
+
+export interface TaskModelUsage extends TaskUsageTotals {
+  provider: string;
+  modelId: string;
+}
+
+export interface TaskUsageMetrics {
+  totals: TaskUsageTotals;
+  byModel: TaskModelUsage[];
+}
+
+function readNumericMetric(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value >= 0 ? value : 0;
+  }
+
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed >= 0 ? parsed : 0;
+    }
+  }
+
+  return 0;
+}
+
+function normalizeUsageTotals(value: unknown): TaskUsageTotals {
+  const record = (value && typeof value === 'object' && !Array.isArray(value))
+    ? value as Record<string, unknown>
+    : {};
+
+  const inputTokens = readNumericMetric(record.inputTokens ?? record.input);
+  const outputTokens = readNumericMetric(record.outputTokens ?? record.output);
+  const cacheReadTokens = readNumericMetric(record.cacheReadTokens ?? record.cacheRead);
+  const cacheWriteTokens = readNumericMetric(record.cacheWriteTokens ?? record.cacheWrite);
+
+  const explicitTotal = readNumericMetric(record.totalTokens ?? record.total);
+  const computedTotal = inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens;
+
+  let cost = readNumericMetric(record.cost);
+  if (cost === 0 && record.cost && typeof record.cost === 'object' && !Array.isArray(record.cost)) {
+    const nested = record.cost as Record<string, unknown>;
+    cost = readNumericMetric(nested.total ?? nested.amount ?? nested.usd);
+  }
+
+  return {
+    inputTokens,
+    outputTokens,
+    cacheReadTokens,
+    cacheWriteTokens,
+    totalTokens: explicitTotal > 0 ? explicitTotal : computedTotal,
+    cost,
+  };
+}
+
+function normalizeTaskModelUsage(value: unknown): TaskModelUsage | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const provider = typeof record.provider === 'string' ? record.provider.trim() : '';
+  const modelId = typeof record.modelId === 'string'
+    ? record.modelId.trim()
+    : typeof record.model === 'string'
+      ? record.model.trim()
+      : '';
+
+  if (!provider || !modelId) {
+    return null;
+  }
+
+  const totals = normalizeUsageTotals(record);
+
+  return {
+    provider,
+    modelId,
+    ...totals,
+  };
+}
+
+export function createEmptyTaskUsageMetrics(): TaskUsageMetrics {
+  return {
+    totals: {
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      totalTokens: 0,
+      cost: 0,
+    },
+    byModel: [],
+  };
+}
+
+function sumTaskUsageTotals(byModel: TaskModelUsage[]): TaskUsageTotals {
+  return byModel.reduce<TaskUsageTotals>((acc, usage) => ({
+    inputTokens: acc.inputTokens + usage.inputTokens,
+    outputTokens: acc.outputTokens + usage.outputTokens,
+    cacheReadTokens: acc.cacheReadTokens + usage.cacheReadTokens,
+    cacheWriteTokens: acc.cacheWriteTokens + usage.cacheWriteTokens,
+    totalTokens: acc.totalTokens + usage.totalTokens,
+    cost: acc.cost + usage.cost,
+  }), createEmptyTaskUsageMetrics().totals);
+}
+
+function hasNonZeroUsageTotals(totals: TaskUsageTotals): boolean {
+  return totals.inputTokens > 0
+    || totals.outputTokens > 0
+    || totals.cacheReadTokens > 0
+    || totals.cacheWriteTokens > 0
+    || totals.totalTokens > 0
+    || totals.cost > 0;
+}
+
+export function normalizeTaskUsageMetrics(value: unknown): TaskUsageMetrics {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return createEmptyTaskUsageMetrics();
+  }
+
+  const record = value as Record<string, unknown>;
+  const rawByModel = Array.isArray(record.byModel)
+    ? record.byModel
+    : Array.isArray(record.models)
+      ? record.models
+      : [];
+
+  const byModel: TaskModelUsage[] = [];
+  const byModelIndex = new Map<string, number>();
+
+  for (const entry of rawByModel) {
+    const normalized = normalizeTaskModelUsage(entry);
+    if (!normalized) continue;
+
+    const key = `${normalized.provider}::${normalized.modelId}`;
+    const existingIndex = byModelIndex.get(key);
+
+    if (existingIndex == null) {
+      byModelIndex.set(key, byModel.length);
+      byModel.push(normalized);
+      continue;
+    }
+
+    const existing = byModel[existingIndex];
+    byModel[existingIndex] = {
+      ...existing,
+      inputTokens: existing.inputTokens + normalized.inputTokens,
+      outputTokens: existing.outputTokens + normalized.outputTokens,
+      cacheReadTokens: existing.cacheReadTokens + normalized.cacheReadTokens,
+      cacheWriteTokens: existing.cacheWriteTokens + normalized.cacheWriteTokens,
+      totalTokens: existing.totalTokens + normalized.totalTokens,
+      cost: existing.cost + normalized.cost,
+    };
+  }
+
+  const totalsFromModels = sumTaskUsageTotals(byModel);
+
+  let totals = totalsFromModels;
+  if (Object.prototype.hasOwnProperty.call(record, 'totals')) {
+    const totalsFromRecord = normalizeUsageTotals(record.totals);
+    totals = hasNonZeroUsageTotals(totalsFromRecord)
+      ? totalsFromRecord
+      : totalsFromModels;
+  }
+
+  return {
+    totals,
+    byModel,
+  };
+}
+
+// =============================================================================
 // Task Frontmatter (YAML header in markdown files)
 // =============================================================================
 
@@ -154,6 +337,9 @@ export interface TaskFrontmatter {
   executionModelConfig?: ModelConfig;
   /** Legacy single-model field (treated as execution model). */
   modelConfig?: ModelConfig;
+
+  // Per-task model usage metrics (tokens/cost, accumulated over time)
+  usageMetrics?: TaskUsageMetrics;
 
   // Plan (auto-generated on task creation)
   plan?: TaskPlan;

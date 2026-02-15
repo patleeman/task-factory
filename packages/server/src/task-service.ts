@@ -6,16 +6,18 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, rmSync, statSync } from 'fs';
 import { join, basename, dirname } from 'path';
 import YAML from 'yaml';
-import type {
-  Task,
-  TaskFrontmatter,
-  TaskPlan,
-  CreateTaskRequest,
-  UpdateTaskRequest,
-  Phase,
-  BlockedState,
-  Attachment,
-  ReorderTasksRequest,
+import {
+  createEmptyTaskUsageMetrics,
+  normalizeTaskUsageMetrics,
+  type Task,
+  type TaskFrontmatter,
+  type TaskPlan,
+  type CreateTaskRequest,
+  type UpdateTaskRequest,
+  type Phase,
+  type BlockedState,
+  type Attachment,
+  type ReorderTasksRequest,
 } from '@pi-factory/shared';
 import { applyTaskDefaultsToRequest, loadTaskDefaultsForWorkspacePath } from './task-defaults-service.js';
 
@@ -214,6 +216,7 @@ function buildFrontmatter(parsed: Partial<TaskFrontmatter>): TaskFrontmatter {
   };
 
   frontmatter.acceptanceCriteria = normalizeAcceptanceCriteria(frontmatter.acceptanceCriteria);
+  frontmatter.usageMetrics = normalizeTaskUsageMetrics(parsed.usageMetrics);
 
   return frontmatter;
 }
@@ -320,6 +323,7 @@ export function createTask(
     executionModelConfig: resolvedDefaults.executionModelConfig,
     // Keep legacy field aligned for backward compatibility.
     modelConfig: resolvedDefaults.modelConfig,
+    usageMetrics: createEmptyTaskUsageMetrics(),
     preExecutionSkills: resolvedDefaults.preExecutionSkills,
     postExecutionSkills: resolvedDefaults.postExecutionSkills,
     skillConfigs: request.skillConfigs,

@@ -484,6 +484,15 @@ blocked:
 
     expect(parsed.frontmatter.acceptanceCriteria).toEqual(['Keep this']);
     expect(parsed.content).toBe('Body content');
+    expect(parsed.frontmatter.usageMetrics?.totals).toEqual({
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      totalTokens: 0,
+      cost: 0,
+    });
+    expect(parsed.frontmatter.usageMetrics?.byModel).toEqual([]);
   });
 
   it('normalizes YAML object-style criteria into readable text', () => {
@@ -507,6 +516,45 @@ blocked:
     const parsed = parseTaskContent(rawTask, '/tmp/test-obj/task.yaml');
 
     expect(parsed.frontmatter.acceptanceCriteria).toEqual(['Criterion with colon: still valid text']);
+  });
+
+  it('recomputes usage totals from byModel when totals object is empty', () => {
+    const now = new Date().toISOString();
+    const rawTask = `id: TEST-USAGE
+phase: backlog
+created: ${now}
+updated: ${now}
+workspace: /tmp/workspace
+project: workspace
+description: Body
+acceptanceCriteria:
+  - Keep this
+testingInstructions: []
+commits: []
+attachments: []
+usageMetrics:
+  totals: {}
+  byModel:
+    - provider: anthropic
+      modelId: claude-sonnet-4-20250514
+      inputTokens: 12
+      outputTokens: 3
+      totalTokens: 15
+      cost: 0.001
+blocked:
+  isBlocked: false
+`;
+
+    const parsed = parseTaskContent(rawTask, '/tmp/test-usage/task.yaml');
+
+    expect(parsed.frontmatter.usageMetrics?.totals).toEqual({
+      inputTokens: 12,
+      outputTokens: 3,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      totalTokens: 15,
+      cost: 0.001,
+    });
   });
 });
 
@@ -620,6 +668,14 @@ describe('directory-per-task format', () => {
     expect(loaded.content).toBe('my description');
     expect(loaded.frontmatter.acceptanceCriteria).toEqual(['criterion 1', 'criterion 2']);
     expect(loaded.frontmatter.phase).toBe('backlog');
+    expect(loaded.frontmatter.usageMetrics?.totals).toEqual({
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      totalTokens: 0,
+      cost: 0,
+    });
   });
 
   it('deletes the entire task directory', () => {

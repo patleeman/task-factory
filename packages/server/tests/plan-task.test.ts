@@ -237,6 +237,99 @@ describe('planTask', () => {
     });
   });
 
+  it('persists usage metrics when planning assistant messages include usage payloads', async () => {
+    const workspacePath = mkdtempSync(join(tmpdir(), 'pi-factory-plan-task-'));
+    tempDirs.push(workspacePath);
+
+    const tasksDir = join(workspacePath, '.pi', 'tasks');
+    mkdirSync(tasksDir, { recursive: true });
+
+    const { createTask, parseTaskFile } = await import('../src/task-service.js');
+    const { planTask } = await import('../src/agent-execution-service.js');
+
+    const task = createTask(workspacePath, tasksDir, {
+      content: 'Persist planning usage metrics',
+      acceptanceCriteria: [],
+    });
+
+    let subscriber: ((event: any) => void) | undefined;
+
+    createAgentSessionMock.mockResolvedValue({
+      session: {
+        subscribe: (listener: (event: any) => void) => {
+          subscriber = listener;
+          return () => {};
+        },
+        prompt: async () => {
+          subscriber?.({
+            type: 'message_end',
+            message: {
+              role: 'assistant',
+              content: [{ type: 'text', text: 'Planning output' }],
+              provider: 'anthropic',
+              model: 'claude-sonnet-4-20250514',
+              usage: {
+                input: 30,
+                output: 10,
+                totalTokens: 40,
+                cost: { total: 0.003 },
+              },
+            },
+          });
+
+          const callback = (globalThis as any).__piFactoryPlanCallbacks?.get(task.id);
+          if (!callback) {
+            throw new Error('save_plan callback not registered');
+          }
+
+          callback({
+            acceptanceCriteria: ['Criterion one'],
+            plan: {
+              goal: 'Goal',
+              steps: ['Step one'],
+              validation: ['Validate one'],
+              cleanup: [],
+              generatedAt: new Date().toISOString(),
+            },
+          });
+        },
+        abort: async () => {},
+      },
+    });
+
+    const result = await planTask({
+      task,
+      workspaceId: 'workspace-test',
+      workspacePath,
+      broadcastToWorkspace: () => {},
+    });
+
+    expect(result).not.toBeNull();
+
+    const persistedTask = parseTaskFile(task.filePath);
+    expect(persistedTask.frontmatter.usageMetrics?.totals).toEqual({
+      inputTokens: 30,
+      outputTokens: 10,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      totalTokens: 40,
+      cost: 0.003,
+    });
+
+    expect(persistedTask.frontmatter.usageMetrics?.byModel).toEqual([
+      {
+        provider: 'anthropic',
+        modelId: 'claude-sonnet-4-20250514',
+        inputTokens: 30,
+        outputTokens: 10,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        totalTokens: 40,
+        cost: 0.003,
+      },
+    ]);
+  });
+
   it('keeps concurrent phase transitions when a plan is saved', async () => {
     const workspacePath = mkdtempSync(join(tmpdir(), 'pi-factory-plan-task-'));
     tempDirs.push(workspacePath);

@@ -44,6 +44,7 @@ import {
   canMoveToPhase,
   discoverTasks,
 } from './task-service.js';
+import { persistTaskUsageFromAssistantMessage } from './task-usage-service.js';
 import { runPreExecutionSkills, runPostExecutionSkills } from './post-execution-skills.js';
 import { withTimeout } from './with-timeout.js';
 import { generateAndPersistSummary } from './summary-service.js';
@@ -1092,6 +1093,29 @@ function shouldSkipToolEchoMessage(session: TaskSession, content: string): boole
   return content.trim() === session.lastToolResultText.trim();
 }
 
+function persistUsageFromAssistantMessage(session: TaskSession, taskId: string, message: unknown): void {
+  if (!session.task) {
+    return;
+  }
+
+  try {
+    const updatedTask = persistTaskUsageFromAssistantMessage(session.task, message);
+    if (!updatedTask) {
+      return;
+    }
+
+    session.task = updatedTask;
+
+    session.broadcastToWorkspace?.({
+      type: 'task:updated',
+      task: updatedTask,
+      changes: { frontmatter: updatedTask.frontmatter },
+    });
+  } catch (err) {
+    console.error(`[AgentExecution] Failed to persist usage metrics for ${taskId}:`, err);
+  }
+}
+
 function handlePiEvent(
   event: AgentSessionEvent,
   session: TaskSession,
@@ -1168,6 +1192,8 @@ function handlePiEvent(
       if (message?.role !== 'assistant') {
         break;
       }
+
+      persistUsageFromAssistantMessage(session, taskId, message);
 
       // Flush streaming text as a final message in the activity log
       let content = '';
@@ -2135,6 +2161,8 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
     lastToolResultAt: 0,
     agentSignaledComplete: false,
     completionSummary: '',
+    task,
+    awaitingUserInput: false,
   };
 
   activeSessions.set(task.id, session);
