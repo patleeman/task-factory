@@ -659,7 +659,6 @@ export function TaskChat({
   const [whiteboardError, setWhiteboardError] = useState<string | null>(null)
   const [isAttachingWhiteboard, setIsAttachingWhiteboard] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
-  const bottomRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const whiteboardSceneRef = useRef<WhiteboardSceneSnapshot | null>(null)
@@ -711,6 +710,39 @@ export function TaskChat({
     () => taskId ? entries.filter((e) => e.taskId === taskId).reverse() : entries,
     [entries, taskId]
   )
+  const latestEntryId = taskEntries.length > 0 ? taskEntries[taskEntries.length - 1].id : null
+  const liveToolScrollKey = useMemo(
+    () => agentStream.toolCalls
+      .map((tc) => `${tc.toolCallId}:${tc.output.length}:${tc.result?.length ?? 0}:${tc.isComplete ? 1 : 0}:${tc.isError ? 1 : 0}`)
+      .join('|'),
+    [agentStream.toolCalls],
+  )
+  const statusConfig = STATUS_CONFIG[agentStream.status]
+  const showStatusBar = isAgentActive || (agentStream.status as string) === 'awaiting_qa'
+  const showControlRow = showSteerControls || showStopControl
+  const hasBottomSlot = !!bottomSlot
+
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
+    const scroller = scrollRef.current
+    if (!scroller) return
+    scroller.scrollTo({ top: scroller.scrollHeight, behavior })
+  }, [])
+
+  const scheduleScrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
+    scrollToBottom(behavior)
+
+    const rafId = requestAnimationFrame(() => {
+      scrollToBottom(behavior)
+    })
+    const timeoutId = setTimeout(() => {
+      scrollToBottom(behavior)
+    }, 50)
+
+    return () => {
+      cancelAnimationFrame(rafId)
+      clearTimeout(timeoutId)
+    }
+  }, [scrollToBottom])
 
   useEffect(() => {
     clearVoiceHotkeyReleaseTimer()
@@ -787,8 +819,21 @@ export function TaskChat({
   }, [input, resizeComposer])
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [taskEntries.length, agentStream.streamingText.length])
+    return scheduleScrollToBottom()
+  }, [
+    scheduleScrollToBottom,
+    taskEntries.length,
+    latestEntryId,
+    agentStream.streamingText.length,
+    agentStream.thinkingText.length,
+    liveToolScrollKey,
+    agentStream.status,
+    isAgentActive,
+    isWaitingForInput,
+    showStatusBar,
+    showControlRow,
+    hasBottomSlot,
+  ])
 
   useEffect(() => {
     setSendMode(showSteerControls ? 'steer' : 'message')
@@ -990,8 +1035,6 @@ export function TaskChat({
     }
   }
 
-  const statusConfig = STATUS_CONFIG[agentStream.status]
-
   return (
     <div
       data-chat-dropzone
@@ -1026,7 +1069,7 @@ export function TaskChat({
       )}
 
       {/* Status bar */}
-      {(isAgentActive || (agentStream.status as string) === 'awaiting_qa') && statusConfig && (
+      {showStatusBar && statusConfig && (
         <div className="flex items-center gap-2 px-4 py-1.5 bg-slate-50 border-b border-slate-200 shrink-0">
           <span className={`w-2 h-2 rounded-full ${statusConfig.color} ${statusConfig.pulse ? 'animate-pulse' : ''}`} />
           <span className="text-xs font-mono text-slate-500">{statusConfig.label}</span>
@@ -1255,7 +1298,6 @@ export function TaskChat({
             </div>
           )}
 
-          <div ref={bottomRef} />
         </div>
       </div>
 
