@@ -43,7 +43,7 @@ afterEach(() => {
 
 describe('skill-management-service', () => {
   it('resolves user skill storage under ~/.taskfactory/skills by default', () => {
-    expect(getFactoryUserSkillsDir()).toContain('/.taskfactory/skills');
+    expect(getFactoryUserSkillsDir()).toContain(join('.taskfactory', 'skills'));
   });
 
   it('creates and updates a skill in the provided skills directory', () => {
