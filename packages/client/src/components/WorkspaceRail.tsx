@@ -4,6 +4,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import type { Workspace } from '@pi-factory/shared'
 import { api } from '../api'
 import { AppIcon } from './AppIcon'
+import { ThemeToggle } from './ThemeToggle'
 
 /**
  * Deterministic HSL hue from a string name.
@@ -152,10 +153,12 @@ export function WorkspaceRail() {
       <div className="w-8 h-px bg-slate-700 my-2 shrink-0" />
 
       <div className="flex flex-col items-center gap-2 shrink-0">
+        <ThemeToggle iconOnly />
+
         {/* Global settings button */}
         <button
           onClick={() => navigate('/settings')}
-          className="w-10 h-10 rounded-xl flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-700 transition-all duration-200 cursor-pointer"
+          className="w-10 h-10 rounded-xl flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-700 transition-all duration-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-safety-orange/50"
           title="Open global settings"
           aria-label="Open global settings"
         >
@@ -165,7 +168,7 @@ export function WorkspaceRail() {
         {/* Add workspace button */}
         <button
           onClick={() => navigate('/')}
-          className="w-10 h-10 rounded-xl flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-700 transition-all duration-200 cursor-pointer"
+          className="w-10 h-10 rounded-xl flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-700 transition-all duration-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-safety-orange/50"
           title="Open folder browser"
           aria-label="Open folder browser"
         >

@@ -19,7 +19,6 @@ import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts'
 import { DEFAULT_VOICE_INPUT_HOTKEY, normalizeVoiceInputHotkey } from '../voiceHotkey'
 import { TaskChat } from './TaskChat'
 import { QADialog } from './QADialog'
-import { ThemeToggle } from './ThemeToggle'
 import { syncAutomationSettingsWithQueue } from './workflow-automation'
 
 const LEFT_PANE_MIN = 320
@@ -1494,7 +1493,6 @@ export function WorkspacePage() {
               Listening… speak now
             </span>
           )}
-          <ThemeToggle />
           {isConnected ? (
             <span className="flex items-center gap-1.5 text-xs text-green-400">
               <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />

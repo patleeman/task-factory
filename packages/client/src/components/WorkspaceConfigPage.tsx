@@ -5,7 +5,6 @@ import { DEFAULT_PRE_EXECUTION_SKILLS, DEFAULT_POST_EXECUTION_SKILLS, type TaskD
 import type { PiSkill, PiExtension, PostExecutionSkill } from '../types/pi'
 import { api, type WorkflowAutomationResponse, type WorkflowAutomationUpdate } from '../api'
 import { AppIcon } from './AppIcon'
-import { ThemeToggle } from './ThemeToggle'
 import { ModelSelector } from './ModelSelector'
 import { ExecutionPipelineEditor } from './ExecutionPipelineEditor'
 
@@ -353,7 +352,6 @@ export function WorkspaceConfigPage() {
           <span className="text-sm font-medium text-slate-300">Workspace Configuration</span>
         </div>
         <div className="flex items-center gap-3">
-          <ThemeToggle />
           <button
             onClick={() => navigate(`/workspace/${workspaceId}`)}
             className="text-sm text-slate-400 hover:text-white transition-colors inline-flex items-center gap-1"
