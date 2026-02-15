@@ -7,7 +7,7 @@ import { api, type WorkflowAutomationResponse } from '../api'
 import { AppIcon } from './AppIcon'
 import { PipelineBar } from './PipelineBar'
 import { TaskDetailPane } from './TaskDetailPane'
-import { CreateTaskPane } from './CreateTaskPane'
+import { CreateTaskPane, type CreateTaskData } from './CreateTaskPane'
 import { ShelfPane } from './ShelfPane'
 import { ResizeHandle } from './ResizeHandle'
 import type { WorkspaceWebSocketConnection } from '../hooks/useWebSocket'
@@ -102,7 +102,9 @@ export function WorkspacePage() {
   const [selectedArtifact, setSelectedArtifact] = useState<Artifact | null>(null)
   const [planningMessages, setPlanningMessages] = useState<PlanningMessage[]>([])
   const [agentTaskFormUpdates, setAgentTaskFormUpdates] = useState<Partial<NewTaskFormState> | null>(null)
-  const [newTaskPrefill, setNewTaskPrefill] = useState<{ id: string; formState: Partial<NewTaskFormState> } | null>(null)
+  const [newTaskPrefill, setNewTaskPrefill] = useState<{ id: string; formState: Partial<NewTaskFormState>; sourceDraftId?: string } | null>(null)
+  const [draftTaskStates, setDraftTaskStates] = useState<Record<string, { status: 'created' | 'dismissed'; taskId?: string }>>({})
+  const [creatingDraftTaskIds, setCreatingDraftTaskIds] = useState<Set<string>>(new Set())
   const [runningExecutionTaskIds, setRunningExecutionTaskIds] = useState<Set<string>>(new Set())
   const [awaitingInputTaskIds, setAwaitingInputTaskIds] = useState<Set<string>>(new Set())
   const [stoppingTaskIds, setStoppingTaskIds] = useState<Set<string>>(new Set())
@@ -250,6 +252,8 @@ export function WorkspacePage() {
     setSelectedArtifact(null)
     setAgentTaskFormUpdates(null)
     setNewTaskPrefill(null)
+    setDraftTaskStates({})
+    setCreatingDraftTaskIds(new Set())
     setRunningExecutionTaskIds(new Set())
     setAwaitingInputTaskIds(new Set())
     stoppingTaskIdsRef.current = new Set()
@@ -530,6 +534,8 @@ export function WorkspacePage() {
           setSelectedArtifact(null)
           setAgentTaskFormUpdates(null)
           setNewTaskPrefill(null)
+          setDraftTaskStates({})
+          setCreatingDraftTaskIds(new Set())
           break
         case 'planning:task_form_updated':
           setAgentTaskFormUpdates(msg.formState)
@@ -542,10 +548,10 @@ export function WorkspacePage() {
   }, [subscribe])
 
   // Create task
-  const handleCreateTask = async (data: { content: string; preExecutionSkills?: string[]; postExecutionSkills?: string[]; skillConfigs?: Record<string, Record<string, string>>; planningModelConfig?: import('@pi-factory/shared').ModelConfig; executionModelConfig?: import('@pi-factory/shared').ModelConfig; pendingFiles?: File[] }) => {
+  const handleCreateTask = async (data: CreateTaskData) => {
     if (!workspaceId) return
     try {
-      const { pendingFiles, ...taskData } = data
+      const { pendingFiles, sourceDraftId, ...taskData } = data
       const task = await api.createTask(workspaceId, taskData)
       if (pendingFiles && pendingFiles.length > 0) {
         try {
@@ -554,6 +560,14 @@ export function WorkspacePage() {
           console.error('Failed to upload attachments:', uploadErr)
         }
       }
+
+      if (sourceDraftId) {
+        setDraftTaskStates((prev) => ({
+          ...prev,
+          [sourceDraftId]: { status: 'created', taskId: task.id },
+        }))
+      }
+
       setNewTaskPrefill(null)
       setAgentTaskFormUpdates(null)
       navigate(`${workspaceRootPath}/tasks/${task.id}`)
@@ -790,6 +804,8 @@ export function WorkspacePage() {
       setSelectedArtifact(null)
       setAgentTaskFormUpdates(null)
       setNewTaskPrefill(null)
+      setDraftTaskStates({})
+      setCreatingDraftTaskIds(new Set())
     } catch (err) {
       console.error('Failed to reset planning session:', err)
     }
@@ -815,6 +831,7 @@ export function WorkspacePage() {
     const content = formatDraftTaskForNewTaskForm(draftTask)
     setNewTaskPrefill({
       id: `${draftTask.id}-${Date.now()}`,
+      sourceDraftId: draftTask.id,
       formState: {
         content,
       },
@@ -822,6 +839,48 @@ export function WorkspacePage() {
     setAgentTaskFormUpdates(null)
     navigate(`${workspaceRootPath}/tasks/new`)
   }, [navigate, workspaceRootPath])
+
+  const handleCreateDraftTaskDirect = useCallback(async (draftTask: DraftTask) => {
+    if (!workspaceId) return
+    if (creatingDraftTaskIds.has(draftTask.id)) return
+
+    setCreatingDraftTaskIds((prev) => {
+      const next = new Set(prev)
+      next.add(draftTask.id)
+      return next
+    })
+
+    try {
+      const task = await api.createTask(workspaceId, {
+        title: draftTask.title,
+        content: draftTask.content,
+        acceptanceCriteria: draftTask.acceptanceCriteria,
+        plan: draftTask.plan,
+      })
+
+      setDraftTaskStates((prev) => ({
+        ...prev,
+        [draftTask.id]: { status: 'created', taskId: task.id },
+      }))
+      showToast(`Added ${task.id} to backlog`)
+    } catch (err) {
+      console.error('Failed to create task from draft:', err)
+      showToast('Failed to create task from draft')
+    } finally {
+      setCreatingDraftTaskIds((prev) => {
+        const next = new Set(prev)
+        next.delete(draftTask.id)
+        return next
+      })
+    }
+  }, [workspaceId, creatingDraftTaskIds, showToast])
+
+  const handleDismissDraftTask = useCallback((draftTask: DraftTask) => {
+    setDraftTaskStates((prev) => ({
+      ...prev,
+      [draftTask.id]: { status: 'dismissed' },
+    }))
+  }, [])
 
   // Q&A disambiguation handlers
   const handleQASubmit = async (answers: QAAnswer[]) => {
@@ -1099,6 +1158,10 @@ export function WorkspacePage() {
                 }
                 onOpenArtifact={handleOpenArtifact}
                 onOpenDraftTask={handleOpenDraftTask}
+                onCreateDraftTask={handleCreateDraftTaskDirect}
+                onDismissDraftTask={handleDismissDraftTask}
+                draftTaskStates={draftTaskStates}
+                creatingDraftTaskIds={creatingDraftTaskIds}
                 isVoiceHotkeyPressed={isVoiceHotkeyPressed}
               />
             ) : (

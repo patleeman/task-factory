@@ -715,6 +715,7 @@ export interface CreateTaskRequest {
   title?: string; // Auto-generated if not provided
   content: string; // Task description
   acceptanceCriteria?: string[]; // Auto-generated if not provided
+  plan?: TaskPlan;
   preExecutionSkills?: string[];
   postExecutionSkills?: string[];
   skillConfigs?: Record<string, Record<string, string>>;

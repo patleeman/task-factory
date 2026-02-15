@@ -22,6 +22,7 @@ describe('foreman inline draft-task prefill regression checks', () => {
     expect(workspacePageSource).toContain("case 'planning:task_form_updated':");
     expect(workspacePageSource).toContain('setAgentTaskFormUpdates(msg.formState)');
     expect(createTaskPaneSource).toContain('agentFormUpdates?: Partial<NewTaskFormState> | null');
-    expect(createTaskPaneSource).toContain('prefillRequest?: { id: string; formState: Partial<NewTaskFormState> } | null');
+    expect(createTaskPaneSource).toContain('prefillRequest?: { id: string; formState: Partial<NewTaskFormState>; sourceDraftId?: string } | null');
+    expect(createTaskPaneSource).toContain('sourceDraftId: prefillRequest?.sourceDraftId');
   });
 });

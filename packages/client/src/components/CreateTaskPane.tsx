@@ -21,6 +21,8 @@ export interface CreateTaskData {
   planningModelConfig?: ModelConfig
   executionModelConfig?: ModelConfig
   pendingFiles?: File[]
+  /** When opened from an inline draft card, identifies that source draft. */
+  sourceDraftId?: string
 }
 
 interface CreateTaskPaneProps {
@@ -30,7 +32,7 @@ interface CreateTaskPaneProps {
   /** Incoming form updates from the planning agent (via WebSocket) */
   agentFormUpdates?: Partial<NewTaskFormState> | null
   /** Optional one-shot prefill payload when opening from inline draft-task cards. */
-  prefillRequest?: { id: string; formState: Partial<NewTaskFormState> } | null
+  prefillRequest?: { id: string; formState: Partial<NewTaskFormState>; sourceDraftId?: string } | null
 }
 
 const CREATE_TASK_WHITEBOARD_STORAGE_KEY_PREFIX = 'pi-factory:create-task-whiteboard'
@@ -349,6 +351,7 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
         planningModelConfig,
         executionModelConfig,
         pendingFiles: pendingFiles.length > 0 ? pendingFiles : undefined,
+        sourceDraftId: prefillRequest?.sourceDraftId,
       })
 
       whiteboardSceneRef.current = null

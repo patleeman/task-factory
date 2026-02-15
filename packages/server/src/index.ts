@@ -2588,18 +2588,11 @@ app.post('/api/workspaces/:workspaceId/shelf/drafts/:draftId/push', async (req, 
     title: draft.title,
     content: draft.content,
     acceptanceCriteria: draft.acceptanceCriteria,
+    plan: draft.plan,
   };
 
   try {
     const task = createTask(workspace.path, tasksDir, createReq, draft.title);
-
-    // If draft has a plan, set it on the task
-    if (draft.plan) {
-      task.frontmatter.plan = draft.plan;
-      task.frontmatter.updated = new Date().toISOString();
-      const { saveTaskFile } = await import('./task-service.js');
-      saveTaskFile(task);
-    }
 
     // Remove from shelf
     const shelf = await removeDraftTask(workspace.id, draft.id);
@@ -2656,15 +2649,8 @@ app.post('/api/workspaces/:workspaceId/shelf/push-all', async (req, res) => {
         title: draft.title,
         content: draft.content,
         acceptanceCriteria: draft.acceptanceCriteria,
+        plan: draft.plan,
       }, draft.title);
-
-      // If draft has a plan, set it on the task
-      if (draft.plan) {
-        task.frontmatter.plan = draft.plan;
-        task.frontmatter.updated = new Date().toISOString();
-        const { saveTaskFile } = await import('./task-service.js');
-        saveTaskFile(task);
-      }
 
       createdTasks.push(task);
       broadcastToWorkspace(workspace.id, { type: 'task:created', task });

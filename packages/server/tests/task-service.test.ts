@@ -68,6 +68,31 @@ function extractTaskNumber(taskId: string): number {
   return Number.parseInt(taskId.split('-').at(-1) ?? '', 10);
 }
 
+describe('createTask', () => {
+  it('persists a provided plan on task creation', () => {
+    const { workspacePath, tasksDir } = createTempWorkspace();
+
+    const created = createTaskFile(workspacePath, tasksDir, {
+      title: 'Task with plan',
+      content: 'Use provided plan',
+      acceptanceCriteria: ['criterion'],
+      plan: {
+        goal: 'Keep the supplied plan',
+        steps: ['step 1'],
+        validation: ['validate 1'],
+        cleanup: [],
+        generatedAt: new Date().toISOString(),
+      },
+    });
+
+    expect(created.frontmatter.plan).toBeDefined();
+    expect(created.frontmatter.plan?.goal).toBe('Keep the supplied plan');
+
+    const taskYaml = readFileSync(created.filePath, 'utf-8');
+    expect(taskYaml).toContain('goal: Keep the supplied plan');
+  });
+});
+
 describe('shouldResumeInterruptedPlanning', () => {
   it('returns true when planning was running and no plan was saved', () => {
     const task = createTask({ planningStatus: 'running', plan: undefined });

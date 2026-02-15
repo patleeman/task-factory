@@ -168,6 +168,7 @@ export const api = {
     }
     return res.json()
   },
+
   async regenerateTaskPlan(workspaceId: string, taskId: string): Promise<void> {
     const res = await fetch(`/api/workspaces/${workspaceId}/tasks/${taskId}/plan/regenerate`, {
       method: 'POST',

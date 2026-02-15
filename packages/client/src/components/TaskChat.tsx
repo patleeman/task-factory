@@ -48,6 +48,14 @@ interface TaskChatProps {
   onOpenArtifact?: (artifact: { id: string; name: string; html: string }) => void
   /** Planning-mode hook: open inline draft task in the New Task pane. */
   onOpenDraftTask?: (draftTask: DraftTask) => void
+  /** Planning-mode hook: create a backlog task directly from an inline draft card. */
+  onCreateDraftTask?: (draftTask: DraftTask) => Promise<void> | void
+  /** Planning-mode hook: dismiss an inline draft card without creating a task. */
+  onDismissDraftTask?: (draftTask: DraftTask) => void
+  /** Per-draft collapse state for inline draft cards. */
+  draftTaskStates?: Record<string, { status: 'created' | 'dismissed'; taskId?: string }>
+  /** Draft IDs currently being created directly from inline cards. */
+  creatingDraftTaskIds?: ReadonlySet<string>
 }
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; pulse?: boolean }> = {
@@ -73,6 +81,7 @@ const TOOL_PREVIEW_LINES = 2
 const MAX_LINES = 100
 const MAX_PREVIEW_CHARS = 500
 const TASK_CHAT_WHITEBOARD_STORAGE_KEY_PREFIX = 'pi-factory:task-chat-whiteboard'
+const VOICE_HOTKEY_RELEASE_GRACE_MS = 1500
 
 function getTaskChatWhiteboardStorageKey(workspaceId?: string, taskId?: string): string | null {
   if (!workspaceId || !taskId) return null
@@ -425,67 +434,120 @@ const ArtifactReopenWidget = memo(function ArtifactReopenWidget({
 const InlineDraftTaskWidget = memo(function InlineDraftTaskWidget({
   draftTask,
   onOpen,
+  onCreate,
+  onDismiss,
+  state,
+  isCreating,
 }: {
   draftTask: DraftTask
   onOpen?: (draftTask: DraftTask) => void
+  onCreate?: (draftTask: DraftTask) => Promise<void> | void
+  onDismiss?: (draftTask: DraftTask) => void
+  state?: { status: 'created' | 'dismissed'; taskId?: string }
+  isCreating?: boolean
 }) {
-  const canOpen = !!onOpen
+  if (state?.status === 'created') {
+    return (
+      <div className="-mx-4 border-l-2 border-blue-400 bg-blue-50/80 px-4 py-2.5">
+        <div className="text-[10px] font-semibold text-blue-700 uppercase tracking-wide">Draft Task · Added to Backlog</div>
+        <div className="text-sm font-medium text-slate-800 mt-0.5">{draftTask.title}</div>
+        {state.taskId && (
+          <div className="text-xs text-slate-500 mt-1 font-mono">Created {state.taskId}</div>
+        )}
+      </div>
+    )
+  }
+
+  if (state?.status === 'dismissed') {
+    return (
+      <div className="-mx-4 border-l-2 border-slate-300 bg-slate-100/80 px-4 py-2.5">
+        <div className="text-[10px] font-semibold text-slate-600 uppercase tracking-wide">Draft Task · Won’t Do</div>
+        <div className="text-sm font-medium text-slate-700 mt-0.5">{draftTask.title}</div>
+      </div>
+    )
+  }
+
+  const canCreate = !!onCreate && !isCreating
+  const canOpen = !!onOpen && !isCreating
+  const canDismiss = !!onDismiss && !isCreating
 
   return (
-    <div className="-mx-4 border-l-2 border-emerald-400 bg-emerald-50/70 px-4 py-2.5">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="text-[10px] font-semibold text-emerald-700 uppercase tracking-wide">Draft Task</div>
-          <div className="text-sm font-medium text-slate-800">{draftTask.title}</div>
+    <div className="-mx-4 border-l-2 border-blue-300 bg-blue-50/60 px-4 py-2.5">
+      <div className="min-w-0">
+        <div className="text-[10px] font-semibold text-blue-700 uppercase tracking-wide">Draft Task</div>
+        <div className="text-sm font-medium text-slate-800">{draftTask.title}</div>
 
-          {draftTask.content.trim() && (
-            <div className="text-xs text-slate-600 mt-1 whitespace-pre-wrap line-clamp-3">{draftTask.content.trim()}</div>
+        {draftTask.content.trim() && (
+          <div className="text-xs text-slate-600 mt-1 whitespace-pre-wrap line-clamp-3">{draftTask.content.trim()}</div>
+        )}
+
+        <div className="mt-2">
+          <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Acceptance Criteria</div>
+          {draftTask.acceptanceCriteria.length > 0 ? (
+            <ul className="mt-1 space-y-0.5">
+              {draftTask.acceptanceCriteria.map((criterion, index) => (
+                <li key={index} className="text-xs text-slate-600 flex items-start gap-1">
+                  <span className="text-slate-400 shrink-0">•</span>
+                  <span>{criterion}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="text-xs text-slate-500 mt-1">(none)</div>
           )}
-
-          <div className="mt-2">
-            <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Acceptance Criteria</div>
-            {draftTask.acceptanceCriteria.length > 0 ? (
-              <ul className="mt-1 space-y-0.5">
-                {draftTask.acceptanceCriteria.map((criterion, index) => (
-                  <li key={index} className="text-xs text-slate-600 flex items-start gap-1">
-                    <span className="text-slate-400 shrink-0">•</span>
-                    <span>{criterion}</span>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <div className="text-xs text-slate-500 mt-1">(none)</div>
-            )}
-          </div>
-
-          <div className="mt-2">
-            <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Plan</div>
-            {draftTask.plan ? (
-              <div className="text-xs text-slate-600 mt-1 space-y-1">
-                <div><span className="font-medium">Goal:</span> {draftTask.plan.goal}</div>
-                <div>
-                  <span className="font-medium">Steps:</span> {draftTask.plan.steps.length} ·
-                  <span className="font-medium"> Validation:</span> {draftTask.plan.validation.length} ·
-                  <span className="font-medium"> Cleanup:</span> {draftTask.plan.cleanup.length}
-                </div>
-              </div>
-            ) : (
-              <div className="text-xs text-slate-500 mt-1">(none)</div>
-            )}
-          </div>
         </div>
 
-        <button
-          onClick={() => onOpen?.(draftTask)}
-          disabled={!canOpen}
-          className={`shrink-0 text-xs px-2.5 py-1 rounded font-medium transition-colors ${
-            canOpen
-              ? 'bg-emerald-600 text-white hover:bg-emerald-700'
-              : 'bg-slate-100 text-slate-400 cursor-not-allowed'
-          }`}
-        >
-          Open draft
-        </button>
+        <div className="mt-2">
+          <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Plan</div>
+          {draftTask.plan ? (
+            <div className="text-xs text-slate-600 mt-1 space-y-1">
+              <div><span className="font-medium">Goal:</span> {draftTask.plan.goal}</div>
+              <div>
+                <span className="font-medium">Steps:</span> {draftTask.plan.steps.length} ·
+                <span className="font-medium"> Validation:</span> {draftTask.plan.validation.length} ·
+                <span className="font-medium"> Cleanup:</span> {draftTask.plan.cleanup.length}
+              </div>
+            </div>
+          ) : (
+            <div className="text-xs text-slate-500 mt-1">(none)</div>
+          )}
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => onCreate?.(draftTask)}
+            disabled={!canCreate}
+            className={`text-xs px-2.5 py-1 rounded font-medium transition-colors ${
+              canCreate
+                ? 'bg-blue-600 text-white hover:bg-blue-700'
+                : 'bg-blue-200 text-blue-500 cursor-not-allowed'
+            }`}
+          >
+            {isCreating ? 'Creating…' : 'Create Task'}
+          </button>
+          <button
+            onClick={() => onOpen?.(draftTask)}
+            disabled={!canOpen}
+            className={`text-xs px-2.5 py-1 rounded font-medium transition-colors ${
+              canOpen
+                ? 'bg-slate-200 text-slate-700 hover:bg-slate-300'
+                : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+            }`}
+          >
+            Edit Draft
+          </button>
+          <button
+            onClick={() => onDismiss?.(draftTask)}
+            disabled={!canDismiss}
+            className={`text-xs px-2.5 py-1 rounded font-medium transition-colors ${
+              canDismiss
+                ? 'bg-white text-slate-600 border border-slate-300 hover:bg-slate-100'
+                : 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
+            }`}
+          >
+            Won’t do
+          </button>
+        </div>
       </div>
     </div>
   )
@@ -580,6 +642,10 @@ export function TaskChat({
   bottomSlot,
   onOpenArtifact,
   onOpenDraftTask,
+  onCreateDraftTask,
+  onDismissDraftTask,
+  draftTaskStates,
+  creatingDraftTaskIds,
 }: TaskChatProps) {
   const [input, setInput] = useState('')
   const [isComposing, setIsComposing] = useState(false)
@@ -599,6 +665,7 @@ export function TaskChat({
   const whiteboardSceneRef = useRef<WhiteboardSceneSnapshot | null>(null)
   const dragDepthRef = useRef(0)
   const dictationStartedForCurrentPressRef = useRef(false)
+  const voiceHotkeyReleaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const whiteboardStorageKey = useMemo(
     () => getTaskChatWhiteboardStorageKey(workspaceId, taskId),
     [workspaceId, taskId],
@@ -618,6 +685,12 @@ export function TaskChat({
     if (!textarea) return
     textarea.style.height = 'auto'
     textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px'
+  }, [])
+
+  const clearVoiceHotkeyReleaseTimer = useCallback(() => {
+    if (!voiceHotkeyReleaseTimerRef.current) return
+    clearTimeout(voiceHotkeyReleaseTimerRef.current)
+    voiceHotkeyReleaseTimerRef.current = null
   }, [])
 
   // Show agent activity for all phases (including complete), so chat mode
@@ -640,8 +713,10 @@ export function TaskChat({
   )
 
   useEffect(() => {
+    clearVoiceHotkeyReleaseTimer()
+    dictationStartedForCurrentPressRef.current = false
     stopDictation()
-  }, [taskId, stopDictation])
+  }, [taskId, clearVoiceHotkeyReleaseTimer, stopDictation])
 
   useEffect(() => {
     setIsWhiteboardModalOpen(false)
@@ -661,31 +736,51 @@ export function TaskChat({
   }, [whiteboardStorageKey])
 
   useEffect(() => {
-    if (!isVoiceHotkeyPressed) {
-      dictationStartedForCurrentPressRef.current = false
+    if (isVoiceHotkeyPressed) {
+      clearVoiceHotkeyReleaseTimer()
+
+      if (dictationStartedForCurrentPressRef.current) {
+        return
+      }
+
+      dictationStartedForCurrentPressRef.current = true
+
+      if (!isDictationSupported) {
+        return
+      }
+
+      clearDictationError()
+      startDictation()
+      return
+    }
+
+    dictationStartedForCurrentPressRef.current = false
+    clearVoiceHotkeyReleaseTimer()
+
+    if (!isDictating) {
       stopDictation()
       return
     }
 
-    if (dictationStartedForCurrentPressRef.current) {
-      return
-    }
-
-    dictationStartedForCurrentPressRef.current = true
-
-    if (!isDictationSupported) {
-      return
-    }
-
-    clearDictationError()
-    startDictation()
+    voiceHotkeyReleaseTimerRef.current = setTimeout(() => {
+      voiceHotkeyReleaseTimerRef.current = null
+      stopDictation()
+    }, VOICE_HOTKEY_RELEASE_GRACE_MS)
   }, [
     clearDictationError,
+    clearVoiceHotkeyReleaseTimer,
+    isDictating,
     isDictationSupported,
     isVoiceHotkeyPressed,
     startDictation,
     stopDictation,
   ])
+
+  useEffect(() => {
+    return () => {
+      clearVoiceHotkeyReleaseTimer()
+    }
+  }, [clearVoiceHotkeyReleaseTimer])
 
   useEffect(() => {
     resizeComposer()
@@ -784,6 +879,8 @@ export function TaskChat({
   }, [canUploadFiles])
 
   const handleSend = async (modeOverride?: SendMode) => {
+    clearVoiceHotkeyReleaseTimer()
+    dictationStartedForCurrentPressRef.current = false
     stopDictation()
     const trimmed = input.trim()
     if (!trimmed && pendingFiles.length === 0) return
@@ -896,7 +993,18 @@ export function TaskChat({
   const statusConfig = STATUS_CONFIG[agentStream.status]
 
   return (
-    <div className="flex flex-col h-full min-h-0 relative">
+    <div
+      data-chat-dropzone
+      className={`flex flex-col h-full min-h-0 relative transition-colors ${
+        canUploadFiles && isDragOver
+          ? 'ring-2 ring-inset ring-blue-400 bg-blue-50/30'
+          : ''
+      }`}
+      onDragEnter={canUploadFiles ? handleDragEnter : undefined}
+      onDragOver={canUploadFiles ? handleDragOver : undefined}
+      onDragLeave={canUploadFiles ? handleDragLeave : undefined}
+      onDrop={canUploadFiles ? handleDrop : undefined}
+    >
       {/* Header — shown when title or reset is provided */}
       {(title || onReset) && (
         <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-200 bg-slate-50 shrink-0">
@@ -936,6 +1044,14 @@ export function TaskChat({
         <div className="flex flex-col items-center justify-center text-slate-400 absolute inset-0 z-0 pointer-events-none">
           <p className="text-sm font-medium text-slate-500 mb-1">{emptyState.title}</p>
           <p className="text-xs">{emptyState.subtitle}</p>
+        </div>
+      )}
+
+      {canUploadFiles && isDragOver && (
+        <div className="absolute inset-0 z-20 pointer-events-none flex items-center justify-center">
+          <div className="rounded-md border border-dashed border-blue-400 bg-blue-50/95 px-4 py-2 text-sm font-medium text-blue-700 shadow-sm">
+            Drop files to attach
+          </div>
         </div>
       )}
 
@@ -1025,6 +1141,10 @@ export function TaskChat({
                       key={entry.id}
                       draftTask={draftTask}
                       onOpen={onOpenDraftTask}
+                      onCreate={onCreateDraftTask}
+                      onDismiss={onDismissDraftTask}
+                      state={draftTaskStates?.[draftTask.id]}
+                      isCreating={creatingDraftTaskIds?.has(draftTask.id)}
                     />
                   )
                 }
@@ -1143,18 +1263,7 @@ export function TaskChat({
       {bottomSlot}
 
       {/* Input */}
-      <div
-        data-chat-composer-dropzone
-        className={`shrink-0 border-t transition-colors ${
-          isDragOver
-            ? 'border-blue-300 bg-blue-50/60'
-            : 'border-slate-200 bg-white'
-        }`}
-        onDragEnter={canUploadFiles ? handleDragEnter : undefined}
-        onDragOver={canUploadFiles ? handleDragOver : undefined}
-        onDragLeave={canUploadFiles ? handleDragLeave : undefined}
-        onDrop={canUploadFiles ? handleDrop : undefined}
-      >
+      <div className="shrink-0 border-t border-slate-200 bg-white">
         {(showSteerControls || showStopControl) && (
           <div className="flex items-center gap-1 px-3 pt-2 pb-0">
             {showSteerControls && (
@@ -1213,14 +1322,6 @@ export function TaskChat({
                 {sendMode === 'steer' ? 'interrupts after current tool' : 'queued for when agent finishes'}
               </span>
             )}
-          </div>
-        )}
-
-        {canUploadFiles && isDragOver && (
-          <div className="px-3 pt-2 pb-0">
-            <div className="rounded-md border border-dashed border-blue-400 bg-blue-50 px-3 py-1.5 text-center text-xs font-medium text-blue-700">
-              Drop files to attach
-            </div>
           </div>
         )}
 
