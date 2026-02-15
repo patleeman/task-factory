@@ -1169,7 +1169,7 @@ app.delete('/api/factory/skills/:id', (req, res) => {
 
   try {
     if (existing.source === 'starter') {
-      res.status(400).json({ error: 'Starter skills cannot be deleted. Create an override in ~/.pi/factory/skills instead.' });
+      res.status(400).json({ error: 'Starter skills cannot be deleted. Create an override in ~/.taskfactory/skills instead.' });
       return;
     }
 

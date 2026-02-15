@@ -98,9 +98,9 @@ describe('logger', () => {
     expect(levels).toEqual(['info', 'warn', 'error']);
   });
 
-  it('uses ~/.pi/factory default path when env override is unset', async () => {
+  it('uses ~/.taskfactory default path when env override is unset', async () => {
     const homePath = setTempHome();
-    const expectedDefaultPath = join(homePath, '.pi', 'factory', 'logs', 'server.jsonl');
+    const expectedDefaultPath = join(homePath, '.taskfactory', 'logs', 'server.jsonl');
 
     delete process.env.PI_FACTORY_SERVER_LOG_PATH;
 

@@ -69,7 +69,7 @@ The extension (`extensions/gondolin-sandbox/index.ts`) will:
 
 ### Configuration
 
-#### Workspace-level config (`~/.pi/factory/workspaces/{id}/sandbox.json`)
+#### Workspace-level config (`~/.taskfactory/workspaces/{id}/sandbox.json`)
 
 ```json
 {
@@ -280,7 +280,7 @@ Wire up per-workspace and per-task sandbox configuration.
 - [ ] Add `SandboxConfig` types to `packages/shared/src/types.ts`
 - [ ] Add optional `sandbox` field to `TaskFrontmatter`
 - [ ] Create sandbox config service (`packages/server/src/sandbox-config-service.ts`)
-  - [ ] Load workspace sandbox config from `~/.pi/factory/workspaces/{id}/sandbox.json`
+  - [ ] Load workspace sandbox config from `~/.taskfactory/workspaces/{id}/sandbox.json`
   - [ ] Merge workspace + task-level config
 - [ ] Update extension to read config instead of env var
 - [ ] Add network policy: `createHttpHooks({ allowedHosts, secrets })`

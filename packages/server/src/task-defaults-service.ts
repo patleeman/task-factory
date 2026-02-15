@@ -1,5 +1,4 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
-import { homedir } from 'os';
 import { dirname, join } from 'path';
 import {
   DEFAULT_PRE_EXECUTION_SKILLS,
@@ -14,6 +13,7 @@ import {
   savePiFactorySettings,
   type PiFactorySettings,
 } from './pi-integration.js';
+import { getTaskFactoryHomeDir } from './taskfactory-home.js';
 
 export interface AvailableModelForDefaults {
   provider: string;
@@ -45,7 +45,7 @@ const BUILT_IN_TASK_DEFAULTS: TaskDefaults = {
   postExecutionSkills: [...DEFAULT_POST_EXECUTION_SKILLS],
 };
 
-const PI_FACTORY_DIR = join(homedir(), '.pi', 'factory');
+const PI_FACTORY_DIR = getTaskFactoryHomeDir();
 const WORKSPACE_REGISTRY_PATH = join(PI_FACTORY_DIR, 'workspaces.json');
 const WORKSPACE_DEFAULTS_FILE_NAME = 'task-defaults.json';
 

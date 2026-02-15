@@ -23,13 +23,13 @@ function setTempHome(): string {
 }
 
 function writeFactorySettings(homePath: string, settings: Record<string, unknown>): void {
-  const factoryDir = join(homePath, '.pi', 'factory');
+  const factoryDir = join(homePath, '.taskfactory');
   mkdirSync(factoryDir, { recursive: true });
   writeFileSync(join(factoryDir, 'settings.json'), JSON.stringify(settings, null, 2), 'utf-8');
 }
 
 function registerWorkspace(homePath: string, workspaceId: string, workspacePath: string): void {
-  const factoryDir = join(homePath, '.pi', 'factory');
+  const factoryDir = join(homePath, '.taskfactory');
   mkdirSync(factoryDir, { recursive: true });
   writeFileSync(
     join(factoryDir, 'workspaces.json'),
@@ -39,7 +39,7 @@ function registerWorkspace(homePath: string, workspaceId: string, workspacePath:
 }
 
 function writeWorkspaceTaskDefaults(homePath: string, workspaceId: string, defaults: Partial<TaskDefaults>): void {
-  const workspaceDir = join(homePath, '.pi', 'factory', 'workspaces', workspaceId);
+  const workspaceDir = join(homePath, '.taskfactory', 'workspaces', workspaceId);
   mkdirSync(workspaceDir, { recursive: true });
   writeFileSync(join(workspaceDir, 'task-defaults.json'), JSON.stringify(defaults, null, 2), 'utf-8');
 }

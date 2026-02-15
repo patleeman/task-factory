@@ -54,6 +54,7 @@ import {
   prependStateToTurn,
   stripStateContractEcho,
 } from './state-contract.js';
+import { resolveTaskFactoryHomePath } from './taskfactory-home.js';
 
 // =============================================================================
 // Shelf callback registry — used by extension tools
@@ -399,7 +400,7 @@ function getWorkspacePath(workspaceId: string): string | null {
     return activeSession.workspacePath;
   }
 
-  const registryPath = join(homedir(), '.pi', 'factory', 'workspaces.json');
+  const registryPath = resolveTaskFactoryHomePath('workspaces.json');
   try {
     const entries = JSON.parse(readFileSync(registryPath, 'utf-8')) as WorkspaceRegistryEntry[];
     const entry = entries.find((e) => e.id === workspaceId);

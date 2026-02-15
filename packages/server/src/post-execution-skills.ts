@@ -7,11 +7,11 @@
 
 import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join, dirname } from 'path';
-import { homedir } from 'os';
 import { fileURLToPath } from 'url';
 import YAML from 'yaml';
 import type { PostExecutionSkill, SkillConfigField, SkillHook, SkillSource } from '@pi-factory/shared';
 import { createSystemEvent } from './activity-service.js';
+import { resolveTaskFactoryHomePath } from './taskfactory-home.js';
 
 // =============================================================================
 // Skill Discovery
@@ -19,7 +19,7 @@ import { createSystemEvent } from './activity-service.js';
 
 const DEFAULT_SKILL_HOOKS: SkillHook[] = ['pre', 'post'];
 const SKILL_HOOK_SET = new Set<SkillHook>(DEFAULT_SKILL_HOOKS);
-const USER_SKILLS_DIR = join(homedir(), '.pi', 'factory', 'skills');
+const USER_SKILLS_DIR = resolveTaskFactoryHomePath('skills');
 
 /** Cached skills (discovered once, reloaded on demand) */
 let _cachedSkills: PostExecutionSkill[] | null = null;
@@ -194,7 +194,7 @@ function discoverSkillsFromDir(skillsDir: string, source: SkillSource): PostExec
 
 /**
  * Discover execution skills from starter skills + user-defined skills.
- * User-defined skills in ~/.pi/factory/skills override starter skills by ID.
+ * User-defined skills in ~/.taskfactory/skills override starter skills by ID.
  */
 export function discoverPostExecutionSkills(): PostExecutionSkill[] {
   if (_cachedSkills !== null) return _cachedSkills;

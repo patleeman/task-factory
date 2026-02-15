@@ -13,14 +13,10 @@ import {
 import { join, dirname } from 'path';
 import { homedir } from 'os';
 import type { TaskDefaults, PlanningGuardrails, WorkflowDefaultsConfig } from '@pi-factory/shared';
+import { getTaskFactoryHomeDir } from './taskfactory-home.js';
 
 const PI_AGENT_DIR = join(homedir(), '.pi', 'agent');
-const PI_FACTORY_DIR = join(homedir(), '.pi', 'factory');
-
-// Ensure Task Factory directory exists
-if (!existsSync(PI_FACTORY_DIR)) {
-  mkdirSync(PI_FACTORY_DIR, { recursive: true });
-}
+const PI_FACTORY_DIR = getTaskFactoryHomeDir();
 
 // =============================================================================
 // Task Factory settings

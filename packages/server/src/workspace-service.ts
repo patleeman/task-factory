@@ -3,12 +3,12 @@
 // =============================================================================
 // Manages workspace configuration and discovery
 // Workspaces are stored as .pi/factory.json files in the workspace directory.
-// A registry at ~/.pi/factory/workspaces.json tracks known workspace paths.
+// A registry at ~/.taskfactory/workspaces.json tracks known workspace paths.
 
 import { mkdir, readFile, writeFile, rm, stat } from 'fs/promises';
 import { join, basename } from 'path';
-import { homedir } from 'os';
 import type { Workspace, WorkspaceConfig } from '@pi-factory/shared';
+import { getTaskFactoryHomeDir } from './taskfactory-home.js';
 // discoverTasks is likely sync, but we are just importing it here.
 // If discoverTasks is used in the future it might need to be async too,
 // but for now we focus on workspace service functions.
@@ -17,7 +17,7 @@ import type { Workspace, WorkspaceConfig } from '@pi-factory/shared';
 // Constants
 // =============================================================================
 
-const REGISTRY_DIR = join(homedir(), '.pi', 'factory');
+const REGISTRY_DIR = getTaskFactoryHomeDir();
 const REGISTRY_PATH = join(REGISTRY_DIR, 'workspaces.json');
 
 const DEFAULT_CONFIG: WorkspaceConfig = {

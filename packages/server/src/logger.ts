@@ -5,6 +5,7 @@
 import { appendFileSync, mkdirSync } from 'fs';
 import { homedir } from 'os';
 import { dirname, join } from 'path';
+import { resolveTaskFactoryHomePath } from './taskfactory-home.js';
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
@@ -18,7 +19,7 @@ export interface LogEntry {
 export const SERVER_LOG_PATH_ENV_VAR = 'PI_FACTORY_SERVER_LOG_PATH';
 
 function defaultServerLogPath(): string {
-  return join(homedir(), '.pi', 'factory', 'logs', 'server.jsonl');
+  return resolveTaskFactoryHomePath('logs', 'server.jsonl');
 }
 
 function resolveTildePath(rawPath: string): string {

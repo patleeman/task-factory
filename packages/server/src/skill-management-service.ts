@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
-import { homedir } from 'os';
 import YAML from 'yaml';
 import type { SkillConfigField, SkillHook } from '@pi-factory/shared';
+import { resolveTaskFactoryHomePath } from './taskfactory-home.js';
 
 const RESERVED_METADATA_KEYS = new Set(['type', 'hooks', 'max-iterations', 'done-signal', 'workflow-id', 'pairs-with']);
 const SKILL_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -12,7 +12,7 @@ const ALLOWED_CONFIG_TYPES = new Set<SkillConfigField['type']>(['string', 'numbe
 const DEFAULT_DONE_SIGNAL = 'HOOK_DONE';
 const DEFAULT_SKILL_HOOKS: SkillHook[] = ['pre', 'post'];
 const SKILL_HOOK_SET = new Set<SkillHook>(DEFAULT_SKILL_HOOKS);
-const DEFAULT_FACTORY_SKILLS_DIR = join(homedir(), '.pi', 'factory', 'skills');
+const DEFAULT_FACTORY_SKILLS_DIR = resolveTaskFactoryHomePath('skills');
 
 interface NormalizedSkillDefinition {
   id: string;

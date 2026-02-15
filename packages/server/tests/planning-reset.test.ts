@@ -22,7 +22,7 @@ function setTempHome(): string {
 }
 
 function registerWorkspace(homePath: string, workspaceId: string, workspacePath: string): void {
-  const registryDir = join(homePath, '.pi', 'factory');
+  const registryDir = join(homePath, '.taskfactory');
   mkdirSync(registryDir, { recursive: true });
   writeFileSync(
     join(registryDir, 'workspaces.json'),

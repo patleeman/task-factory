@@ -506,7 +506,7 @@ export interface WorkspaceAutomationSettings {
   readyToExecuting: boolean;
 }
 
-/** Global workflow defaults persisted in ~/.pi/factory/settings.json. */
+/** Global workflow defaults persisted in ~/.taskfactory/settings.json. */
 export interface WorkflowDefaultsConfig {
   readyLimit?: number;
   executingLimit?: number;

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
@@ -22,13 +22,29 @@ function setTempHome(): string {
 }
 
 function registerWorkspace(homePath: string, workspaceId: string, workspacePath: string): void {
-  const registryDir = join(homePath, '.pi', 'factory');
+  const registryDir = join(homePath, '.taskfactory');
   mkdirSync(registryDir, { recursive: true });
   writeFileSync(
     join(registryDir, 'workspaces.json'),
     JSON.stringify([{ id: workspaceId, path: workspacePath, name: 'workspace' }], null, 2),
     'utf-8',
   );
+}
+
+function registerLegacyWorkspace(homePath: string, workspaceId: string, workspacePath: string): void {
+  const legacyRegistryDir = join(homePath, '.pi', 'factory');
+  mkdirSync(legacyRegistryDir, { recursive: true });
+  writeFileSync(
+    join(legacyRegistryDir, 'workspaces.json'),
+    JSON.stringify([{ id: workspaceId, path: workspacePath, name: 'workspace' }], null, 2),
+    'utf-8',
+  );
+}
+
+function writeLegacyFactorySettings(homePath: string, settings: Record<string, unknown>): void {
+  const legacyDir = join(homePath, '.pi', 'factory');
+  mkdirSync(legacyDir, { recursive: true });
+  writeFileSync(join(legacyDir, 'settings.json'), JSON.stringify(settings, null, 2), 'utf-8');
 }
 
 function writeWorkspaceConfig(workspacePath: string): void {
@@ -178,6 +194,27 @@ describe('buildAgentContext shared context merge behavior', () => {
     expect(second).toContain('SHARED CONTEXT V2');
     expect(second).not.toContain('SHARED CONTEXT V1');
   });
+
+  it('reads a legacy ~/.pi/factory workspace registry and migrates it to ~/.taskfactory', async () => {
+    const homePath = setTempHome();
+    const workspaceId = 'ws-legacy-registry';
+    const workspacePath = createTempDir('pi-factory-workspace-');
+
+    writeGlobalAgentsMd(homePath, 'GLOBAL RULES');
+    writeWorkspaceConfig(workspacePath);
+    registerLegacyWorkspace(homePath, workspaceId, workspacePath);
+
+    const { buildAgentContext } = await import('../src/pi-integration.js');
+    const context = buildAgentContext(workspaceId, []);
+
+    expect(context.globalRules).toContain('GLOBAL RULES');
+
+    const migratedRegistryPath = join(homePath, '.taskfactory', 'workspaces.json');
+    expect(existsSync(migratedRegistryPath)).toBe(true);
+
+    const migratedEntries = JSON.parse(readFileSync(migratedRegistryPath, 'utf-8')) as Array<{ id: string }>;
+    expect(migratedEntries.some((entry) => entry.id === workspaceId)).toBe(true);
+  });
 });
 
 describe('pi factory settings persistence', () => {
@@ -194,6 +231,34 @@ describe('pi factory settings persistence', () => {
     expect(loadPiFactorySettings()).toEqual({
       theme: 'dark',
       voiceInputHotkey: 'Alt+Space',
+    });
+  });
+
+  it('loads and migrates legacy ~/.pi/factory/settings.json into ~/.taskfactory/settings.json', async () => {
+    const homePath = setTempHome();
+    writeLegacyFactorySettings(homePath, {
+      theme: 'legacy-theme',
+      voiceInputHotkey: 'Alt+V',
+    });
+
+    const { loadPiFactorySettings, savePiFactorySettings } = await import('../src/pi-integration.js');
+
+    expect(loadPiFactorySettings()).toEqual({
+      theme: 'legacy-theme',
+      voiceInputHotkey: 'Alt+V',
+    });
+
+    const migratedSettingsPath = join(homePath, '.taskfactory', 'settings.json');
+    expect(existsSync(migratedSettingsPath)).toBe(true);
+
+    savePiFactorySettings({
+      theme: 'new-theme',
+      voiceInputHotkey: 'Ctrl+Space',
+    });
+
+    expect(JSON.parse(readFileSync(migratedSettingsPath, 'utf-8'))).toEqual({
+      theme: 'new-theme',
+      voiceInputHotkey: 'Ctrl+Space',
     });
   });
 });

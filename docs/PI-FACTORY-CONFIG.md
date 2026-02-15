@@ -3,7 +3,7 @@
 ## Directory Structure
 
 ```
-~/.pi/factory/                    # Task Factory specific config
+~/.taskfactory/                   # Task Factory specific config
 ├── settings.json                 # Task Factory settings (extends Pi settings)
 ├── workspaces/                   # Workspace-specific config
 │   ├── {workspace-id}/
@@ -94,8 +94,8 @@
 ## Implementation Plan
 
 ### Phase 1: Task Factory Settings Directory
-- [ ] Create `~/.pi/factory/` structure
-- [ ] Move Task Factory settings from `~/.pi/agent/` to `~/.pi/factory/`
+- [ ] Create `~/.taskfactory/` structure
+- [ ] Move Task Factory settings from `~/.pi/agent/` to `~/.taskfactory/`
 - [ ] Update server to read from new location
 
 ### Phase 2: Workspace-Specific Configuration

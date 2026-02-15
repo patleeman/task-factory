@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync, existsSync } from 'fs';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import {
@@ -11,6 +11,8 @@ import {
   parseImportedSkillMarkdown,
 } from '../src/skill-management-service.js';
 
+const originalHome = process.env.HOME;
+const originalUserProfile = process.env.USERPROFILE;
 const tempDirs: string[] = [];
 
 function createTempSkillsDir(): string {
@@ -19,7 +21,20 @@ function createTempSkillsDir(): string {
   return dir;
 }
 
+function setTempHome(): string {
+  const homePath = mkdtempSync(join(tmpdir(), 'pi-factory-home-'));
+  tempDirs.push(homePath);
+  process.env.HOME = homePath;
+  process.env.USERPROFILE = homePath;
+  return homePath;
+}
+
 afterEach(() => {
+  vi.resetModules();
+
+  process.env.HOME = originalHome;
+  process.env.USERPROFILE = originalUserProfile;
+
   for (const dir of tempDirs) {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -27,8 +42,8 @@ afterEach(() => {
 });
 
 describe('skill-management-service', () => {
-  it('resolves user skill storage under ~/.pi/factory/skills by default', () => {
-    expect(getFactoryUserSkillsDir()).toContain('/.pi/factory/skills');
+  it('resolves user skill storage under ~/.taskfactory/skills by default', () => {
+    expect(getFactoryUserSkillsDir()).toContain('/.taskfactory/skills');
   });
 
   it('creates and updates a skill in the provided skills directory', () => {
@@ -148,6 +163,25 @@ Use {{style}} tone.
 
     deleteFactorySkill('delete-me', { skillsDir });
     expect(existsSync(skillDir)).toBe(false);
+  });
+
+  it('migrates legacy ~/.pi/factory/skills into ~/.taskfactory/skills', async () => {
+    const homePath = setTempHome();
+
+    const legacySkillDir = join(homePath, '.pi', 'factory', 'skills', 'legacy-review');
+    mkdirSync(legacySkillDir, { recursive: true });
+    writeFileSync(
+      join(legacySkillDir, 'SKILL.md'),
+      '---\nname: legacy-review\ndescription: Legacy review\n---\n\nReview output.\n',
+      'utf-8',
+    );
+
+    vi.resetModules();
+    const { getFactoryUserSkillsDir: getFactoryUserSkillsDirFresh } = await import('../src/skill-management-service.js');
+
+    const skillsDir = getFactoryUserSkillsDirFresh();
+    expect(skillsDir).toBe(join(homePath, '.taskfactory', 'skills'));
+    expect(existsSync(join(skillsDir, 'legacy-review', 'SKILL.md'))).toBe(true);
   });
 
   it('validates imported markdown shape', () => {

@@ -111,7 +111,7 @@ npm run dev
 | `PORT` | `3000` | HTTP/WebSocket server port |
 | `HOST` | `127.0.0.1` | Bind host (set `HOST=0.0.0.0` to intentionally expose on your network) |
 | `DEBUG` | _(unset)_ | Enable debug-level server logs when set to any non-empty value |
-| `PI_FACTORY_SERVER_LOG_PATH` | `~/.pi/factory/logs/server.jsonl` | Override server log file destination |
+| `PI_FACTORY_SERVER_LOG_PATH` | `~/.taskfactory/logs/server.jsonl` | Override server log file destination |
 
 By default, Task Factory listens only on loopback. Use a non-loopback `HOST` value only when you intentionally want remote access.
 
@@ -119,7 +119,7 @@ By default, Task Factory listens only on loopback. Use a non-loopback `HOST` val
 
 The server writes JSON log lines to both console output (`stdout`/`stderr`) and a local log file.
 
-- Default log file: `~/.pi/factory/logs/server.jsonl`
+- Default log file: `~/.taskfactory/logs/server.jsonl`
 - Custom log file: set `PI_FACTORY_SERVER_LOG_PATH`
 
 For troubleshooting, inspect or tail that file directly.
