@@ -1,11 +1,22 @@
-# API
+# API Reference
 
-Use this section for internal/external API contracts and integration expectations.
+Task Factory exposes a JSON REST API and a workspace-scoped WebSocket event stream.
 
-## What to include
+## API docs in this section
 
-- Endpoint or interface catalog
-- Authentication/authorization model
-- Request and response schemas
-- Error contracts and retry guidance
-- Versioning and deprecation policy
+- [REST API Reference](./rest-api-reference.md)
+- [WebSocket Event Reference](./websocket-events-reference.md)
+
+## Scope
+
+These docs focus on the integration points used by the current client runtime:
+
+- Workspace management
+- Task lifecycle + execution controls
+- Planning APIs
+- Workflow automation + queue controls
+- Shelf and idea backlog APIs
+- Task/planning attachments
+- WebSocket client↔server event contracts
+
+For canonical transport/type definitions, see `packages/shared/src/types.ts`.
