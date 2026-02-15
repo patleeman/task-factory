@@ -179,4 +179,58 @@ describe('workflow-settings-service', () => {
       readyToExecuting: true,
     });
   });
+
+  it('applies explicit ready→executing disable patches to both workflowAutomation and queueProcessing', () => {
+    const globalDefaults = {
+      readyLimit: 25,
+      executingLimit: 2,
+      backlogToReady: false,
+      readyToExecuting: true,
+    };
+
+    const patchResult = applyWorkflowPatchToWorkspaceConfig(
+      createWorkspaceConfig({
+        workflowAutomation: {
+          backlogToReady: false,
+          readyToExecuting: true,
+        },
+        queueProcessing: { enabled: true },
+      }),
+      {
+        readyToExecuting: false,
+      },
+      globalDefaults,
+    );
+
+    expect(patchResult.nextConfig.workflowAutomation?.readyToExecuting).toBe(false);
+    expect(patchResult.nextConfig.queueProcessing).toEqual({ enabled: false });
+    expect(patchResult.effective.readyToExecuting).toBe(false);
+  });
+
+  it('applies explicit ready→executing enable patches to both workflowAutomation and queueProcessing', () => {
+    const globalDefaults = {
+      readyLimit: 25,
+      executingLimit: 2,
+      backlogToReady: false,
+      readyToExecuting: false,
+    };
+
+    const patchResult = applyWorkflowPatchToWorkspaceConfig(
+      createWorkspaceConfig({
+        workflowAutomation: {
+          backlogToReady: false,
+          readyToExecuting: false,
+        },
+        queueProcessing: { enabled: false },
+      }),
+      {
+        readyToExecuting: true,
+      },
+      globalDefaults,
+    );
+
+    expect(patchResult.nextConfig.workflowAutomation?.readyToExecuting).toBe(true);
+    expect(patchResult.nextConfig.queueProcessing).toEqual({ enabled: true });
+    expect(patchResult.effective.readyToExecuting).toBe(true);
+  });
 });

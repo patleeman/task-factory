@@ -493,6 +493,30 @@ describe('queue manager ordering', () => {
     ).toBe(false);
   });
 
+  it('keeps queue paused on startup when ready→executing automation is disabled', async () => {
+    const workspace = createWorkspace(1);
+    workspace.config.workflowAutomation.readyToExecuting = false;
+    workspace.config.queueProcessing = { enabled: false };
+
+    const tasks = [
+      createTask('TASK-READY', 'ready', 0, '2025-01-01T00:00:00.000Z'),
+    ];
+
+    listWorkspacesMock.mockImplementation(async () => [workspace]);
+    getWorkspaceByIdMock.mockImplementation(async () => workspace);
+    discoverTasksMock.mockImplementation(() => tasks);
+
+    const { initializeQueueManagers } = await import('../src/queue-manager.js');
+
+    await initializeQueueManagers(() => {});
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    expect(executeTaskMock).not.toHaveBeenCalled();
+    expect(
+      moveTaskToPhaseMock.mock.calls.some((call) => call[0]?.id === 'TASK-READY' && call[1] === 'executing'),
+    ).toBe(false);
+  });
+
   it('recovers orphaned executions during startup before promoting regular ready work', async () => {
     const workspace = createWorkspace(1);
     workspace.config.workflowAutomation.readyToExecuting = true;

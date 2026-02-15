@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { syncAutomationSettingsWithQueue } from '../../client/src/components/workflow-automation';
+import {
+  isFactoryRunningState,
+  syncAutomationSettingsWithQueue,
+} from '../../client/src/components/workflow-automation';
 
 describe('workflow automation settings synchronization', () => {
   it('syncs ready→executing toggle state from live queue status when enabled', () => {
@@ -69,5 +72,45 @@ describe('workflow automation settings synchronization', () => {
       backlogToReady: false,
       readyToExecuting: false,
     });
+  });
+
+  it('treats factory as paused when automation is disabled and no live executions remain', () => {
+    const synced = syncAutomationSettingsWithQueue(
+      {
+        readyLimit: 25,
+        executingLimit: 2,
+        backlogToReady: false,
+        readyToExecuting: false,
+      },
+      {
+        workspaceId: 'workspace-1',
+        enabled: false,
+        currentTaskId: null,
+        tasksInReady: 0,
+        tasksInExecuting: 3,
+      },
+    );
+
+    expect(isFactoryRunningState(synced, 0)).toBe(false);
+  });
+
+  it('treats factory as running when live executions are still active', () => {
+    const synced = syncAutomationSettingsWithQueue(
+      {
+        readyLimit: 25,
+        executingLimit: 2,
+        backlogToReady: false,
+        readyToExecuting: false,
+      },
+      {
+        workspaceId: 'workspace-1',
+        enabled: false,
+        currentTaskId: null,
+        tasksInReady: 0,
+        tasksInExecuting: 1,
+      },
+    );
+
+    expect(isFactoryRunningState(synced, 1)).toBe(true);
   });
 });

@@ -19,7 +19,7 @@ import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts'
 import { DEFAULT_VOICE_INPUT_HOTKEY, normalizeVoiceInputHotkey } from '../voiceHotkey'
 import { TaskChat } from './TaskChat'
 import { QADialog } from './QADialog'
-import { syncAutomationSettingsWithQueue } from './workflow-automation'
+import { isFactoryRunningState, syncAutomationSettingsWithQueue } from './workflow-automation'
 
 const LEFT_PANE_MIN = 320
 const LEFT_PANE_MAX = 1400
@@ -166,16 +166,18 @@ export function WorkspacePage() {
   const runningTaskIds = runningExecutionTaskIds
   const awaitingTaskIds = awaitingInputTaskIds
   const awaitingInputCount = nonArchivedTasks.filter((task) => awaitingTaskIds.has(task.id)).length
-  const executingTasks = nonArchivedTasks.filter((task) => task.frontmatter.phase === 'executing')
+  const liveExecutionTaskIds = useMemo(() => {
+    const ids = new Set(runningTaskIds)
+    for (const taskId of awaitingTaskIds) {
+      ids.add(taskId)
+    }
+    return ids
+  }, [runningTaskIds, awaitingTaskIds])
   const effectiveAutomationSettings: WorkspaceWorkflowSettings = syncAutomationSettingsWithQueue(
     automationSettings,
     queueStatus,
   )
-  const isFactoryRunning = (
-    effectiveAutomationSettings.backlogToReady
-    || effectiveAutomationSettings.readyToExecuting
-    || executingTasks.length > 0
-  )
+  const isFactoryRunning = isFactoryRunningState(effectiveAutomationSettings, liveExecutionTaskIds.size)
   const planGeneratingTaskIds = useMemo(() => {
     return new Set(
       tasks
@@ -1159,18 +1161,18 @@ export function WorkspacePage() {
         })
         applyAutomationResult(automationResult)
 
-        const tasksToStop = tasks.filter((task) => task.frontmatter.phase === 'executing')
+        const taskIdsToStop = Array.from(liveExecutionTaskIds)
         let failedStops = 0
 
-        await Promise.all(tasksToStop.map(async (task) => {
-          if (!markTaskStopping(task.id)) return
+        await Promise.all(taskIdsToStop.map(async (activeTaskId) => {
+          if (!markTaskStopping(activeTaskId)) return
           try {
-            await api.stopTaskExecution(workspaceId, task.id)
+            await api.stopTaskExecution(workspaceId, activeTaskId)
           } catch (err) {
             failedStops++
-            console.error(`Failed to stop task ${task.id}:`, err)
+            console.error(`Failed to stop task ${activeTaskId}:`, err)
           } finally {
-            clearTaskStopping(task.id)
+            clearTaskStopping(activeTaskId)
           }
         }))
 

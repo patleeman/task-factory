@@ -9,3 +9,10 @@ export function syncAutomationSettingsWithQueue(
     readyToExecuting: queueStatus?.enabled ?? settings.readyToExecuting,
   }
 }
+
+export function isFactoryRunningState(
+  settings: Pick<WorkspaceWorkflowSettings, 'backlogToReady' | 'readyToExecuting'>,
+  liveExecutionCount: number,
+): boolean {
+  return settings.backlogToReady || settings.readyToExecuting || liveExecutionCount > 0
+}
