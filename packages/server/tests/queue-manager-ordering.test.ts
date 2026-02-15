@@ -6,6 +6,7 @@ const discoverTasksMock = vi.fn();
 const moveTaskToPhaseMock = vi.fn();
 const executeTaskMock = vi.fn();
 const hasRunningSessionMock = vi.fn(() => false);
+const stopTaskExecutionMock = vi.fn(async () => false);
 const loadGlobalWorkflowSettingsMock = vi.fn(() => ({
   readyLimit: 25,
   executingLimit: 1,
@@ -28,6 +29,7 @@ vi.mock('../src/task-service.js', () => ({
 vi.mock('../src/agent-execution-service.js', () => ({
   executeTask: (...args: any[]) => executeTaskMock(...args),
   hasRunningSession: (...args: any[]) => hasRunningSessionMock(...args),
+  stopTaskExecution: (...args: any[]) => stopTaskExecutionMock(...args),
 }));
 
 vi.mock('../src/activity-service.js', () => ({
@@ -103,9 +105,11 @@ describe('queue manager ordering', () => {
     moveTaskToPhaseMock.mockReset();
     executeTaskMock.mockReset();
     hasRunningSessionMock.mockReset();
+    stopTaskExecutionMock.mockReset();
     loadGlobalWorkflowSettingsMock.mockReset();
 
     hasRunningSessionMock.mockImplementation(() => false);
+    stopTaskExecutionMock.mockImplementation(async () => false);
     loadGlobalWorkflowSettingsMock.mockImplementation(() => ({
       readyLimit: 25,
       executingLimit: 1,
@@ -278,7 +282,97 @@ describe('queue manager ordering', () => {
     ));
 
     expect(readyMoveCall?.[4]).toBe(tasks);
+    expect(stopTaskExecutionMock).toHaveBeenCalledWith('TASK-ORPHAN');
     expect(executeTaskMock).not.toHaveBeenCalled();
+
+    await stopQueueProcessing(workspace.id);
+  });
+
+  it('does not auto-assign ready work while another executing task still has an active session', async () => {
+    const workspace = createWorkspace(1);
+    const tasks = [
+      createTask('TASK-EXECUTING', 'executing', 0, '2025-01-01T00:00:00.000Z'),
+      createTask('TASK-READY', 'ready', -1, '2025-01-01T00:00:10.000Z'),
+    ];
+
+    getWorkspaceByIdMock.mockImplementation(async () => workspace);
+    discoverTasksMock.mockImplementation(() => tasks);
+    hasRunningSessionMock.mockImplementation((taskId: string) => taskId === 'TASK-EXECUTING');
+    updateWorkspaceConfigMock.mockImplementation(async (_workspace: any, config: any) => {
+      workspace.config = {
+        ...workspace.config,
+        ...config,
+      };
+      return workspace;
+    });
+
+    const { startQueueProcessing, stopQueueProcessing, kickQueue } = await import('../src/queue-manager.js');
+
+    await startQueueProcessing(workspace.id, () => {});
+    kickQueue(workspace.id);
+
+    await vi.waitFor(() => {
+      expect(discoverTasksMock.mock.calls.length).toBeGreaterThanOrEqual(2);
+    });
+
+    expect(executeTaskMock).not.toHaveBeenCalled();
+    expect(
+      moveTaskToPhaseMock.mock.calls.some((call) => call[0]?.id === 'TASK-READY' && call[1] === 'executing'),
+    ).toBe(false);
+
+    await stopQueueProcessing(workspace.id);
+  });
+
+  it('ignores stale completion callbacks from superseded execution attempts', async () => {
+    const workspace = createWorkspace(1);
+    const tasks = [
+      createTask('TASK-RACE', 'ready', 0, '2025-01-01T00:00:00.000Z'),
+    ];
+
+    getWorkspaceByIdMock.mockImplementation(async () => workspace);
+    discoverTasksMock.mockImplementation(() => tasks);
+    updateWorkspaceConfigMock.mockImplementation(async (_workspace: any, config: any) => {
+      workspace.config = {
+        ...workspace.config,
+        ...config,
+      };
+      return workspace;
+    });
+
+    const completionCallbacks: Array<(success: boolean) => void> = [];
+    executeTaskMock.mockImplementation(async ({ onComplete }: any) => {
+      completionCallbacks.push(onComplete);
+    });
+
+    const { startQueueProcessing, stopQueueProcessing, kickQueue } = await import('../src/queue-manager.js');
+
+    await startQueueProcessing(workspace.id, () => {});
+
+    await vi.waitFor(() => {
+      expect(completionCallbacks).toHaveLength(1);
+    });
+
+    kickQueue(workspace.id);
+
+    await vi.waitFor(() => {
+      expect(completionCallbacks).toHaveLength(2);
+    });
+
+    completionCallbacks[0]?.(true);
+
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    expect(
+      moveTaskToPhaseMock.mock.calls.filter((call) => call[0]?.id === 'TASK-RACE' && call[1] === 'complete'),
+    ).toHaveLength(0);
+
+    completionCallbacks[1]?.(true);
+
+    await vi.waitFor(() => {
+      expect(
+        moveTaskToPhaseMock.mock.calls.filter((call) => call[0]?.id === 'TASK-RACE' && call[1] === 'complete'),
+      ).toHaveLength(1);
+    });
 
     await stopQueueProcessing(workspace.id);
   });

@@ -550,6 +550,105 @@ describe('planTask', () => {
     expect(updateEvents.at(-1)?.task?.frontmatter?.phase).toBe('ready');
   });
 
+  it('does not clear a newer execution session when planning cleanup runs', async () => {
+    const workspacePath = mkdtempSync(join(tmpdir(), 'pi-factory-plan-task-'));
+    tempDirs.push(workspacePath);
+
+    const tasksDir = join(workspacePath, '.pi', 'tasks');
+    mkdirSync(tasksDir, { recursive: true });
+
+    const { createTask, discoverTasks, moveTaskToPhase } = await import('../src/task-service.js');
+    const {
+      executeTask,
+      getActiveSession,
+      hasRunningSession,
+      planTask,
+      stopTaskExecution,
+    } = await import('../src/agent-execution-service.js');
+
+    const task = createTask(workspacePath, tasksDir, {
+      content: 'Keep execution session alive when planning session tears down',
+      acceptanceCriteria: [],
+    });
+
+    let releasePlanningPrompt: (() => void) | undefined;
+    const planningPromptBlock = new Promise<void>((resolve) => {
+      releasePlanningPrompt = resolve;
+    });
+
+    createAgentSessionMock.mockResolvedValueOnce({
+      session: {
+        subscribe: () => () => {},
+        prompt: async () => {
+          const callback = (globalThis as any).__piFactoryPlanCallbacks?.get(task.id);
+          if (!callback) {
+            throw new Error('save_plan callback not registered');
+          }
+
+          callback({
+            acceptanceCriteria: ['Criterion one'],
+            plan: {
+              goal: 'Goal',
+              steps: ['Step one'],
+              validation: ['Validate one'],
+              cleanup: [],
+              generatedAt: new Date().toISOString(),
+            },
+          });
+
+          await planningPromptBlock;
+        },
+        abort: async () => {},
+      },
+    });
+
+    createAgentSessionMock.mockResolvedValueOnce({
+      session: {
+        subscribe: () => () => {},
+        prompt: async () => {},
+        abort: async () => {},
+      },
+    });
+
+    const planningPromise = planTask({
+      task,
+      workspaceId: 'workspace-test',
+      workspacePath,
+      broadcastToWorkspace: () => {},
+    });
+
+    await vi.waitFor(() => {
+      expect(task.frontmatter.plan).toBeDefined();
+    });
+
+    const liveTasks = discoverTasks(tasksDir);
+    const liveTask = liveTasks.find((candidate) => candidate.id === task.id);
+    if (!liveTask) {
+      throw new Error('Live task not found while setting up execution handoff');
+    }
+
+    moveTaskToPhase(liveTask, 'executing', 'system', 'Queue manager auto-assigned', liveTasks);
+
+    const executionSession = await executeTask({
+      task: liveTask,
+      workspaceId: 'workspace-test',
+      workspacePath,
+      broadcastToWorkspace: () => {},
+    });
+
+    expect(getActiveSession(task.id)?.id).toBe(executionSession.id);
+
+    releasePlanningPrompt?.();
+
+    const result = await planningPromise;
+    expect(result).not.toBeNull();
+
+    expect(getActiveSession(task.id)?.id).toBe(executionSession.id);
+    expect(hasRunningSession(task.id)).toBe(true);
+
+    await stopTaskExecution(task.id);
+  });
+
   it('auto-promotes backlog tasks to ready when backlog automation is enabled', async () => {
     const workspacePath = mkdtempSync(join(tmpdir(), 'pi-factory-plan-task-'));
     tempDirs.push(workspacePath);

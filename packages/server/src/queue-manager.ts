@@ -15,11 +15,12 @@
 // It recovers gracefully from server restarts by detecting orphaned executing tasks.
 
 import type { Task, ServerEvent, QueueStatus, Workspace } from '@pi-factory/shared';
+import { randomUUID } from 'crypto';
 import { resolveWorkspaceWorkflowSettings } from '@pi-factory/shared';
 import { getWorkspaceById, getTasksDir, listWorkspaces, updateWorkspaceConfig } from './workspace-service.js';
 import { discoverTasks, moveTaskToPhase } from './task-service.js';
 import { loadGlobalWorkflowSettings } from './workflow-settings-service.js';
-import { executeTask, hasRunningSession } from './agent-execution-service.js';
+import { executeTask, hasRunningSession, stopTaskExecution } from './agent-execution-service.js';
 import { createSystemEvent } from './activity-service.js';
 import { logger } from './logger.js';
 import { buildTaskStateSnapshot } from './state-contract.js';
@@ -45,6 +46,7 @@ class QueueManager {
   private processing = false;
   private pollTimer: NodeJS.Timeout | null = null;
   private broadcastFn: (event: ServerEvent) => void;
+  private executionAttempts = new Map<string, string>();
 
   constructor(workspaceId: string, broadcastFn: (event: ServerEvent) => void) {
     this.workspaceId = workspaceId;
@@ -109,6 +111,22 @@ class QueueManager {
     this.broadcastFn({ type: 'queue:status', status: await this.getStatus() });
   }
 
+  private beginExecutionAttempt(taskId: string): string {
+    const attemptId = randomUUID();
+    this.executionAttempts.set(taskId, attemptId);
+    return attemptId;
+  }
+
+  private isCurrentExecutionAttempt(taskId: string, attemptId: string): boolean {
+    return this.executionAttempts.get(taskId) === attemptId;
+  }
+
+  private clearExecutionAttempt(taskId: string, attemptId: string): void {
+    if (this.isCurrentExecutionAttempt(taskId, attemptId)) {
+      this.executionAttempts.delete(taskId);
+    }
+  }
+
   private async processNext(): Promise<void> {
     if (!this.enabled || this.processing) return;
     this.processing = true;
@@ -145,6 +163,13 @@ class QueueManager {
 
         if (recentlyStarted) {
           logger.info(`[QueueManager] Orphaned task ${orphan.id} failed recently — moving back to ready`);
+
+          this.executionAttempts.delete(orphan.id);
+          const stoppedLingeringSession = await stopTaskExecution(orphan.id);
+          if (stoppedLingeringSession) {
+            logger.info(`[QueueManager] Stopped lingering session before orphan reset for ${orphan.id}`);
+          }
+
           const fromState = buildTaskStateSnapshot(orphan.frontmatter);
           moveTaskToPhase(orphan, 'ready', 'system', 'Moved back to ready after execution failure', tasks);
 
@@ -183,7 +208,8 @@ class QueueManager {
             'Queue manager resuming orphaned task after server restart'
           );
 
-          await this.startExecution(orphan, workspace);
+          const attemptId = this.beginExecutionAttempt(orphan.id);
+          await this.startExecution(orphan, workspace, attemptId);
           return;
         }
       }
@@ -245,7 +271,8 @@ class QueueManager {
       );
 
       await this.broadcastStatus();
-      await this.startExecution(nextTask, workspace);
+      const attemptId = this.beginExecutionAttempt(nextTask.id);
+      await this.startExecution(nextTask, workspace, attemptId);
     } catch (err) {
       logger.error('[QueueManager] Error processing queue:', err);
     } finally {
@@ -253,7 +280,7 @@ class QueueManager {
     }
   }
 
-  private async startExecution(task: Task, workspace: Workspace): Promise<void> {
+  private async startExecution(task: Task, workspace: Workspace, attemptId: string): Promise<void> {
     try {
       await executeTask({
         task,
@@ -261,21 +288,32 @@ class QueueManager {
         workspacePath: workspace.path,
         broadcastToWorkspace: (event) => this.broadcastFn(event),
         onComplete: (success) => {
-          void this.handleTaskComplete(task.id, success);
+          void this.handleTaskComplete(task.id, success, attemptId);
         },
       });
     } catch (err) {
       logger.error(`[QueueManager] Failed to start execution for ${task.id}:`, err);
-      this.currentTaskId = null;
+      this.clearExecutionAttempt(task.id, attemptId);
+      if (this.currentTaskId === task.id) {
+        this.currentTaskId = null;
+      }
       await this.broadcastStatus();
       // Retry after delay
       setTimeout(() => this.kick(), 5000);
     }
   }
 
-  private async handleTaskComplete(taskId: string, success: boolean): Promise<void> {
+  private async handleTaskComplete(taskId: string, success: boolean, attemptId: string): Promise<void> {
+    if (!this.isCurrentExecutionAttempt(taskId, attemptId)) {
+      logger.info(`[QueueManager] Ignoring stale completion callback for task ${taskId}`);
+      return;
+    }
+
     logger.info(`[QueueManager] Task ${taskId} completed (success: ${success})`);
-    this.currentTaskId = null;
+    this.clearExecutionAttempt(taskId, attemptId);
+    if (this.currentTaskId === taskId) {
+      this.currentTaskId = null;
+    }
 
     // Re-read task from disk (it may have been modified during execution)
     const workspace = await getWorkspaceById(this.workspaceId);
