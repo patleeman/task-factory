@@ -75,7 +75,7 @@ ${description}${planContext}`;
     });
 
     let result = '';
-    session.subscribe((event) => {
+    const unsubscribe = session.subscribe((event) => {
       if (
         event.type === 'message_update' &&
         event.assistantMessageEvent.type === 'text_delta'
@@ -84,8 +84,12 @@ ${description}${planContext}`;
       }
     });
 
-    await withTimeout(session.prompt(prompt), 15000, undefined);
-    session.dispose();
+    try {
+      await withTimeout(session.prompt(prompt), 15000, undefined);
+    } finally {
+      unsubscribe();
+      session.dispose();
+    }
 
     const criteria = parseCriteriaFromResponse(result);
     return criteria.length > 0 ? criteria : fallbackCriteria(description);

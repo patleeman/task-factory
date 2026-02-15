@@ -68,7 +68,7 @@ ${description}${criteriaText}`;
     });
 
     let result = '';
-    session.subscribe((event) => {
+    const unsubscribe = session.subscribe((event) => {
       if (
         event.type === 'message_update' &&
         event.assistantMessageEvent.type === 'text_delta'
@@ -77,8 +77,12 @@ ${description}${criteriaText}`;
       }
     });
 
-    await withTimeout(session.prompt(prompt), 10000, undefined);
-    session.dispose();
+    try {
+      await withTimeout(session.prompt(prompt), 10000, undefined);
+    } finally {
+      unsubscribe();
+      session.dispose();
+    }
 
     const title = result.trim().replace(/^["']|["']$/g, '');
     return title || fallbackTitle(description);
