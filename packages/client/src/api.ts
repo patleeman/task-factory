@@ -156,6 +156,19 @@ export const api = {
     }
     return res.json()
   },
+  async openArchiveInFileExplorer(workspaceId: string): Promise<void> {
+    const res = await fetch(`/api/workspaces/${workspaceId}/archive/open-in-explorer`, {
+      method: 'POST',
+    })
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => null)
+      const message = err && typeof err.error === 'string' && err.error.trim().length > 0
+        ? err.error
+        : `Failed to open archive in file explorer (${res.status})`
+      throw new Error(message)
+    }
+  },
   async getActivity(workspaceId: string, limit = 100): Promise<ActivityEntry[]> {
     const res = await fetch(`/api/workspaces/${workspaceId}/activity?limit=${limit}`)
     return res.json()

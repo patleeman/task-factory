@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, RotateCcw, Trash2 } from 'lucide-react'
+import { ArrowLeft, FolderOpen, RotateCcw, Trash2 } from 'lucide-react'
 import type { Task } from '@pi-factory/shared'
 import { AppIcon } from './AppIcon'
 
 interface ArchivePaneProps {
   archivedTasks: Task[]
   onBack: () => void
+  onOpenInFileExplorer: () => Promise<void>
+  isOpeningInFileExplorer: boolean
   onRestoreTask: (taskId: string) => Promise<boolean>
   onDeleteTask: (taskId: string) => Promise<boolean>
   onBulkRestoreTasks: (taskIds: string[]) => Promise<void>
@@ -18,6 +20,8 @@ const LOAD_MORE_ROWS = 40
 export function ArchivePane({
   archivedTasks,
   onBack,
+  onOpenInFileExplorer,
+  isOpeningInFileExplorer,
   onRestoreTask,
   onDeleteTask,
   onBulkRestoreTasks,
@@ -254,13 +258,24 @@ export function ArchivePane({
         <h2 className="font-semibold text-xs text-slate-500 uppercase tracking-wide">
           Archive
         </h2>
-        <button
-          onClick={onBack}
-          className="text-xs text-slate-400 hover:text-slate-600 inline-flex items-center gap-1"
-        >
-          <AppIcon icon={ArrowLeft} size="xs" />
-          Back to workspace
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => { void onOpenInFileExplorer() }}
+            disabled={isOpeningInFileExplorer}
+            className="text-xs text-slate-500 hover:text-slate-700 inline-flex items-center gap-1 px-2 py-1 rounded border border-slate-200 bg-white disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <AppIcon icon={FolderOpen} size="xs" />
+            {isOpeningInFileExplorer ? 'Opening…' : 'Open in File Explorer'}
+          </button>
+
+          <button
+            onClick={onBack}
+            className="text-xs text-slate-400 hover:text-slate-600 inline-flex items-center gap-1"
+          >
+            <AppIcon icon={ArrowLeft} size="xs" />
+            Back to workspace
+          </button>
+        </div>
       </div>
 
       <div className="px-4 py-3 border-b border-slate-200 shrink-0 space-y-2.5">

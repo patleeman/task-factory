@@ -103,8 +103,10 @@ export function WorkspacePage() {
   const [factoryToggling, setFactoryToggling] = useState(false)
   const [archivedTasksLoaded, setArchivedTasksLoaded] = useState(false)
   const [archivedTasksLoading, setArchivedTasksLoading] = useState(false)
+  const [isOpeningArchiveInFileExplorer, setIsOpeningArchiveInFileExplorer] = useState(false)
   const toastTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
   const archivedLoadPromiseRef = useRef<Promise<void> | null>(null)
+  const openingArchiveExplorerRef = useRef(false)
 
   const [selectedArtifact, setSelectedArtifact] = useState<Artifact | null>(null)
   const [ideaBacklog, setIdeaBacklog] = useState<IdeaBacklog | null>(null)
@@ -1214,6 +1216,24 @@ export function WorkspacePage() {
     void loadArchivedTasksIfNeeded()
   }, [navigate, workspaceArchivePath, loadArchivedTasksIfNeeded])
 
+  const handleOpenArchiveInFileExplorer = useCallback(async () => {
+    if (!workspaceId || openingArchiveExplorerRef.current) return
+
+    openingArchiveExplorerRef.current = true
+    setIsOpeningArchiveInFileExplorer(true)
+
+    try {
+      await api.openArchiveInFileExplorer(workspaceId)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to open archive in file explorer'
+      showToast(message)
+      console.error('Failed to open archive in file explorer:', err)
+    } finally {
+      openingArchiveExplorerRef.current = false
+      setIsOpeningArchiveInFileExplorer(false)
+    }
+  }, [workspaceId, showToast])
+
   const handleRestoreArchivedTask = useCallback(async (
     targetTaskId: string,
     options?: { silent?: boolean },
@@ -1601,6 +1621,8 @@ export function WorkspacePage() {
                   <ArchivePane
                     archivedTasks={archivedTasks}
                     onBack={() => navigate(workspaceRootPath)}
+                    onOpenInFileExplorer={handleOpenArchiveInFileExplorer}
+                    isOpeningInFileExplorer={isOpeningArchiveInFileExplorer}
                     onRestoreTask={handleRestoreArchivedTask}
                     onDeleteTask={handleDeleteArchivedTask}
                     onBulkRestoreTasks={handleBulkRestoreArchivedTasks}

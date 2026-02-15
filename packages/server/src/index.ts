@@ -64,6 +64,7 @@ import { getNonLoopbackBindWarning } from './network-host.js';
 import { buildTaskStateSnapshot } from './state-contract.js';
 import { logTaskStateTransition } from './state-transition.js';
 import { buildWorkspaceAttentionSummary } from './workspace-attention.js';
+import { openInFileExplorer } from './file-explorer.js';
 
 // =============================================================================
 // Configuration
@@ -296,6 +297,35 @@ app.delete('/api/workspaces/:id', async (req, res) => {
   } catch (err) {
     logger.error('Error deleting workspace', err);
     res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// Open archive storage in the system file explorer
+app.post('/api/workspaces/:workspaceId/archive/open-in-explorer', async (req, res) => {
+  const workspace = await getWorkspaceById(req.params.workspaceId);
+
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return;
+  }
+
+  const tasksDir = getTasksDir(workspace);
+
+  try {
+    await openInFileExplorer(tasksDir);
+    res.json({ success: true, path: tasksDir });
+  } catch (err) {
+    logger.error('Failed to open archive directory in file explorer', {
+      workspaceId: workspace.id,
+      tasksDir,
+      error: err instanceof Error ? err.message : String(err),
+    });
+
+    const detail = err instanceof Error && err.message.trim().length > 0
+      ? `: ${err.message}`
+      : '';
+
+    res.status(500).json({ error: `Failed to open archive in file explorer${detail}` });
   }
 });
 
