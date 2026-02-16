@@ -6,6 +6,7 @@ import type { Task } from '@pi-factory/shared';
 import {
   canMoveToPhase,
   createTask as createTaskFile,
+  countTasksByScope,
   deleteTask,
   discoverTasks,
   moveTaskToPhase,
@@ -235,6 +236,73 @@ describe('discoverTasks scope filtering', () => {
 
     expect(activeOnly.map((task) => task.id)).toContain(activeTask.id);
     expect(activeOnly.map((task) => task.id)).not.toContain(archivedTask.id);
+  });
+
+  it('counts tasks by scope without loading full archived payloads', () => {
+    const { workspacePath, tasksDir } = createTempWorkspace();
+
+    const activeTask = createTaskFile(workspacePath, tasksDir, {
+      title: 'Active task',
+      content: 'active body',
+      acceptanceCriteria: ['done'],
+    });
+
+    const archivedTask = createTaskFile(workspacePath, tasksDir, {
+      title: 'Archived task',
+      content: 'archived body',
+      acceptanceCriteria: ['done'],
+    });
+
+    const allTasks = discoverTasks(tasksDir);
+    moveTaskToPhase(
+      allTasks.find((task) => task.id === archivedTask.id)!,
+      'archived',
+      'user',
+      'archive for count scope filtering',
+      allTasks,
+    );
+
+    expect(countTasksByScope(tasksDir, 'all')).toBe(2);
+    expect(countTasksByScope(tasksDir, 'active')).toBe(1);
+    expect(countTasksByScope(tasksDir, 'archived')).toBe(1);
+
+    const activeOnly = discoverTasks(tasksDir, { scope: 'active' });
+    expect(activeOnly.map((task) => task.id)).toContain(activeTask.id);
+    expect(activeOnly.map((task) => task.id)).not.toContain(archivedTask.id);
+  });
+
+  it('counts malformed archived tasks by phase header without parsing failures', () => {
+    const { workspacePath, tasksDir } = createTempWorkspace();
+
+    createTaskFile(workspacePath, tasksDir, {
+      title: 'Active task',
+      content: 'active body',
+      acceptanceCriteria: ['done'],
+    });
+
+    const malformedArchivedDir = join(tasksDir, 'broken-archived-task-count');
+    mkdirSync(malformedArchivedDir, { recursive: true });
+    writeFileSync(
+      join(malformedArchivedDir, 'task.yaml'),
+      [
+        'id: BROK-555',
+        'title: Broken archived task',
+        'phase: archived',
+        'description: |',
+        '  [this yaml is intentionally malformed',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      expect(countTasksByScope(tasksDir, 'active')).toBe(1);
+      expect(countTasksByScope(tasksDir, 'archived')).toBe(1);
+      expect(errorSpy).not.toHaveBeenCalled();
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });
 

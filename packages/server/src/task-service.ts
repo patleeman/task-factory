@@ -679,6 +679,55 @@ export function discoverTasks(tasksDir: string, options: DiscoverTasksOptions = 
   });
 }
 
+export function countTasksByScope(tasksDir: string, scope: TaskDiscoveryScope = 'all'): number {
+  if (!existsSync(tasksDir)) {
+    return 0;
+  }
+
+  const entries = readdirSync(tasksDir);
+  let count = 0;
+
+  for (const entry of entries) {
+    const entryPath = join(tasksDir, entry);
+
+    try {
+      const entryStat = statSync(entryPath);
+
+      if (!entryStat.isDirectory()) {
+        continue;
+      }
+
+      const yamlPath = join(entryPath, 'task.yaml');
+      if (!existsSync(yamlPath)) {
+        continue;
+      }
+
+      if (scope === 'all') {
+        parseTaskFile(yamlPath);
+        count += 1;
+        continue;
+      }
+
+      const phaseFromHeader = readTaskPhaseFromHeader(yamlPath);
+      if (phaseFromHeader) {
+        if (shouldIncludeTaskForScope(phaseFromHeader, scope)) {
+          count += 1;
+        }
+        continue;
+      }
+
+      const task = parseTaskFile(yamlPath);
+      if (shouldIncludeTaskForScope(task.frontmatter.phase, scope)) {
+        count += 1;
+      }
+    } catch (err) {
+      console.error(`Failed to count task entry: ${entry}`, err);
+    }
+  }
+
+  return count;
+}
+
 export function getTasksByPhase(tasks: Task[], phase: Phase): Task[] {
   return tasks.filter((t) => t.frontmatter.phase === phase);
 }

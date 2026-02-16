@@ -156,6 +156,20 @@ export const api = {
     }
     return res.json()
   },
+  async getArchivedTaskCount(workspaceId: string): Promise<number> {
+    const res = await fetch(`/api/workspaces/${workspaceId}/tasks/archived/count`)
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to load archived count' }))
+      throw new Error(err.error || `Failed to load archived count (${res.status})`)
+    }
+
+    const data = await res.json().catch(() => ({ archivedCount: 0 }))
+    const count = typeof data.archivedCount === 'number' && Number.isFinite(data.archivedCount)
+      ? data.archivedCount
+      : 0
+
+    return Math.max(0, Math.floor(count))
+  },
   async openArchiveInFileExplorer(workspaceId: string): Promise<void> {
     const res = await fetch(`/api/workspaces/${workspaceId}/archive/open-in-explorer`, {
       method: 'POST',

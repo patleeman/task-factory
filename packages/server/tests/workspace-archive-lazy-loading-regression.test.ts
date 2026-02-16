@@ -12,6 +12,12 @@ describe('workspace archive lazy loading regression checks', () => {
     expect(workspacePageSource).toContain("api.getTasks(workspaceId, 'active')");
   });
 
+  it('loads archived count on bootstrap and uses it in the pipeline bar before archive hydration', () => {
+    expect(workspacePageSource).toContain('api.getArchivedTaskCount(workspaceId)');
+    expect(workspacePageSource).toContain('const effectiveArchivedCount = archivedTasksLoaded');
+    expect(workspacePageSource).toContain('archivedCount={effectiveArchivedCount}');
+  });
+
   it('loads archived tasks through an explicit lazy loader', () => {
     expect(workspacePageSource).toContain("api.getTasks(workspaceId, 'archived')");
     expect(workspacePageSource).toContain('const loadArchivedTasksIfNeeded = useCallback(async');

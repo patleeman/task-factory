@@ -32,6 +32,7 @@ Canonical payload types live in `packages/shared/src/types.ts`.
 | Method | Path | Purpose | Success response | Common errors |
 |---|---|---|---|---|
 | GET | `/api/workspaces/:workspaceId/tasks?scope=all|active|archived` | List tasks by scope (`active` excludes archived tasks) | `Task[]` | `400` invalid scope, `404` workspace |
+| GET | `/api/workspaces/:workspaceId/tasks/archived/count` | Get archived-task count without loading archived payloads | `{ archivedCount: number }` | `404` workspace, `500` |
 | POST | `/api/workspaces/:workspaceId/tasks` | Create task | `Task` | `404`, `500` |
 | GET | `/api/workspaces/:workspaceId/tasks/:taskId` | Fetch one task | `Task` | `404` workspace/task, `500` |
 | PATCH | `/api/workspaces/:workspaceId/tasks/:taskId` | Update task fields | `Task` | `404`, `500` |

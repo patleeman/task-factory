@@ -34,6 +34,26 @@ function isExecutionStatusRunning(status: AgentExecutionStatus): boolean {
   return RUNNING_EXECUTION_STATUSES.has(status)
 }
 
+function getArchivedCountDelta(fromPhase: Phase | null | undefined, toPhase: Phase | null | undefined): number {
+  if (fromPhase !== 'archived' && toPhase === 'archived') {
+    return 1
+  }
+
+  if (fromPhase === 'archived' && toPhase !== 'archived') {
+    return -1
+  }
+
+  return 0
+}
+
+function clampArchivedCount(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 0
+  }
+
+  return Math.max(0, Math.floor(value))
+}
+
 function formatDraftTaskForNewTaskForm(draftTask: DraftTask): string {
   const sections: string[] = []
 
@@ -103,6 +123,7 @@ export function WorkspacePage() {
   const [factoryToggling, setFactoryToggling] = useState(false)
   const [archivedTasksLoaded, setArchivedTasksLoaded] = useState(false)
   const [archivedTasksLoading, setArchivedTasksLoading] = useState(false)
+  const [archivedTaskCount, setArchivedTaskCount] = useState(0)
   const [isOpeningArchiveInFileExplorer, setIsOpeningArchiveInFileExplorer] = useState(false)
   const toastTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
   const archivedLoadPromiseRef = useRef<Promise<void> | null>(null)
@@ -163,6 +184,9 @@ export function WorkspacePage() {
       new Date(b.frontmatter.updated).getTime() - new Date(a.frontmatter.updated).getTime()
     )
   const nonArchivedTasks = tasks.filter(t => t.frontmatter.phase !== 'archived')
+  const effectiveArchivedCount = archivedTasksLoaded
+    ? archivedTasks.length
+    : archivedTaskCount
   const runningTaskIds = runningExecutionTaskIds
   const awaitingTaskIds = awaitingInputTaskIds
   const awaitingInputCount = nonArchivedTasks.filter((task) => awaitingTaskIds.has(task.id)).length
@@ -225,6 +249,7 @@ export function WorkspacePage() {
     const loadPromise = api.getTasks(workspaceId, 'archived')
       .then((archivedTasksData) => {
         setTasks((prev) => mergeArchivedTasks(prev, archivedTasksData))
+        setArchivedTaskCount(clampArchivedCount(archivedTasksData.length))
         setArchivedTasksLoaded(true)
       })
       .catch((err) => {
@@ -334,11 +359,16 @@ export function WorkspacePage() {
     setAutomationSettings({ ...DEFAULT_WORKFLOW_SETTINGS })
     setArchivedTasksLoaded(false)
     setArchivedTasksLoading(false)
+    setArchivedTaskCount(0)
     archivedLoadPromiseRef.current = null
 
     Promise.all([
       api.getWorkspace(workspaceId),
       api.getTasks(workspaceId, 'active'),
+      api.getArchivedTaskCount(workspaceId).catch((err) => {
+        console.warn('Failed to load archived task count:', err)
+        return 0
+      }),
       api.getActivity(workspaceId, 100),
       api.getWorkflowAutomation(workspaceId),
       api.getPlanningMessages(workspaceId),
@@ -351,7 +381,7 @@ export function WorkspacePage() {
         return []
       }),
     ])
-      .then(([ws, tasksData, activityData, automationData, planningMsgs, ideaBacklogData, activeExecutions]) => {
+      .then(([ws, tasksData, archivedCount, activityData, automationData, planningMsgs, ideaBacklogData, activeExecutions]) => {
         const nextWipLimits = {
           ...(ws.config.wipLimits || {}),
         }
@@ -381,6 +411,7 @@ export function WorkspacePage() {
           },
         })
         setTasks(tasksData)
+        setArchivedTaskCount(clampArchivedCount(archivedCount))
         setActivity((prev) => {
           const byId = new Map<string, ActivityEntry>()
 
@@ -479,7 +510,7 @@ export function WorkspacePage() {
   useEffect(() => {
     return subscribe((msg) => {
       switch (msg.type) {
-        case 'task:created':
+        case 'task:created': {
           setTasks((prev) => {
             if (prev.some((t) => t.id === msg.task.id)) return prev
             if (msg.task.frontmatter.phase === 'archived' && !archivedTasksLoaded) {
@@ -488,7 +519,8 @@ export function WorkspacePage() {
             return [msg.task, ...prev]
           })
           break
-        case 'task:updated':
+        }
+        case 'task:updated': {
           setTasks((prev) => {
             const existingIndex = prev.findIndex((task) => task.id === msg.task.id)
             if (existingIndex === -1) {
@@ -503,7 +535,14 @@ export function WorkspacePage() {
             return updated
           })
           break
-        case 'task:moved':
+        }
+        case 'task:moved': {
+          const knownTask = tasksByIdRef.current.get(msg.task.id)
+          const delta = getArchivedCountDelta(knownTask?.frontmatter.phase ?? msg.from, msg.to)
+          if (delta !== 0) {
+            setArchivedTaskCount((prev) => clampArchivedCount(prev + delta))
+          }
+
           setTasks((prev) => {
             const existingIndex = prev.findIndex((task) => task.id === msg.task.id)
 
@@ -524,6 +563,7 @@ export function WorkspacePage() {
             return updated
           })
           break
+        }
         case 'task:plan_generated': {
           setTasks((prev) =>
             prev.map((t) =>
@@ -798,7 +838,15 @@ export function WorkspacePage() {
         updated: new Date().toISOString(),
       },
     }
+    const archivedDelta = getArchivedCountDelta(task.frontmatter.phase, toPhase)
+
     setTasks((prev) => prev.map((t) => (t.id === task.id ? updatedTask : t)))
+    tasksByIdRef.current.set(task.id, updatedTask)
+
+    if (archivedDelta !== 0) {
+      setArchivedTaskCount((prev) => clampArchivedCount(prev + archivedDelta))
+    }
+
     if (task.frontmatter.phase === 'executing' && toPhase !== 'executing') {
       setRunningExecutionTaskIds((prev) => {
         if (!prev.has(task.id)) return prev
@@ -822,9 +870,16 @@ export function WorkspacePage() {
         if (t.frontmatter.phase !== toPhase) return t
         return result
       }))
+      tasksByIdRef.current.set(task.id, result)
       return true
     } catch (err) {
       setTasks((prev) => prev.map((t) => (t.id === task.id ? task : t)))
+      tasksByIdRef.current.set(task.id, task)
+
+      if (archivedDelta !== 0) {
+        setArchivedTaskCount((prev) => clampArchivedCount(prev - archivedDelta))
+      }
+
       const message = err instanceof Error ? err.message : 'Failed to move task'
       setMoveError(message)
       showToast(message)
@@ -1253,15 +1308,28 @@ export function WorkspacePage() {
         updated: new Date().toISOString(),
       },
     }
+    const archivedDelta = getArchivedCountDelta(task.frontmatter.phase, optimisticTask.frontmatter.phase)
 
     setTasks((prev) => prev.map((candidate) => (candidate.id === targetTaskId ? optimisticTask : candidate)))
+    tasksByIdRef.current.set(targetTaskId, optimisticTask)
+
+    if (archivedDelta !== 0) {
+      setArchivedTaskCount((prev) => clampArchivedCount(prev + archivedDelta))
+    }
 
     try {
       const result = await api.moveTask(workspaceId, targetTaskId, 'complete', 'restore from archive')
       setTasks((prev) => prev.map((candidate) => (candidate.id === targetTaskId ? result : candidate)))
+      tasksByIdRef.current.set(targetTaskId, result)
       return true
     } catch (err) {
       setTasks((prev) => prev.map((candidate) => (candidate.id === targetTaskId ? task : candidate)))
+      tasksByIdRef.current.set(targetTaskId, task)
+
+      if (archivedDelta !== 0) {
+        setArchivedTaskCount((prev) => clampArchivedCount(prev - archivedDelta))
+      }
+
       if (!options?.silent) {
         const message = err instanceof Error ? err.message : 'Failed to restore archived task'
         showToast(message)
@@ -1277,9 +1345,16 @@ export function WorkspacePage() {
   ): Promise<boolean> => {
     if (!workspaceId) return false
 
+    const existingTask = tasksByIdRef.current.get(targetTaskId)
+
     try {
       await api.deleteTask(workspaceId, targetTaskId)
       setTasks((prev) => prev.filter((candidate) => candidate.id !== targetTaskId))
+      tasksByIdRef.current.delete(targetTaskId)
+
+      if (existingTask?.frontmatter.phase === 'archived') {
+        setArchivedTaskCount((prev) => clampArchivedCount(prev - 1))
+      }
 
       if (taskId === targetTaskId) {
         navigate(workspaceRootPath)
@@ -1703,7 +1778,7 @@ export function WorkspacePage() {
             onMoveTask={handleMoveTask}
             onReorderTasks={handleReorderTasks}
             onCreateTask={handleOpenNewTask}
-            archivedCount={archivedTasks.length}
+            archivedCount={effectiveArchivedCount}
             onOpenArchive={handleOpenArchive}
           />
         </div>

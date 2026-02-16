@@ -35,6 +35,7 @@ import {
   updateTask,
   moveTaskToPhase,
   discoverTasks,
+  countTasksByScope,
   canMoveToPhase,
   parseTaskFile,
   reorderTasks,
@@ -346,6 +347,27 @@ app.get('/api/workspaces/:id/tasks', async (req, res) => {
   const tasks = discoverTasks(tasksDir, { scope });
 
   res.json(tasks);
+});
+
+app.get('/api/workspaces/:id/tasks/archived/count', async (req, res) => {
+  const workspace = await getWorkspaceById(req.params.id);
+
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return;
+  }
+
+  try {
+    const tasksDir = getTasksDir(workspace);
+    const archivedCount = countTasksByScope(tasksDir, 'archived');
+    res.json({ archivedCount });
+  } catch (err) {
+    logger.error('Failed to count archived tasks', {
+      workspaceId: req.params.id,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
 });
 
 // Create task
