@@ -107,33 +107,43 @@ npm run check:release
 ## Feature gallery
 
 Provider setup supports all providers [pi supports](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/providers.md)
+
 ![Provider setup and login](docs/screenshots/provider_login.png)
 
 The agent can ask you questions using a multiple choice Q&A widget
+
 ![Question/answer flow in planning](docs/screenshots/qa.png)
 
 The foreman can generate visual artifacts 
+
 ![Artifacts generated during planning](docs/screenshots/artifacts.png)
 
 Customize skills 
+
 ![Customizable execution skills](docs/screenshots/customizable_skills.png)
 
 Then run those skills before or after tasks
+
 ![Task skill sequencing](docs/screenshots/task_skill_sequencing.png)
 
 Attach sketches via embedded excalidraw
+
 ![Embedded Excalidraw for visual intent](docs/screenshots/embedded_excalidraw.png)
 
 Tasks are archived and can be restored. Archived tasks contain all metadata including the full conversation
+
 ![Task archive and history](docs/screenshots/task_archive.png)
 
 After tasks are completed, a summary is generated to give you a quick overview over the completed work
+
 ![Task completion summary and criteria review](docs/screenshots/task_completion_summary.png)
 
 Track token usage and statistics on a per-task basis
+
 ![Task statistics and metrics](docs/screenshots/task_stats.png)
 
 Global voice dictation with a keyboard shortcut using the browser's Web Speech API
+
 ![Voice dictation support](docs/screenshots/voice_dictation.png)
 
 ## License
