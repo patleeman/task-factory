@@ -2,7 +2,6 @@
 
 Task Factory is a queue-first work orchestrator for AI coding agents, built on **[Pi](https://github.com/badlogic/pi-mono/tree/main)**.
 
-
 ## Philosophy
 
 Task Factory is designed around one idea: **the human is the bottleneck**.
@@ -31,6 +30,16 @@ This keeps agent output aligned to your review capacity and prevents overproduct
 Task Factory runs with Pi-style **YOLO mode** behavior (no permission popups/approval gates). Agents can execute tools and shell commands with your local user permissions.
 
 > ⚠️ **Security warning:** Task Factory currently has **no sandbox boundary**. Only run it on trusted repositories and in environments you control.
+
+## Foreman
+
+The foreman is a special agent scoped to a workspace that helps you plan tasks and can ideate with you.
+
+The foreman can:
+- Help you ideate and then break the task down that you can add to your queue.
+- Generate artifacts (web pages) to help give you a visual guide, design mockups, etc.
+
+If you need help coming up with ideas or using Task Factory, ask the Foreman.
 
 ## Installation
 
@@ -97,9 +106,9 @@ npm run check:release
 
 ## Feature gallery
 
-Additional screenshots for key workflows and capabilities:
-
+Provider setup supports all providers [pi supports](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/providers.md)
 ![Provider setup and login](docs/screenshots/provider_login.png)
+
 
 ![Question/answer flow in planning](docs/screenshots/qa.png)
 
