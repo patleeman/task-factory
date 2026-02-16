@@ -12,6 +12,12 @@ Task Factory is designed around one idea: **the human is the bottleneck**.
 
 Instead of juggling many half-finished agent runs, you stage work in a queue and let the system sequence it with explicit capacity limits. The goal is to maximize your throughput and reduce context switching.
 
+## Product preview
+
+![Idea backlog and queue sequencing](docs/screenshots/idea_backlog.png)
+
+![Task-level execution context and review](docs/screenshots/task_view.png)
+
 ## Core queue states (working flow)
 
 The active flow is intentionally simple:
@@ -143,6 +149,30 @@ By default Task Factory binds to loopback only; set `HOST=0.0.0.0` to intentiona
 npm run check:deadcode
 npm run check:release
 ```
+
+## Feature gallery
+
+Additional screenshots for key workflows and capabilities:
+
+![Provider setup and login](docs/screenshots/provider_login.png)
+
+![Question/answer flow in planning](docs/screenshots/qa.png)
+
+![Artifacts generated during planning](docs/screenshots/artifacts.png)
+
+![Customizable execution skills](docs/screenshots/customizable_skills.png)
+
+![Task skill sequencing](docs/screenshots/task_skill_sequencing.png)
+
+![Embedded Excalidraw for visual intent](docs/screenshots/embedded_excalidraw.png)
+
+![Task archive and history](docs/screenshots/task_archive.png)
+
+![Task completion summary and criteria review](docs/screenshots/task_completion_summary.png)
+
+![Task statistics and metrics](docs/screenshots/task_stats.png)
+
+![Voice dictation support](docs/screenshots/voice_dictation.png)
 
 ## License
 
