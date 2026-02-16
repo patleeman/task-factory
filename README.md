@@ -1,65 +1,95 @@
 # Task Factory
 
-Task Factory is a lean manufacturing-inspired task queue for AI coding agents, built on **Pi**.
+Task Factory is a queue-first work orchestrator for AI coding agents, built on **Pi**.
 
-It gives you a two-mode interface:
-- a **planning agent** for research and task decomposition
-- a **task pipeline** that executes work in controlled, trackable phases
+By default, Task Factory runs with Pi-style **YOLO mode** behavior (no permission popups/approval gates). Agents can execute tools and shell commands with your local user permissions.
 
-> ⚠️ **Important security note:** Task Factory is built on Pi and currently has **no sandboxing**.
-> Agents can run tools and commands with your user permissions. Only run it against trusted code/workspaces.
+> ⚠️ **Security warning:** Task Factory currently has **no sandbox boundary**. Only run it on trusted repositories and in environments you control.
 
-## How the application works
+## Why this exists
 
-### 1) Planning mode (Foreman)
-In planning mode, you chat with a planning agent to:
-- explore the codebase
-- break larger goals into smaller tasks
-- draft acceptance criteria and implementation plans
+Task Factory is designed around one idea: **the human is the bottleneck**.
 
-Planning output is saved to a **Shelf** as draft tasks and artifacts for review.
+Instead of juggling many half-finished agent runs, you stage work in a queue and let the system sequence it with explicit capacity limits. The goal is to maximize your throughput and reduce context switching.
 
-### 2) Shelf review
-The Shelf acts as a staging area for planning output:
-- **Draft tasks** can be promoted into the pipeline
-- **Artifacts** (e.g. HTML summaries) can be reviewed before execution
+## Core queue states (working flow)
 
-### 3) Task pipeline execution
-Tasks move left-to-right through phases:
+The active flow is intentionally simple:
 
-| Phase | Description |
+| State | Meaning |
 |---|---|
-| **Backlog** | New/unplanned tasks |
-| **Planning** | Plan generation in progress |
-| **Ready** | Planned and queued |
-| **Executing** | Agent actively working |
-| **Complete** | Finished |
-| **Archived** | Removed from active flow |
+| **Backlog** | Captured work/intent that is not yet queued to run |
+| **Ready** | Planned work that is approved and waiting for execution capacity |
+| **Executing** | Agent is actively implementing the task |
+| **Complete** | Execution finished; task is ready for review/rework/archive |
 
-### 4) Task mode
-Selecting a task switches to task mode, where you can:
-- inspect task details
-- chat with the task agent
-- monitor streaming progress, tool calls, and status updates
+`archived` also exists for historical storage, but the core day-to-day working queue is **backlog → ready → executing → complete**.
+
+> Planning is handled as task-level lifecycle/status (plan generation + criteria), not as a separate queue column.
+
+## Queue philosophy: pull, sequence, and WIP limits
+
+Task Factory uses pull-based flow:
+
+- Work is added to **backlog** as intents.
+- Tasks move to **ready** only when they are defined enough to execute.
+- The queue pulls from **ready** into **executing** when capacity is available.
+- WIP/concurrency limits constrain how many tasks can be staged or running at once (for example, one executing task at a time).
+
+This keeps agent output aligned to your review capacity and prevents overproduction.
+
+## Task-level context lifecycle (single-task encapsulation)
+
+Each task is the unit of context and traceability:
+
+1. **Original intent**
+   - Task description captures the problem/request in markdown.
+2. **Context aids**
+   - Attach files/images directly to the task.
+   - Add **Excalidraw** sketches to communicate intent visually.
+3. **Plan + acceptance criteria**
+   - A planning run generates a structured plan and testable acceptance criteria.
+4. **Execution history**
+   - Task chat/activity history shows what the agent did and why.
+5. **Completion review**
+   - Post-execution summary includes what changed, code-change evidence (file diffs), and acceptance-criteria validation (pass/fail/pending with evidence).
+
+## Workflow customization per task
+
+Each task can run ordered skills around main execution:
+
+- **Pre-execution hooks**: run before implementation (for setup, guardrails, quality gates, etc.).
+- **Post-execution hooks**: run after implementation (for quality checks, commit/push, PR workflows, reporting, etc.).
+
+These hooks are configurable per task so you can enforce the workflow your team wants.
 
 ## Prerequisites
 
 - Node.js **20+**
-- Pi configured locally (auth + model/provider setup in `~/.pi/agent/`)
+- npm
+- Git
+- Pi configured locally (`~/.pi/agent/` auth + model/provider setup)
 
 ## Installation
 
-### Option A: Install from npm (recommended)
+### Option A: npm global install
 
 ```bash
 npm install -g pi-factory
 ```
 
-This installs both CLI commands:
+This installs both CLI names:
+
 - `pifactory` (primary)
 - `pi-factory` (compatibility alias)
 
-### Option B: Install from source
+Run it:
+
+```bash
+pifactory
+```
+
+### Option B: run from source
 
 ```bash
 git clone https://github.com/patleeman/pi-factory.git
@@ -67,17 +97,26 @@ cd pi-factory
 npm install
 ```
 
-## Quickstart
+## Running from source
 
-### Start with the CLI
+### Production build
 
 ```bash
-pifactory
+npm run build
+npm start
 ```
 
-By default this starts the server and opens the app in your browser.
+Open `http://127.0.0.1:3000`.
 
-Useful options:
+### Development mode
+
+```bash
+npm run dev
+```
+
+This starts shared, server, and client in watch/dev mode.
+
+## Useful CLI options
 
 ```bash
 pifactory --help
@@ -87,84 +126,23 @@ PORT=8080 HOST=127.0.0.1 pifactory
 HOST=0.0.0.0 pifactory  # Expose on your network (explicit opt-in)
 ```
 
-### Start from source (production build)
-
-```bash
-npm run build
-npm start
-```
-
-Then open `http://localhost:3000`.
-
-### Development mode
-
-```bash
-npm run dev
-```
-
-## Quality checks
-
-Run dead-code/dependency cleanliness checks (Knip + Madge). The config treats repo `extensions/` extension entrypoints as dynamically loaded to avoid false positives from runtime extension loading:
-
-```bash
-npm run check:deadcode
-```
-
-Run the full release gate (lint, typecheck, tests, build, then cleanliness checks):
-
-```bash
-npm run check:release
-```
-
-## Configuration
-
-### Environment variables
+## Environment variables
 
 | Variable | Default | Description |
 |---|---|---|
 | `PORT` | `3000` | HTTP/WebSocket server port |
-| `HOST` | `127.0.0.1` | Bind host (set `HOST=0.0.0.0` to intentionally expose on your network) |
+| `HOST` | `127.0.0.1` | Server bind host |
 | `DEBUG` | _(unset)_ | Enable debug-level server logs when set to any non-empty value |
 | `PI_FACTORY_SERVER_LOG_PATH` | `~/.taskfactory/logs/server.jsonl` | Override server log file destination |
 
-By default, Task Factory listens only on loopback. Use a non-loopback `HOST` value only when you intentionally want remote access.
+By default Task Factory binds to loopback only; set `HOST=0.0.0.0` to intentionally expose on your network.
 
-### Server logging
+## Quality checks
 
-The server writes JSON log lines to both console output (`stdout`/`stderr`) and a local log file.
-
-- Default log file: `~/.taskfactory/logs/server.jsonl`
-- Custom log file: set `PI_FACTORY_SERVER_LOG_PATH`
-
-For troubleshooting, inspect or tail that file directly.
-
-## Keyboard shortcuts
-
-| Key | Action |
-|---|---|
-| `Esc` | Return to planning mode |
-| `⌘/Ctrl+K` | Focus chat input |
-
-## Built on Pi (and no sandboxing yet)
-
-Task Factory is built directly on the Pi coding-agent runtime and extension model.
-
-That means:
-- agent capabilities are powerful and flexible
-- but there is currently **no sandboxing boundary** in Task Factory
-- commands/tool calls execute with your local machine permissions
-
-Use trusted repositories, review task intent, and run in an environment you control.
-
-## Contributing
-
-We are currently **not accepting pull requests**.
-
-If you find a bug or have a feature request, please open a GitHub **Issue** with:
-- what you expected
-- what happened
-- steps to reproduce
-- logs/screenshots (if available)
+```bash
+npm run check:deadcode
+npm run check:release
+```
 
 ## License
 
