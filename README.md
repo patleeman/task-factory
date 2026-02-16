@@ -1,80 +1,36 @@
 # Task Factory
 
-Task Factory is a queue-first work orchestrator for AI coding agents, built on **Pi**.
+Task Factory is a queue-first work orchestrator for AI coding agents, built on **[Pi](https://github.com/badlogic/pi-mono/tree/main)**.
 
-By default, Task Factory runs with Pi-style **YOLO mode** behavior (no permission popups/approval gates). Agents can execute tools and shell commands with your local user permissions.
 
-> ⚠️ **Security warning:** Task Factory currently has **no sandbox boundary**. Only run it on trusted repositories and in environments you control.
-
-## Why this exists
+## Philosophy
 
 Task Factory is designed around one idea: **the human is the bottleneck**.
 
-Instead of juggling many half-finished agent runs, you stage work in a queue and let the system sequence it with explicit capacity limits. The goal is to maximize your throughput and reduce context switching.
+Instead of juggling many half-finished agent runs, you stage work in a queue and let the system sequence the work in order. Task factory's goal is to maximize your throughput, reduce context switching, and automate the completion of the task. 
 
-## Product preview
-
-![Idea backlog and queue sequencing](docs/screenshots/idea_backlog.png)
+You're left with creating the idea and checking the output.
 
 ![Task-level execution context and review](docs/screenshots/task_view.png)
 
-## Core queue states (working flow)
+![Idea backlog and queue sequencing](docs/screenshots/idea_backlog.png)
 
-The active flow is intentionally simple:
+## Workflow 
 
-| State | Meaning |
-|---|---|
-| **Backlog** | Captured work/intent that is not yet queued to run |
-| **Ready** | Planned work that is approved and waiting for execution capacity |
-| **Executing** | Agent is actively implementing the task |
-| **Complete** | Execution finished; task is ready for review/rework/archive |
+Task Factory has a fairly opinionated workflow. Tasks progress through stages:
 
-`archived` also exists for historical storage, but the core day-to-day working queue is **backlog → ready → executing → complete**.
-
-> Planning is handled as task-level lifecycle/status (plan generation + criteria), not as a separate queue column.
-
-## Queue philosophy: pull, sequence, and WIP limits
-
-Task Factory uses pull-based flow:
-
-- Work is added to **backlog** as intents.
-- Tasks move to **ready** only when they are defined enough to execute.
-- The queue pulls from **ready** into **executing** when capacity is available.
-- WIP/concurrency limits constrain how many tasks can be staged or running at once (for example, one executing task at a time).
+- **Backlog**: Tasks are staged in the backlog as an agent is run to generate a plan. You can review the plan before marking it as ready.
+- **Ready**: Once a task is ready for execution, place it in the ready queue, or let it Auto Promote from the backlog.
+- **Executing**: Tasks are executed one at a time by default (but that number is configurable). Pre and post execution skill are fired before and after the task is implemented.
+- **Completed**: Once in completed state, you can review the task before archiving it.
 
 This keeps agent output aligned to your review capacity and prevents overproduction.
 
-## Task-level context lifecycle (single-task encapsulation)
+## YOLO by default
 
-Each task is the unit of context and traceability:
+Task Factory runs with Pi-style **YOLO mode** behavior (no permission popups/approval gates). Agents can execute tools and shell commands with your local user permissions.
 
-1. **Original intent**
-   - Task description captures the problem/request in markdown.
-2. **Context aids**
-   - Attach files/images directly to the task.
-   - Add **Excalidraw** sketches to communicate intent visually.
-3. **Plan + acceptance criteria**
-   - A planning run generates a structured plan and testable acceptance criteria.
-4. **Execution history**
-   - Task chat/activity history shows what the agent did and why.
-5. **Completion review**
-   - Post-execution summary includes what changed, code-change evidence (file diffs), and acceptance-criteria validation (pass/fail/pending with evidence).
-
-## Workflow customization per task
-
-Each task can run ordered skills around main execution:
-
-- **Pre-execution hooks**: run before implementation (for setup, guardrails, quality gates, etc.).
-- **Post-execution hooks**: run after implementation (for quality checks, commit/push, PR workflows, reporting, etc.).
-
-These hooks are configurable per task so you can enforce the workflow your team wants.
-
-## Prerequisites
-
-- Node.js **20+**
-- npm
-- Git
-- Pi configured locally (`~/.pi/agent/` auth + model/provider setup)
+> ⚠️ **Security warning:** Task Factory currently has **no sandbox boundary**. Only run it on trusted repositories and in environments you control.
 
 ## Installation
 
@@ -131,17 +87,6 @@ pifactory --no-open
 PORT=8080 HOST=127.0.0.1 pifactory
 HOST=0.0.0.0 pifactory  # Expose on your network (explicit opt-in)
 ```
-
-## Environment variables
-
-| Variable | Default | Description |
-|---|---|---|
-| `PORT` | `3000` | HTTP/WebSocket server port |
-| `HOST` | `127.0.0.1` | Server bind host |
-| `DEBUG` | _(unset)_ | Enable debug-level server logs when set to any non-empty value |
-| `PI_FACTORY_SERVER_LOG_PATH` | `~/.taskfactory/logs/server.jsonl` | Override server log file destination |
-
-By default Task Factory binds to loopback only; set `HOST=0.0.0.0` to intentionally expose on your network.
 
 ## Quality checks
 
