@@ -97,7 +97,7 @@ class QueueManager {
 
     if (workspace) {
       const tasksDir = getTasksDir(workspace);
-      const tasks = discoverTasks(tasksDir);
+      const tasks = discoverTasks(tasksDir, { scope: 'active' });
       tasksInReady = tasks.filter(t => t.frontmatter.phase === 'ready').length;
       tasksInExecuting = tasks.filter(t => t.frontmatter.phase === 'executing').length;
     }
@@ -487,7 +487,7 @@ export async function getQueueStatus(workspaceId: string): Promise<QueueStatus> 
 
   if (workspace) {
     const tasksDir = getTasksDir(workspace);
-    const tasks = discoverTasks(tasksDir);
+    const tasks = discoverTasks(tasksDir, { scope: 'active' });
     tasksInReady = tasks.filter(t => t.frontmatter.phase === 'ready').length;
     tasksInExecuting = tasks.filter(t => t.frontmatter.phase === 'executing').length;
 

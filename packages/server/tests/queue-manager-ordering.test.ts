@@ -676,4 +676,80 @@ describe('queue manager ordering', () => {
 
     await stopQueueProcessing(workspace.id);
   });
+
+  it('uses active-scope discovery for queue status when no manager is running', async () => {
+    const workspace = createWorkspace(1);
+    workspace.config.workflowAutomation.readyToExecuting = true;
+
+    const activeTasks = [
+      createTask('TASK-READY', 'ready', 0, '2025-01-01T00:00:00.000Z'),
+      createTask('TASK-EXECUTING', 'executing', 1, '2025-01-01T00:00:05.000Z'),
+    ];
+    const archivedTask = createTask('TASK-ARCHIVED', 'archived', 2, '2025-01-01T00:00:10.000Z');
+
+    getWorkspaceByIdMock.mockImplementation(async () => workspace);
+    discoverTasksMock.mockImplementation((_tasksDir: string, options?: { scope?: string }) => {
+      if (options?.scope === 'active') {
+        return activeTasks;
+      }
+      return [...activeTasks, archivedTask];
+    });
+
+    const { getQueueStatus } = await import('../src/queue-manager.js');
+
+    const status = await getQueueStatus(workspace.id);
+
+    expect(discoverTasksMock).toHaveBeenCalledWith('/tmp/tasks', { scope: 'active' });
+    expect(status).toEqual({
+      workspaceId: workspace.id,
+      enabled: true,
+      currentTaskId: null,
+      tasksInReady: 1,
+      tasksInExecuting: 1,
+    });
+  });
+
+  it('uses active-scope discovery for queue status when a manager is running', async () => {
+    const workspace = createWorkspace(1);
+
+    const activeTasks = [
+      createTask('TASK-READY', 'ready', 0, '2025-01-01T00:00:00.000Z'),
+      createTask('TASK-EXECUTING', 'executing', 1, '2025-01-01T00:00:05.000Z'),
+    ];
+    const archivedTask = createTask('TASK-ARCHIVED', 'archived', 2, '2025-01-01T00:00:10.000Z');
+
+    getWorkspaceByIdMock.mockImplementation(async () => workspace);
+    hasLiveExecutionSessionMock.mockImplementation((taskId: string) => taskId === 'TASK-EXECUTING');
+    discoverTasksMock.mockImplementation((_tasksDir: string, options?: { scope?: string }) => {
+      if (options?.scope === 'active') {
+        return activeTasks;
+      }
+      return [...activeTasks, archivedTask];
+    });
+
+    const { startQueueProcessing, stopQueueProcessing, getQueueStatus } = await import('../src/queue-manager.js');
+
+    const startStatus = await startQueueProcessing(workspace.id, () => {}, { persist: false });
+    const runningStatus = await getQueueStatus(workspace.id);
+
+    const activeScopeCalls = discoverTasksMock.mock.calls.filter((call) => call[1]?.scope === 'active');
+
+    expect(activeScopeCalls.length).toBeGreaterThan(0);
+    expect(startStatus).toEqual({
+      workspaceId: workspace.id,
+      enabled: true,
+      currentTaskId: null,
+      tasksInReady: 1,
+      tasksInExecuting: 1,
+    });
+    expect(runningStatus).toEqual({
+      workspaceId: workspace.id,
+      enabled: true,
+      currentTaskId: null,
+      tasksInReady: 1,
+      tasksInExecuting: 1,
+    });
+
+    await stopQueueProcessing(workspace.id, { persist: false });
+  });
 });
