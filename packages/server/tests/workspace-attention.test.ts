@@ -46,4 +46,33 @@ describe('buildWorkspaceAttentionSummary', () => {
       { workspaceId: 'ws-b', awaitingInputCount: 0 },
     ]);
   });
+
+  it('preserves counts when active phase maps omit many archived tasks', () => {
+    const phaseByWorkspace = new Map<string, Map<string, Phase>>([
+      ['ws-a', new Map<string, Phase>([
+        ['PIFA-1', 'executing'],
+        ['PIFA-2', 'ready'],
+      ])],
+    ]);
+
+    const archivedSessions = Array.from({ length: 500 }, (_value, index) => ({
+      workspaceId: 'ws-a',
+      taskId: `PIFA-A-${index + 1}`,
+      awaitingUserInput: true,
+    }));
+
+    const summary = buildWorkspaceAttentionSummary(
+      ['ws-a'],
+      phaseByWorkspace,
+      [
+        { workspaceId: 'ws-a', taskId: 'PIFA-1', awaitingUserInput: true },
+        { workspaceId: 'ws-a', taskId: 'PIFA-2', awaitingUserInput: true },
+        ...archivedSessions,
+      ],
+    );
+
+    expect(summary).toEqual([
+      { workspaceId: 'ws-a', awaitingInputCount: 1 },
+    ]);
+  });
 });

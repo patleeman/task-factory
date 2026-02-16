@@ -197,7 +197,7 @@ app.get('/api/workspaces/attention', async (_req, res) => {
       const phaseByTask = new Map<string, Phase>();
 
       try {
-        const tasks = discoverTasks(getTasksDir(workspace));
+        const tasks = discoverTasks(getTasksDir(workspace), { scope: 'active' });
         for (const task of tasks) {
           phaseByTask.set(task.id, task.frontmatter.phase);
         }
