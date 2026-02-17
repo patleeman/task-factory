@@ -16,7 +16,7 @@ Primary code paths:
 2. `planning-agent-service` gets/creates a workspace planning session.
 3. Service builds the Foreman system prompt (`buildPlanningSystemPrompt`) and prepends the state contract (`mode=foreman`).
 4. Foreman-scoped extensions run through callback bridges:
-   - `create_draft_task`, `create_artifact`, `manage_shelf`
+   - `create_draft_task`, `create_artifact`
    - `manage_new_task`
    - `factory_control`
    - `ask_questions`

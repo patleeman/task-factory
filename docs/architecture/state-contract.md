@@ -22,7 +22,7 @@ The server injects this as `<state_contract version="2">...</state_contract>` on
 
 | Mode | Meaning | Allowed | Forbidden | Completion rule |
 |---|---|---|---|---|
-| `foreman` | Workspace planning agent | `read`, `bash`, `web_search`, `web_fetch`, `ask_questions`, `create_draft_task`, `create_artifact`, `manage_shelf`, `manage_new_task`, `factory_control` | `edit`, `write`, `save_plan`, `task_complete` | Provide planning output and stop unless asked for more. |
+| `foreman` | Workspace planning agent | `read`, `bash`, `web_search`, `web_fetch`, `ask_questions`, `create_draft_task`, `create_artifact`, `manage_new_task`, `factory_control` | `edit`, `write`, `save_plan`, `task_complete` | Provide planning output and stop unless asked for more. |
 | `task_planning` | Task-level planning run | `read`, `bash`, `save_plan` | `edit`, `write`, `task_complete`, `web_search`, `web_fetch` | Call `save_plan` exactly once, then stop. |
 | `task_execution` | Task implementation run | `read`, `bash`, `edit`, `write`, `task_complete`, `attach_task_file` | `save_plan`, `web_search`, `web_fetch` | Call `task_complete` only when done. |
 | `task_complete` | Post-completion chat/rework | `read`, `bash`, `edit`, `write`, `attach_task_file` | `save_plan`, `task_complete`, `web_search`, `web_fetch` | Respond conversationally; do not call lifecycle tools. |

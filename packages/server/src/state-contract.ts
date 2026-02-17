@@ -44,7 +44,6 @@ const MODE_CONTRACTS: Record<AgentMode, ModeContract> = {
       'ask_questions',
       'create_draft_task',
       'create_artifact',
-      'manage_shelf',
       'manage_new_task',
       'factory_control',
     ],

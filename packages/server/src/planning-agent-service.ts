@@ -857,13 +857,6 @@ Parameters:
 Read or update the New Task form when it is open.
 Use this after the user opens a draft from chat, so you can iteratively refine the task content together.
 
-### manage_shelf
-List/remove/update session-scoped output items (legacy tool name).
-Parameters:
-- action (string): "list" | "remove" | "update"
-- item_id (string, optional): ID of the item (required for remove/update)
-- updates (object, optional): Draft update fields (title, content, acceptance_criteria)
-
 ### factory_control
 Start, stop, or check the status of the factory queue (the execution pipeline that processes tasks).
 Parameters:
