@@ -456,6 +456,12 @@ export function saveWorkspacePiConfig(workspaceId: string, config: WorkspacePiCo
 // Foreman Settings (per-workspace)
 // =============================================================================
 
+function isValidModelConfig(value: unknown): value is ForemanSettings['modelConfig'] {
+  if (!value || typeof value !== 'object') return false;
+  const config = value as Record<string, unknown>;
+  return typeof config.provider === 'string' && typeof config.modelId === 'string';
+}
+
 export function loadForemanSettings(workspaceId: string): ForemanSettings {
   const settingsPath = join(PI_FACTORY_DIR, 'workspaces', workspaceId, 'foreman-settings.json');
   
@@ -465,7 +471,23 @@ export function loadForemanSettings(workspaceId: string): ForemanSettings {
 
   try {
     const content = readFileSync(settingsPath, 'utf-8');
-    return JSON.parse(content);
+    const parsed = JSON.parse(content);
+    
+    // Validate the parsed object
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      console.warn(`[ForemanSettings] Invalid settings file for workspace ${workspaceId}, returning defaults`);
+      return {};
+    }
+    
+    // Validate modelConfig if present
+    if (parsed.modelConfig !== undefined && parsed.modelConfig !== null) {
+      if (!isValidModelConfig(parsed.modelConfig)) {
+        console.warn(`[ForemanSettings] Invalid modelConfig for workspace ${workspaceId}, ignoring`);
+        parsed.modelConfig = undefined;
+      }
+    }
+    
+    return parsed as ForemanSettings;
   } catch (err) {
     console.error(`Failed to load foreman settings for workspace ${workspaceId}:`, err);
     return {};

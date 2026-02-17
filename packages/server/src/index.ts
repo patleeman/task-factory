@@ -1495,12 +1495,28 @@ app.get('/api/workspaces/:workspaceId/foreman-model', (req, res) => {
   res.json({ modelConfig: settings.modelConfig ?? null });
 });
 
+// Validate that a modelConfig has required fields
+function isValidModelConfig(value: unknown): value is ModelConfig {
+  if (!value || typeof value !== 'object') return false;
+  const config = value as Record<string, unknown>;
+  return typeof config.provider === 'string' && typeof config.modelId === 'string';
+}
+
 // Save foreman model configuration
 app.put('/api/workspaces/:workspaceId/foreman-model', (req, res) => {
   try {
-    const body = req.body as { modelConfig?: ModelConfig | null };
+    const body = req.body as { modelConfig?: unknown };
+    
+    // Validate the modelConfig if provided
+    if (body.modelConfig !== undefined && body.modelConfig !== null) {
+      if (!isValidModelConfig(body.modelConfig)) {
+        res.status(400).json({ error: 'Invalid modelConfig: must include provider (string) and modelId (string)' });
+        return;
+      }
+    }
+    
     const settings = loadForemanSettings(req.params.workspaceId);
-    settings.modelConfig = body.modelConfig ?? undefined;
+    settings.modelConfig = (body.modelConfig as ModelConfig | null) ?? undefined;
     saveForemanSettings(req.params.workspaceId, settings);
     res.json({ modelConfig: settings.modelConfig ?? null });
   } catch (err) {

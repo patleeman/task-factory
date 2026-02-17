@@ -687,6 +687,8 @@ async function getOrCreateSession(
       const resolved = modelRegistry.find(mc.provider, mc.modelId);
       if (resolved) {
         sessionOpts.model = resolved;
+      } else {
+        console.warn(`[PlanningAgent] Configured model ${mc.provider}/${mc.modelId} not found, using default`);
       }
       if (mc.thinkingLevel) {
         sessionOpts.thinkingLevel = mc.thinkingLevel;
@@ -1380,6 +1382,8 @@ async function sendToAgent(
             const resolved = modelRegistry.find(mc.provider, mc.modelId);
             if (resolved) {
               sessionOpts.model = resolved;
+            } else {
+              console.warn(`[PlanningAgent] Configured model ${mc.provider}/${mc.modelId} not found, using default`);
             }
             if (mc.thinkingLevel) {
               sessionOpts.thinkingLevel = mc.thinkingLevel;
