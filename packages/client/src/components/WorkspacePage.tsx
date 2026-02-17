@@ -3,7 +3,7 @@ import { ArrowLeft, Lightbulb, Plus, Power } from 'lucide-react'
 import { useParams, useNavigate, useMatch, useOutletContext } from 'react-router-dom'
 import type { Task, Workspace, ActivityEntry, Phase, QueueStatus, PlanningMessage, QAAnswer, AgentExecutionStatus, WorkspaceWorkflowSettings, Artifact, DraftTask, IdeaBacklog, IdeaBacklogItem, NewTaskFormState } from '@task-factory/shared'
 import { DEFAULT_WORKFLOW_SETTINGS } from '@task-factory/shared'
-import { api, type WorkflowAutomationResponse } from '../api'
+import { api, type WorkflowAutomationResponse, type WorkspaceSkill } from '../api'
 import { AppIcon } from './AppIcon'
 import { PipelineBar } from './PipelineBar'
 import { TaskDetailPane } from './TaskDetailPane'
@@ -19,7 +19,7 @@ import { usePlanningStreaming, PLANNING_TASK_ID } from '../hooks/usePlanningStre
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts'
 import { useForemanModel } from '../hooks/useForemanModel'
 import { DEFAULT_VOICE_INPUT_HOTKEY, normalizeVoiceInputHotkey } from '../voiceHotkey'
-import { TaskChat } from './TaskChat'
+import { TaskChat, type SlashCommandOption } from './TaskChat'
 import { QADialog } from './QADialog'
 import { isFactoryRunningState, syncAutomationSettingsWithQueue } from './workflow-automation'
 
@@ -31,6 +31,33 @@ const RUNNING_EXECUTION_STATUSES = new Set<AgentExecutionStatus>([
   'thinking',
   'post-hooks',
 ])
+
+const BASE_FOREMAN_SLASH_COMMANDS: SlashCommandOption[] = [
+  { command: '/new', description: 'Reset the planning conversation' },
+  { command: '/help', description: 'Show supported slash commands' },
+]
+
+function buildForemanSlashCommands(skills: WorkspaceSkill[]): SlashCommandOption[] {
+  const commands = [...BASE_FOREMAN_SLASH_COMMANDS]
+
+  const sortedSkills = [...skills].sort((a, b) => a.id.localeCompare(b.id))
+  for (const skill of sortedSkills) {
+    const description = skill.description.trim() || `Run skill ${skill.name}`
+    commands.push({
+      command: `/skill:${skill.id}`,
+      description,
+    })
+  }
+
+  if (sortedSkills.length === 0) {
+    commands.push({
+      command: '/skill:<name>',
+      description: 'Run a loaded skill command',
+    })
+  }
+
+  return commands
+}
 
 function isExecutionStatusRunning(status: AgentExecutionStatus): boolean {
   return RUNNING_EXECUTION_STATUSES.has(status)
@@ -135,6 +162,7 @@ export function WorkspacePage() {
   const [ideaBacklog, setIdeaBacklog] = useState<IdeaBacklog | null>(null)
   const [activeForemanPane, setActiveForemanPane] = useState<'workspace' | 'ideas'>('workspace')
   const [planningMessages, setPlanningMessages] = useState<PlanningMessage[]>([])
+  const [foremanSlashCommands, setForemanSlashCommands] = useState<SlashCommandOption[]>(BASE_FOREMAN_SLASH_COMMANDS)
   const [agentTaskFormUpdates, setAgentTaskFormUpdates] = useState<Partial<NewTaskFormState> | null>(null)
   const [newTaskPrefill, setNewTaskPrefill] = useState<{ id: string; formState: Partial<NewTaskFormState>; sourceDraftId?: string } | null>(null)
   const [draftTaskStates, setDraftTaskStates] = useState<Record<string, { status: 'created' | 'dismissed'; taskId?: string }>>({})
@@ -346,6 +374,7 @@ export function WorkspacePage() {
     setSelectedArtifact(null)
     setIdeaBacklog(null)
     setActiveForemanPane('workspace')
+    setForemanSlashCommands(BASE_FOREMAN_SLASH_COMMANDS)
     setAgentTaskFormUpdates(null)
     setNewTaskPrefill(null)
     setDraftTaskStates({})
@@ -375,6 +404,10 @@ export function WorkspacePage() {
       api.getActivity(workspaceId, 100),
       api.getWorkflowAutomation(workspaceId),
       api.getPlanningMessages(workspaceId),
+      api.getWorkspaceSkills(workspaceId).catch((err) => {
+        console.warn('Failed to load workspace skills:', err)
+        return []
+      }),
       api.getIdeaBacklog(workspaceId).catch((err) => {
         console.warn('Failed to load idea backlog:', err)
         return { items: [] }
@@ -384,7 +417,7 @@ export function WorkspacePage() {
         return []
       }),
     ])
-      .then(([ws, tasksData, archivedCount, activityData, automationData, planningMsgs, ideaBacklogData, activeExecutions]) => {
+      .then(([ws, tasksData, archivedCount, activityData, automationData, planningMsgs, workspaceSkills, ideaBacklogData, activeExecutions]) => {
         const nextWipLimits = {
           ...(ws.config.wipLimits || {}),
         }
@@ -437,6 +470,7 @@ export function WorkspacePage() {
         setAutomationSettings(automationData.effective)
         setQueueStatus(automationData.queueStatus)
         setPlanningMessages(planningMsgs)
+        setForemanSlashCommands(buildForemanSlashCommands(workspaceSkills))
         setIdeaBacklog(ideaBacklogData)
 
         const tasksById = new Map(tasksData.map((task) => [task.id, task]))
@@ -1635,6 +1669,7 @@ export function WorkspacePage() {
                 onReset={handleResetPlanning}
                 title="Foreman"
                 emptyState={{ title: 'Foreman', subtitle: 'Ask me to research, plan, or decompose work into tasks. Try /help for slash commands.' }}
+                slashCommands={foremanSlashCommands}
                 headerSlot={
                   <ModelSelector
                     value={foremanModelConfig ?? undefined}

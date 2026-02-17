@@ -120,6 +120,12 @@ export interface WorkflowAutomationUpdate {
   executingLimit?: number | null
 }
 
+export interface WorkspaceSkill {
+  id: string
+  name: string
+  description: string
+}
+
 export const api = {
   async getWorkspaces(): Promise<Workspace[]> {
     const res = await fetch('/api/workspaces')
@@ -545,6 +551,38 @@ export const api = {
   // ─────────────────────────────────────────────────────────────────────────
   // Planning Agent
   // ─────────────────────────────────────────────────────────────────────────
+
+  async getWorkspaceSkills(workspaceId: string): Promise<WorkspaceSkill[]> {
+    const res = await fetch(`/api/workspaces/${workspaceId}/skills`)
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to load skills' }))
+      throw new Error(err.error || `Failed to load skills (${res.status})`)
+    }
+
+    const data = await res.json().catch(() => [])
+    if (!Array.isArray(data)) return []
+
+    return data
+      .map((skill): WorkspaceSkill | null => {
+        if (!skill || typeof skill !== 'object') return null
+        const raw = skill as Record<string, unknown>
+        if (typeof raw.id !== 'string') return null
+
+        const name = typeof raw.name === 'string' && raw.name.trim().length > 0
+          ? raw.name.trim()
+          : raw.id
+        const description = typeof raw.description === 'string'
+          ? raw.description.trim()
+          : ''
+
+        return {
+          id: raw.id,
+          name,
+          description,
+        }
+      })
+      .filter((skill): skill is WorkspaceSkill => skill !== null)
+  },
 
   async sendPlanningMessage(workspaceId: string, content: string, attachmentIds?: string[]): Promise<void> {
     const res = await fetch(`/api/workspaces/${workspaceId}/planning/message`, {

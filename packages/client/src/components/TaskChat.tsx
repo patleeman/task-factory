@@ -22,6 +22,11 @@ const REMARK_PLUGINS = [remarkGfm]
 
 type SendMode = 'message' | 'steer' | 'followUp'
 
+export interface SlashCommandOption {
+  command: string
+  description: string
+}
+
 interface TaskChatProps {
   taskId?: string
   taskPhase?: Phase
@@ -44,6 +49,8 @@ interface TaskChatProps {
   getAttachmentUrl?: (storedName: string) => string
   title?: string
   emptyState?: { title: string; subtitle: string }
+  /** Optional slash command options for autocomplete in the composer. */
+  slashCommands?: SlashCommandOption[]
   /** Optional element rendered in the header bar, next to reset button */
   headerSlot?: React.ReactNode
   /** Optional element rendered above the input area (e.g. QADialog) */
@@ -654,6 +661,7 @@ export function TaskChat({
   getAttachmentUrl: getAttachmentUrlProp,
   title,
   emptyState,
+  slashCommands,
   headerSlot,
   bottomSlot,
   onOpenArtifact,
@@ -669,6 +677,7 @@ export function TaskChat({
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
   const [isUploading, setIsUploading] = useState(false)
   const [isDragOver, setIsDragOver] = useState(false)
+  const [selectedSlashCommandIndex, setSelectedSlashCommandIndex] = useState(0)
   const [attachmentPreview, setAttachmentPreview] = useState<{ url: string; filename: string } | null>(null)
   const [isWhiteboardModalOpen, setIsWhiteboardModalOpen] = useState(false)
   const [initialWhiteboardScene, setInitialWhiteboardScene] = useState<WhiteboardSceneSnapshot | null>(null)
@@ -752,6 +761,75 @@ export function TaskChat({
     : null
   const showControlRow = showSteerControls || showStopControl
   const hasBottomSlot = !!bottomSlot
+
+  const normalizedSlashCommands = useMemo(() => {
+    if (!slashCommands || slashCommands.length === 0) {
+      return []
+    }
+
+    const deduped = new Map<string, SlashCommandOption>()
+    for (const option of slashCommands) {
+      const command = option.command.trim()
+      if (!command.startsWith('/')) continue
+
+      if (!deduped.has(command)) {
+        deduped.set(command, {
+          command,
+          description: option.description.trim(),
+        })
+      }
+    }
+
+    return Array.from(deduped.values())
+  }, [slashCommands])
+
+  const slashAutocomplete = useMemo(() => {
+    if (normalizedSlashCommands.length === 0) {
+      return { visible: false, suggestions: [] as SlashCommandOption[] }
+    }
+
+    const trimmedStart = input.trimStart()
+    if (!trimmedStart.startsWith('/')) {
+      return { visible: false, suggestions: [] as SlashCommandOption[] }
+    }
+
+    const token = trimmedStart.split(/\s+/u)[0] || ''
+    if (!token.startsWith('/')) {
+      return { visible: false, suggestions: [] as SlashCommandOption[] }
+    }
+
+    const hasArguments = trimmedStart.length > token.length && /\s/u.test(trimmedStart.charAt(token.length))
+    if (hasArguments) {
+      return { visible: false, suggestions: [] as SlashCommandOption[] }
+    }
+
+    const tokenLower = token.toLowerCase()
+    const suggestions = normalizedSlashCommands
+      .filter((option) => {
+        const optionCommand = option.command.toLowerCase()
+
+        if (optionCommand.startsWith(tokenLower)) {
+          return true
+        }
+
+        if (tokenLower.startsWith('/skill:') && optionCommand.startsWith('/skill:')) {
+          const typedSkill = tokenLower.slice('/skill:'.length)
+          const candidateSkill = optionCommand.slice('/skill:'.length)
+          return typedSkill.length === 0 || candidateSkill.startsWith(typedSkill)
+        }
+
+        return false
+      })
+      .slice(0, 8)
+
+    return {
+      visible: suggestions.length > 0,
+      suggestions,
+    }
+  }, [input, normalizedSlashCommands])
+
+  const slashSuggestions = slashAutocomplete.suggestions
+  const showSlashAutocomplete = slashAutocomplete.visible
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
     const scroller = scrollRef.current
@@ -848,6 +926,18 @@ export function TaskChat({
   useEffect(() => {
     resizeComposer()
   }, [input, resizeComposer])
+
+  useEffect(() => {
+    if (!showSlashAutocomplete) {
+      setSelectedSlashCommandIndex(0)
+      return
+    }
+
+    setSelectedSlashCommandIndex((prev) => {
+      if (slashSuggestions.length === 0) return 0
+      return Math.min(prev, slashSuggestions.length - 1)
+    })
+  }, [showSlashAutocomplete, slashSuggestions.length])
 
   useEffect(() => {
     return scheduleScrollToBottom()
@@ -954,6 +1044,25 @@ export function TaskChat({
     setIsDragOver(false)
   }, [canUploadFiles])
 
+  const applySlashCommand = useCallback((command: string) => {
+    const trimmedStart = input.trimStart()
+    const leadingWhitespace = input.slice(0, input.length - trimmedStart.length)
+    const suffix = command.startsWith('/skill:') ? ' ' : ''
+    const nextValue = `${leadingWhitespace}${command}${suffix}`
+
+    setInput(nextValue)
+    setSelectedSlashCommandIndex(0)
+
+    requestAnimationFrame(() => {
+      const textarea = textareaRef.current
+      if (!textarea) return
+      textarea.focus()
+      const cursorPosition = nextValue.length
+      textarea.setSelectionRange(cursorPosition, cursorPosition)
+      resizeComposer()
+    })
+  }, [input, resizeComposer])
+
   const handleSend = async (modeOverride?: SendMode) => {
     clearVoiceHotkeyReleaseTimer()
     dictationStartedForCurrentPressRef.current = false
@@ -1057,6 +1166,30 @@ export function TaskChat({
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (isComposing) return
+
+    if (showSlashAutocomplete && slashSuggestions.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setSelectedSlashCommandIndex((prev) => (prev + 1) % slashSuggestions.length)
+        return
+      }
+
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setSelectedSlashCommandIndex((prev) => (prev - 1 + slashSuggestions.length) % slashSuggestions.length)
+        return
+      }
+
+      if (e.key === 'Tab') {
+        e.preventDefault()
+        const selectedCommand = slashSuggestions[selectedSlashCommandIndex]
+        if (selectedCommand) {
+          applySlashCommand(selectedCommand.command)
+        }
+        return
+      }
+    }
+
     if (e.key === 'Enter' && !e.shiftKey && !e.altKey) {
       e.preventDefault()
       void handleSend()
@@ -1441,6 +1574,34 @@ export function TaskChat({
             <p className="text-xs text-red-600" role="status">
               {dictationError}
             </p>
+          </div>
+        )}
+
+        {showSlashAutocomplete && (
+          <div className="mx-3 mt-2 mb-0.5 rounded-md border border-slate-200 bg-white shadow-sm overflow-hidden" role="listbox" aria-label="Slash command suggestions">
+            <div className="px-2 py-1 text-[10px] text-slate-400 font-mono border-b border-slate-100">
+              slash commands · tab to autocomplete
+            </div>
+            <div className="max-h-48 overflow-y-auto">
+              {slashSuggestions.map((option, index) => (
+                <button
+                  key={option.command}
+                  type="button"
+                  role="option"
+                  aria-selected={index === selectedSlashCommandIndex}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => applySlashCommand(option.command)}
+                  className={`w-full text-left px-2 py-1.5 transition-colors ${
+                    index === selectedSlashCommandIndex
+                      ? 'bg-slate-100'
+                      : 'hover:bg-slate-50'
+                  }`}
+                >
+                  <div className="text-xs font-mono text-slate-700">{option.command}</div>
+                  <div className="text-[11px] text-slate-500 truncate">{option.description}</div>
+                </button>
+              ))}
+            </div>
           </div>
         )}
 
