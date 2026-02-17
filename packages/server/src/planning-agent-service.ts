@@ -38,7 +38,7 @@ import {
 import { getWorkspaceById } from './workspace-service.js';
 import { discoverTasks } from './task-service.js';
 import { getTasksDir } from './workspace-service.js';
-import { getRepoExtensionPaths } from './agent-execution-service.js';
+import { getRepoExtensionPaths, hasLiveExecutionSession } from './agent-execution-service.js';
 import {
   loadWorkspaceSharedContext,
   WORKSPACE_SHARED_CONTEXT_REL_PATH,
@@ -703,8 +703,8 @@ async function getOrCreateSession(
     registerShelfCallbacks(workspaceId, broadcast, () => planningSessions.get(workspaceId));
     registerFactoryControlCallbacks(workspaceId, broadcast);
     registerQACallbacks(workspaceId, broadcast, () => planningSessions.get(workspaceId));
-    registerTaskCallbacks(workspaceId);
-    registerMessageAgentCallbacks(workspaceId, broadcast);
+    await registerTaskCallbacks(workspaceId);
+    await registerMessageAgentCallbacks(workspaceId, broadcast);
     registerCreateSkillCallbacks(workspaceId);
     registerCreateExtensionCallbacks(workspaceId);
 
@@ -1724,8 +1724,8 @@ function getDemotePhase(phase: string): string | null {
   return flow[phase] || null;
 }
 
-function registerTaskCallbacks(workspaceId: string): void {
-  const workspace = getWorkspaceById(workspaceId);
+async function registerTaskCallbacks(workspaceId: string): Promise<void> {
+  const workspace = await getWorkspaceById(workspaceId);
   if (!workspace) return;
 
   ensureTaskCallbackRegistry().set(workspaceId, {
@@ -1756,7 +1756,7 @@ function registerTaskCallbacks(workspaceId: string): void {
       return true;
     },
     moveTask: async (taskId: string, toPhase: string) => {
-      const { moveTaskToPhase, canMoveToPhase, getTasksByPhase } = await import('./task-service.js');
+      const { moveTaskToPhase, canMoveToPhase } = await import('./task-service.js');
       const tasksDir = getTasksDir(workspace);
       const tasks = discoverTasks(tasksDir);
       const task = tasks.find(t => t.id === taskId);
@@ -1767,14 +1767,14 @@ function registerTaskCallbacks(workspaceId: string): void {
         throw new Error(validation.reason || `Cannot move task to ${toPhase}`);
       }
 
-      return moveTaskToPhase(task, toPhase as any, tasks);
+      return moveTaskToPhase(task, toPhase as any, 'agent', undefined, tasks);
     },
     getPromotePhase,
     getDemotePhase,
   });
 }
 
-function unregisterTaskCallbacks(workspaceId: string): void {
+export function _unregisterTaskCallbacks(workspaceId: string): void {
   globalThis.__piFactoryTaskCallbacks?.delete(workspaceId);
 }
 
@@ -1805,16 +1805,15 @@ function ensureMessageAgentCallbackRegistry(): Map<string, {
   return globalThis.__piFactoryMessageAgentCallbacks;
 }
 
-function registerMessageAgentCallbacks(
+async function registerMessageAgentCallbacks(
   workspaceId: string,
   broadcast: (event: ServerEvent) => void,
-): void {
-  const workspace = getWorkspaceById(workspaceId);
+): Promise<void> {
+  const workspace = await getWorkspaceById(workspaceId);
   if (!workspace) return;
 
   ensureMessageAgentCallbackRegistry().set(workspaceId, {
     hasActiveSession: (taskId: string) => {
-      const { hasLiveExecutionSession } = require('./agent-execution-service.js');
       return hasLiveExecutionSession(taskId);
     },
     steerTask: async (taskId: string, content: string, _attachmentIds?: string[]) => {
@@ -1850,7 +1849,7 @@ function registerMessageAgentCallbacks(
   });
 }
 
-function unregisterMessageAgentCallbacks(workspaceId: string): void {
+export function _unregisterMessageAgentCallbacks(workspaceId: string): void {
   globalThis.__piFactoryMessageAgentCallbacks?.delete(workspaceId);
 }
 

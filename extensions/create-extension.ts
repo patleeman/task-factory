@@ -135,10 +135,10 @@ export default function (pi: ExtensionAPI) {
         if (result.needsConfirmation) {
           let warningText = '';
           if (result.warnings && result.warnings.length > 0) {
-            warningText = '\n\nSecurity Warnings:\n' + result.warnings.map(w => `  ⚠️  ${w}`).join('\n');
+            warningText = '\n\nSecurity Warnings:\n' + result.warnings.map(w => `  [WARN] ${w}`).join('\n');
           }
           if (result.validationErrors && result.validationErrors.length > 0) {
-            warningText += '\n\nValidation Issues:\n' + result.validationErrors.map(e => `  ❌ ${e}`).join('\n');
+            warningText += '\n\nValidation Issues:\n' + result.validationErrors.map(e => `  [ERROR] ${e}`).join('\n');
           }
 
           return {
@@ -160,7 +160,7 @@ export default function (pi: ExtensionAPI) {
           let message = `Extension "${name}" created successfully.\n\nPath: ${result.path}\n\nThe extension is now available and will appear in GET /api/factory/extensions.`;
 
           if (result.warnings && result.warnings.length > 0) {
-            message += '\n\nWarnings:\n' + result.warnings.map(w => `  ⚠️  ${w}`).join('\n');
+            message += '\n\nWarnings:\n' + result.warnings.map(w => `  [WARN] ${w}`).join('\n');
           }
 
           return {
