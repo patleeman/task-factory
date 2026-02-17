@@ -706,6 +706,7 @@ async function getOrCreateSession(
     registerTaskCallbacks(workspaceId);
     registerMessageAgentCallbacks(workspaceId, broadcast);
     registerCreateSkillCallbacks(workspaceId);
+    registerCreateExtensionCallbacks(workspaceId);
 
     // Subscribe to streaming events
     session.unsubscribe = piSession.subscribe((event: AgentSessionEvent) => {
@@ -1411,6 +1412,7 @@ async function sendToAgent(
           registerFactoryControlCallbacks(workspaceId, broadcast);
           registerQACallbacks(workspaceId, broadcast, () => planningSessions.get(workspaceId));
           registerCreateSkillCallbacks(workspaceId);
+          registerCreateExtensionCallbacks(workspaceId);
           session.unsubscribe = piSession.subscribe((event: AgentSessionEvent) => {
             handlePlanningEvent(event, session);
           });
@@ -1586,6 +1588,7 @@ export async function resetPlanningSession(
   unregisterFactoryControlCallbacks(workspaceId);
   unregisterQACallbacks(workspaceId);
   unregisterCreateSkillCallbacks(workspaceId);
+  unregisterCreateExtensionCallbacks(workspaceId);
 
   // Generate new session ID and persist
   const newSessionId = crypto.randomUUID();
@@ -1935,4 +1938,134 @@ function registerCreateSkillCallbacks(workspaceId: string): void {
 
 function unregisterCreateSkillCallbacks(workspaceId: string): void {
   globalThis.__piFactoryCreateSkillCallbacks?.delete(workspaceId);
+}
+
+// =============================================================================
+// Create Extension Callbacks (create new TypeScript extensions from foreman)
+// =============================================================================
+
+declare global {
+  var __piFactoryCreateExtensionCallbacks: Map<string, {
+    createExtension: (payload: {
+      name: string;
+      audience: 'foreman' | 'task' | 'all';
+      typescript: string;
+      confirmed?: boolean;
+    }) => Promise<{
+      success: boolean;
+      path?: string;
+      error?: string;
+      warnings?: string[];
+      validationErrors?: string[];
+      needsConfirmation?: boolean;
+    }>;
+    listExtensions: () => Promise<Array<{ name: string; path: string; audience: string }>>;
+  }> | undefined;
+}
+
+function ensureCreateExtensionCallbackRegistry(): Map<string, {
+  createExtension: (payload: {
+    name: string;
+    audience: 'foreman' | 'task' | 'all';
+    typescript: string;
+    confirmed?: boolean;
+  }) => Promise<{
+    success: boolean;
+    path?: string;
+    error?: string;
+    warnings?: string[];
+    validationErrors?: string[];
+    needsConfirmation?: boolean;
+  }>;
+  listExtensions: () => Promise<Array<{ name: string; path: string; audience: string }>>;
+}> {
+  if (!globalThis.__piFactoryCreateExtensionCallbacks) {
+    globalThis.__piFactoryCreateExtensionCallbacks = new Map();
+  }
+  return globalThis.__piFactoryCreateExtensionCallbacks;
+}
+
+function registerCreateExtensionCallbacks(workspaceId: string): void {
+  ensureCreateExtensionCallbackRegistry().set(workspaceId, {
+    createExtension: async (payload) => {
+      const { createFactoryExtension, validateExtensionTypeScript, scanExtensionSecurity } = await import('./extension-management-service.js');
+
+      try {
+        // First, validate the TypeScript code
+        const validationResult = await validateExtensionTypeScript(payload.typescript);
+        if (!validationResult.valid) {
+          return {
+            success: false,
+            error: 'TypeScript validation failed',
+            validationErrors: validationResult.errors,
+          };
+        }
+
+        // Scan for security issues
+        const securityScan = await scanExtensionSecurity(payload.typescript);
+
+        // If there are warnings and not confirmed, require confirmation
+        if ((securityScan.warnings.length > 0 || validationResult.warnings.length > 0) && !payload.confirmed) {
+          return {
+            success: false,
+            needsConfirmation: true,
+            warnings: securityScan.warnings,
+            validationErrors: validationResult.warnings,
+          };
+        }
+
+        // Create the extension
+        const result = await createFactoryExtension({
+          name: payload.name,
+          audience: payload.audience,
+          typescript: payload.typescript,
+        });
+
+        if (result.success) {
+          // Reload extensions so the new extension is immediately available
+          const { reloadRepoExtensions } = await import('./agent-execution-service.js');
+          reloadRepoExtensions();
+
+          return {
+            success: true,
+            path: result.path,
+            warnings: securityScan.warnings,
+          };
+        } else {
+          return {
+            success: false,
+            error: result.error,
+          };
+        }
+      } catch (err: any) {
+        return {
+          success: false,
+          error: err.message || String(err),
+        };
+      }
+    },
+    listExtensions: async () => {
+      const { getRepoExtensionPaths } = await import('./agent-execution-service.js');
+      const { basename, dirname } = await import('path');
+
+      const paths = getRepoExtensionPaths('all');
+      const FOREMAN_ONLY_EXTENSION_IDS = new Set(['web-tools', 'manage-tasks', 'message-agent', 'create-skill', 'create-extension']);
+
+      return paths.map(path => {
+        const fileName = basename(path);
+        const name = fileName === 'index.ts' ? basename(dirname(path)) : fileName.replace(/\.ts$/, '');
+        const isForemanOnly = FOREMAN_ONLY_EXTENSION_IDS.has(name);
+
+        return {
+          name,
+          path,
+          audience: isForemanOnly ? 'foreman' : 'all',
+        };
+      });
+    },
+  });
+}
+
+function unregisterCreateExtensionCallbacks(workspaceId: string): void {
+  globalThis.__piFactoryCreateExtensionCallbacks?.delete(workspaceId);
 }
