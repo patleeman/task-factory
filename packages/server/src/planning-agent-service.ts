@@ -705,6 +705,7 @@ async function getOrCreateSession(
     registerQACallbacks(workspaceId, broadcast, () => planningSessions.get(workspaceId));
     registerTaskCallbacks(workspaceId);
     registerMessageAgentCallbacks(workspaceId, broadcast);
+    registerCreateSkillCallbacks(workspaceId);
 
     // Subscribe to streaming events
     session.unsubscribe = piSession.subscribe((event: AgentSessionEvent) => {
@@ -1409,6 +1410,7 @@ async function sendToAgent(
           registerShelfCallbacks(workspaceId, broadcast, () => planningSessions.get(workspaceId));
           registerFactoryControlCallbacks(workspaceId, broadcast);
           registerQACallbacks(workspaceId, broadcast, () => planningSessions.get(workspaceId));
+          registerCreateSkillCallbacks(workspaceId);
           session.unsubscribe = piSession.subscribe((event: AgentSessionEvent) => {
             handlePlanningEvent(event, session);
           });
@@ -1583,6 +1585,7 @@ export async function resetPlanningSession(
   unregisterShelfCallbacks(workspaceId);
   unregisterFactoryControlCallbacks(workspaceId);
   unregisterQACallbacks(workspaceId);
+  unregisterCreateSkillCallbacks(workspaceId);
 
   // Generate new session ID and persist
   const newSessionId = crypto.randomUUID();
@@ -1846,4 +1849,90 @@ function registerMessageAgentCallbacks(
 
 function unregisterMessageAgentCallbacks(workspaceId: string): void {
   globalThis.__piFactoryMessageAgentCallbacks?.delete(workspaceId);
+}
+
+// =============================================================================
+// Create Skill Callbacks (create new execution skills from foreman)
+// =============================================================================
+
+declare global {
+  var __piFactoryCreateSkillCallbacks: Map<string, {
+    createSkill: (payload: {
+      name: string;
+      description: string;
+      hooks: ('pre' | 'post')[];
+      content: string;
+    }) => Promise<{ success: boolean; skillId?: string; path?: string; error?: string }>;
+    listSkills: () => Promise<Array<{ id: string; name: string; description: string; hooks: string[] }>>;
+  }> | undefined;
+}
+
+function ensureCreateSkillCallbackRegistry(): Map<string, {
+  createSkill: (payload: {
+    name: string;
+    description: string;
+    hooks: ('pre' | 'post')[];
+    content: string;
+  }) => Promise<{ success: boolean; skillId?: string; path?: string; error?: string }>;
+  listSkills: () => Promise<Array<{ id: string; name: string; description: string; hooks: string[] }>>;
+}> {
+  if (!globalThis.__piFactoryCreateSkillCallbacks) {
+    globalThis.__piFactoryCreateSkillCallbacks = new Map();
+  }
+  return globalThis.__piFactoryCreateSkillCallbacks;
+}
+
+function registerCreateSkillCallbacks(workspaceId: string): void {
+  ensureCreateSkillCallbackRegistry().set(workspaceId, {
+    createSkill: async (payload) => {
+      const { createFactorySkill, getFactoryUserSkillsDir } = await import('./skill-management-service.js');
+      const { reloadPostExecutionSkills } = await import('./post-execution-skills.js');
+      const { join } = await import('path');
+
+      try {
+        // Normalize the skill payload to match what createFactorySkill expects
+        const skillPayload = {
+          id: payload.name,
+          description: payload.description,
+          type: 'follow-up' as const,
+          hooks: payload.hooks,
+          promptTemplate: payload.content,
+          maxIterations: 1,
+        };
+
+        const skillId = createFactorySkill(skillPayload, { skillsDir: getFactoryUserSkillsDir() });
+        
+        // Reload skills so the new skill is immediately available
+        reloadPostExecutionSkills();
+
+        const skillsDir = getFactoryUserSkillsDir();
+        const skillPath = join(skillsDir, skillId, 'SKILL.md');
+
+        return {
+          success: true,
+          skillId,
+          path: skillPath,
+        };
+      } catch (err: any) {
+        return {
+          success: false,
+          error: err.message || String(err),
+        };
+      }
+    },
+    listSkills: async () => {
+      const { discoverPostExecutionSkills } = await import('./post-execution-skills.js');
+      const skills = discoverPostExecutionSkills();
+      return skills.map(skill => ({
+        id: skill.id,
+        name: skill.name,
+        description: skill.description,
+        hooks: skill.hooks,
+      }));
+    },
+  });
+}
+
+function unregisterCreateSkillCallbacks(workspaceId: string): void {
+  globalThis.__piFactoryCreateSkillCallbacks?.delete(workspaceId);
 }
