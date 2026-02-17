@@ -1724,8 +1724,8 @@ function getDemotePhase(phase: string): string | null {
   return flow[phase] || null;
 }
 
-function registerTaskCallbacks(workspaceId: string): void {
-  const workspace = getWorkspaceById(workspaceId);
+async function registerTaskCallbacks(workspaceId: string): Promise<void> {
+  const workspace = await getWorkspaceById(workspaceId);
   if (!workspace) return;
 
   ensureTaskCallbackRegistry().set(workspaceId, {
@@ -1756,7 +1756,7 @@ function registerTaskCallbacks(workspaceId: string): void {
       return true;
     },
     moveTask: async (taskId: string, toPhase: string) => {
-      const { moveTaskToPhase, canMoveToPhase, getTasksByPhase } = await import('./task-service.js');
+      const { moveTaskToPhase, canMoveToPhase } = await import('./task-service.js');
       const tasksDir = getTasksDir(workspace);
       const tasks = discoverTasks(tasksDir);
       const task = tasks.find(t => t.id === taskId);
@@ -1767,14 +1767,14 @@ function registerTaskCallbacks(workspaceId: string): void {
         throw new Error(validation.reason || `Cannot move task to ${toPhase}`);
       }
 
-      return moveTaskToPhase(task, toPhase as any, tasks);
+      return moveTaskToPhase(task, toPhase as any, 'user', undefined, tasks);
     },
     getPromotePhase,
     getDemotePhase,
   });
 }
 
-function unregisterTaskCallbacks(workspaceId: string): void {
+export function unregisterTaskCallbacks(workspaceId: string): void {
   globalThis.__piFactoryTaskCallbacks?.delete(workspaceId);
 }
 
@@ -1805,11 +1805,11 @@ function ensureMessageAgentCallbackRegistry(): Map<string, {
   return globalThis.__piFactoryMessageAgentCallbacks;
 }
 
-function registerMessageAgentCallbacks(
+async function registerMessageAgentCallbacks(
   workspaceId: string,
   broadcast: (event: ServerEvent) => void,
-): void {
-  const workspace = getWorkspaceById(workspaceId);
+): Promise<void> {
+  const workspace = await getWorkspaceById(workspaceId);
   if (!workspace) return;
 
   ensureMessageAgentCallbackRegistry().set(workspaceId, {
@@ -1850,7 +1850,7 @@ function registerMessageAgentCallbacks(
   });
 }
 
-function unregisterMessageAgentCallbacks(workspaceId: string): void {
+export function unregisterMessageAgentCallbacks(workspaceId: string): void {
   globalThis.__piFactoryMessageAgentCallbacks?.delete(workspaceId);
 }
 
