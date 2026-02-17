@@ -1,0 +1,44 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+## [0.2.0] - 2026-02-17
+
+### Added
+- `create_extension` tool for foreman to create new TypeScript extensions
+- `create_skill` tool for foreman to create execution skills
+
+### Fixed
+- Dark mode background for dismissed "Won't Do" draft cards
+
+### Changed
+- Renamed pi-factory to task-factory across codebase
+
+### Fixed (Code Quality)
+- Fixed lint error: replaced `require()` with ES module import in planning-agent-service.ts
+- Fixed type errors: made `registerTaskCallbacks` and `registerMessageAgentCallbacks` async
+- Fixed `moveTask` callback signature to match `moveTaskToPhase` API
+- Fixed iconography regression: removed emoji glyphs from create-extension.ts
+
+## [0.1.0] - Initial Release
+
+### Added
+- Initial release of task-factory
+- Lean manufacturing-inspired task queue system for AI agents
+- CLI tool for managing tasks
+- Web UI for visual task management
+- Extension system for custom tools
+- Skill system for execution prompts
+- Planning agent for task decomposition
+- Queue manager for task automation
+- Workspace management
+- Task lifecycle: backlog → ready → executing → complete/archived
+
+[Unreleased]: https://github.com/patleeman/task-factory/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/patleeman/task-factory/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/patleeman/task-factory/releases/tag/v0.1.0
