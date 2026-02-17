@@ -703,6 +703,8 @@ async function getOrCreateSession(
     registerShelfCallbacks(workspaceId, broadcast, () => planningSessions.get(workspaceId));
     registerFactoryControlCallbacks(workspaceId, broadcast);
     registerQACallbacks(workspaceId, broadcast, () => planningSessions.get(workspaceId));
+    registerTaskCallbacks(workspaceId);
+    registerMessageAgentCallbacks(workspaceId, broadcast);
 
     // Subscribe to streaming events
     session.unsubscribe = piSession.subscribe((event: AgentSessionEvent) => {
@@ -861,6 +863,25 @@ Use this after the user opens a draft from chat, so you can iteratively refine t
 Start, stop, or check the status of the factory queue (the execution pipeline that processes tasks).
 Parameters:
 - action (string): "status" to check, "start" to begin processing, "stop" to pause
+
+### manage_tasks
+List, get, update, delete, or change the state of workspace tasks.
+Use this to manage existing tasks (different from creating new draft tasks).
+Parameters:
+- action (string): "list", "get", "update", "delete", "move", "promote", or "demote"
+- taskId (string, optional): Task ID (required for get/update/delete/move/promote/demote)
+- updates (object, optional): Fields to update (title, content, acceptanceCriteria, priority, tags, notes)
+- toPhase (string, optional): Target phase for move action (backlog, ready, executing, complete, archived)
+Note: Editing task fields does NOT change phase; use move/promote/demote for state changes.
+
+### message_agent
+Send a message to a specific task agent (steer, follow-up, or chat).
+Use this to interact with running task agents or start/resume conversations.
+Parameters:
+- taskId (string): ID of the task to message
+- messageType (string): "steer" (interrupt), "follow-up" (queue), or "chat" (start/resume)
+- content (string): Message content
+- attachmentIds (string[], optional): Attachment IDs to include
 
 ## Guidelines
 - **If the user's request is ambiguous, use \`ask_questions\` first** to disambiguate before creating tasks. Present concrete multiple-choice options so the user can quickly clarify intent.
@@ -1645,4 +1666,181 @@ function registerFactoryControlCallbacks(
 
 function unregisterFactoryControlCallbacks(workspaceId: string): void {
   globalThis.__piFactoryControlCallbacks?.delete(workspaceId);
+}
+
+// =============================================================================
+// Task Management Callbacks (CRUD + move/promote/demote from planning agent)
+// =============================================================================
+
+declare global {
+  var __piFactoryTaskCallbacks: Map<string, {
+    listTasks: () => Promise<any[]>;
+    getTask: (taskId: string) => Promise<any | null>;
+    updateTask: (taskId: string, updates: any) => Promise<any>;
+    deleteTask: (taskId: string) => Promise<boolean>;
+    moveTask: (taskId: string, toPhase: string) => Promise<any>;
+    getPromotePhase: (phase: string) => string | null;
+    getDemotePhase: (phase: string) => string | null;
+  }> | undefined;
+}
+
+function ensureTaskCallbackRegistry(): Map<string, {
+  listTasks: () => Promise<any[]>;
+  getTask: (taskId: string) => Promise<any | null>;
+  updateTask: (taskId: string, updates: any) => Promise<any>;
+  deleteTask: (taskId: string) => Promise<boolean>;
+  moveTask: (taskId: string, toPhase: string) => Promise<any>;
+  getPromotePhase: (phase: string) => string | null;
+  getDemotePhase: (phase: string) => string | null;
+}> {
+  if (!globalThis.__piFactoryTaskCallbacks) {
+    globalThis.__piFactoryTaskCallbacks = new Map();
+  }
+  return globalThis.__piFactoryTaskCallbacks;
+}
+
+function getPromotePhase(phase: string): string | null {
+  const flow: Record<string, string> = {
+    backlog: 'ready',
+    ready: 'executing',
+    executing: 'complete',
+  };
+  return flow[phase] || null;
+}
+
+function getDemotePhase(phase: string): string | null {
+  const flow: Record<string, string> = {
+    ready: 'backlog',
+    executing: 'ready',
+    complete: 'executing',
+    archived: 'backlog',
+  };
+  return flow[phase] || null;
+}
+
+function registerTaskCallbacks(workspaceId: string): void {
+  const workspace = getWorkspaceById(workspaceId);
+  if (!workspace) return;
+
+  ensureTaskCallbackRegistry().set(workspaceId, {
+    listTasks: async () => {
+      const tasksDir = getTasksDir(workspace);
+      return discoverTasks(tasksDir);
+    },
+    getTask: async (taskId: string) => {
+      const tasksDir = getTasksDir(workspace);
+      const tasks = discoverTasks(tasksDir);
+      return tasks.find(t => t.id === taskId) || null;
+    },
+    updateTask: async (taskId: string, updates: any) => {
+      const { updateTask } = await import('./task-service.js');
+      const tasksDir = getTasksDir(workspace);
+      const tasks = discoverTasks(tasksDir);
+      const task = tasks.find(t => t.id === taskId);
+      if (!task) throw new Error(`Task ${taskId} not found`);
+      return updateTask(task, updates);
+    },
+    deleteTask: async (taskId: string) => {
+      const { deleteTask } = await import('./task-service.js');
+      const tasksDir = getTasksDir(workspace);
+      const tasks = discoverTasks(tasksDir);
+      const task = tasks.find(t => t.id === taskId);
+      if (!task) return false;
+      deleteTask(task);
+      return true;
+    },
+    moveTask: async (taskId: string, toPhase: string) => {
+      const { moveTaskToPhase, canMoveToPhase, getTasksByPhase } = await import('./task-service.js');
+      const tasksDir = getTasksDir(workspace);
+      const tasks = discoverTasks(tasksDir);
+      const task = tasks.find(t => t.id === taskId);
+      if (!task) throw new Error(`Task ${taskId} not found`);
+
+      const validation = canMoveToPhase(task, toPhase as any);
+      if (!validation.allowed) {
+        throw new Error(validation.reason || `Cannot move task to ${toPhase}`);
+      }
+
+      return moveTaskToPhase(task, toPhase as any, tasks);
+    },
+    getPromotePhase,
+    getDemotePhase,
+  });
+}
+
+function unregisterTaskCallbacks(workspaceId: string): void {
+  globalThis.__piFactoryTaskCallbacks?.delete(workspaceId);
+}
+
+// =============================================================================
+// Message Agent Callbacks (steer/follow-up/chat from planning agent)
+// =============================================================================
+
+declare global {
+  var __piFactoryMessageAgentCallbacks: Map<string, {
+    hasActiveSession: (taskId: string) => boolean;
+    steerTask: (taskId: string, content: string, attachmentIds?: string[]) => Promise<boolean>;
+    followUpTask: (taskId: string, content: string, attachmentIds?: string[]) => Promise<boolean>;
+    startChat: (taskId: string, content: string, attachmentIds?: string[]) => Promise<boolean>;
+    resumeChat: (taskId: string, content: string, attachmentIds?: string[]) => Promise<boolean>;
+  }> | undefined;
+}
+
+function ensureMessageAgentCallbackRegistry(): Map<string, {
+  hasActiveSession: (taskId: string) => boolean;
+  steerTask: (taskId: string, content: string, attachmentIds?: string[]) => Promise<boolean>;
+  followUpTask: (taskId: string, content: string, attachmentIds?: string[]) => Promise<boolean>;
+  startChat: (taskId: string, content: string, attachmentIds?: string[]) => Promise<boolean>;
+  resumeChat: (taskId: string, content: string, attachmentIds?: string[]) => Promise<boolean>;
+}> {
+  if (!globalThis.__piFactoryMessageAgentCallbacks) {
+    globalThis.__piFactoryMessageAgentCallbacks = new Map();
+  }
+  return globalThis.__piFactoryMessageAgentCallbacks;
+}
+
+function registerMessageAgentCallbacks(
+  workspaceId: string,
+  broadcast: (event: ServerEvent) => void,
+): void {
+  const workspace = getWorkspaceById(workspaceId);
+  if (!workspace) return;
+
+  ensureMessageAgentCallbackRegistry().set(workspaceId, {
+    hasActiveSession: (taskId: string) => {
+      const { hasLiveExecutionSession } = require('./agent-execution-service.js');
+      return hasLiveExecutionSession(taskId);
+    },
+    steerTask: async (taskId: string, content: string, attachmentIds?: string[]) => {
+      const { steerTask, getActiveSession } = await import('./agent-execution-service.js');
+      // steerTask doesn't accept attachmentIds in current signature
+      return steerTask(taskId, content);
+    },
+    followUpTask: async (taskId: string, content: string, attachmentIds?: string[]) => {
+      const { followUpTask } = await import('./agent-execution-service.js');
+      return followUpTask(taskId, content);
+    },
+    startChat: async (taskId: string, content: string, attachmentIds?: string[]) => {
+      const { startChat } = await import('./agent-execution-service.js');
+      const { discoverTasks } = await import('./task-service.js');
+      const tasksDir = getTasksDir(workspace);
+      const tasks = discoverTasks(tasksDir);
+      const task = tasks.find(t => t.id === taskId);
+      if (!task) throw new Error(`Task ${taskId} not found`);
+      return startChat(task, workspaceId, workspace.path, content, broadcast);
+    },
+    resumeChat: async (taskId: string, content: string, attachmentIds?: string[]) => {
+      const { resumeChat } = await import('./agent-execution-service.js');
+      const { discoverTasks } = await import('./task-service.js');
+      const tasksDir = getTasksDir(workspace);
+      const tasks = discoverTasks(tasksDir);
+      const task = tasks.find(t => t.id === taskId);
+      if (!task) throw new Error(`Task ${taskId} not found`);
+      return resumeChat(task, workspaceId, workspace.path, content, broadcast);
+    },
+  });
+}
+
+function unregisterMessageAgentCallbacks(workspaceId: string): void {
+  globalThis.__piFactoryMessageAgentCallbacks?.delete(workspaceId);
 }

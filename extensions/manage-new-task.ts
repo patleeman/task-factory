@@ -76,6 +76,9 @@ export default function (pi: ExtensionAPI) {
         selectedSkillIds: Type.Optional(Type.Array(Type.String(), {
           description: 'Post-execution skill IDs to enable, in execution order',
         })),
+        selectedPreSkillIds: Type.Optional(Type.Array(Type.String(), {
+          description: 'Pre-execution skill IDs to enable, in execution order',
+        })),
       }, { description: 'Fields to update (for update action)' })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
@@ -128,6 +131,7 @@ export default function (pi: ExtensionAPI) {
           }
 
           lines.push(`\n**Selected Post-Execution Skills:** ${formState.selectedSkillIds?.length ? formState.selectedSkillIds.join(', ') : '(none)'}`);
+          lines.push(`**Selected Pre-Execution Skills:** ${formState.selectedPreSkillIds?.length ? formState.selectedPreSkillIds.join(', ') : '(none)'}`);
         }
 
         if (availableModels.length > 0) {
@@ -189,6 +193,9 @@ export default function (pi: ExtensionAPI) {
         }
         if (updates.selectedSkillIds !== undefined) {
           formUpdates.selectedSkillIds = updates.selectedSkillIds;
+        }
+        if (updates.selectedPreSkillIds !== undefined) {
+          formUpdates.selectedPreSkillIds = updates.selectedPreSkillIds;
         }
 
         const result = cb.updateFormState(formUpdates);

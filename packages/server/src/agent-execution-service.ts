@@ -130,7 +130,7 @@ function discoverExtensionsInDir(extensionsDir: string): string[] {
  */
 export type RepoExtensionAudience = 'all' | 'foreman' | 'task';
 
-const FOREMAN_ONLY_EXTENSION_IDS = new Set<string>(['web-tools']);
+const FOREMAN_ONLY_EXTENSION_IDS = new Set<string>(['web-tools', 'manage-tasks', 'message-agent']);
 
 function getExtensionId(path: string): string {
   const fileName = basename(path);

@@ -39,6 +39,8 @@ describe('planning prompt guidance', () => {
     expect(prompt).toContain('### web_fetch');
     expect(prompt).toContain('### create_artifact');
     expect(prompt).toContain('### manage_new_task');
+    expect(prompt).toContain('### manage_tasks');
+    expect(prompt).toContain('### message_agent');
     expect(prompt).toContain('inline draft-task card');
     expect(prompt).not.toContain('draft task on the shelf');
     expect(prompt).not.toContain('reference specific files, functions, and components');
