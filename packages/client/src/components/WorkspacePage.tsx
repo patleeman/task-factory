@@ -1634,7 +1634,7 @@ export function WorkspacePage() {
                 getAttachmentUrl={(storedName) => api.getPlanningAttachmentUrl(workspaceId!, storedName)}
                 onReset={handleResetPlanning}
                 title="Foreman"
-                emptyState={{ title: 'Foreman', subtitle: 'Ask me to research, plan, or decompose work into tasks' }}
+                emptyState={{ title: 'Foreman', subtitle: 'Ask me to research, plan, or decompose work into tasks. Try /help for slash commands.' }}
                 headerSlot={
                   <ModelSelector
                     value={foremanModelConfig ?? undefined}

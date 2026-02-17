@@ -51,6 +51,7 @@ import {
 } from './queue-manager.js';
 import {
   buildContractReference,
+  buildStateBlock,
   prependStateToTurn,
   stripStateContractEcho,
 } from './state-contract.js';
@@ -1268,6 +1269,213 @@ function handlePlanningEvent(
 // =============================================================================
 
 const MAX_RETRIES = 1;
+const FOREMAN_STATE_ENFORCEMENT_LINE = 'Obey <state_contract> as the highest-priority behavior contract for this turn.';
+const FOREMAN_UNSUPPORTED_TUI_COMMANDS = new Set([
+  'settings',
+  'model',
+  'scoped-models',
+  'export',
+  'share',
+  'copy',
+  'name',
+  'session',
+  'changelog',
+  'hotkeys',
+  'fork',
+  'tree',
+  'login',
+  'logout',
+  'compact',
+  'resume',
+  'reload',
+  'quit',
+  'exit',
+  'debug',
+  'arminsayshi',
+]);
+
+export type ForemanSlashCommand =
+  | { kind: 'none' }
+  | { kind: 'new' }
+  | { kind: 'help' }
+  | { kind: 'skill'; skillName: string; args: string }
+  | { kind: 'unknown'; command: string };
+
+export function parseForemanSlashCommand(content: string): ForemanSlashCommand {
+  const trimmed = content.trim();
+  if (!trimmed.startsWith('/')) {
+    return { kind: 'none' };
+  }
+
+  if (trimmed === '/new') {
+    return { kind: 'new' };
+  }
+
+  if (trimmed === '/help') {
+    return { kind: 'help' };
+  }
+
+  if (trimmed === '/') {
+    return { kind: 'unknown', command: '/' };
+  }
+
+  const skillMatch = /^\/skill:([^\s]+)(?:\s+([\s\S]*))?$/u.exec(trimmed);
+  if (skillMatch) {
+    return {
+      kind: 'skill',
+      skillName: skillMatch[1],
+      args: skillMatch[2]?.trim() || '',
+    };
+  }
+
+  const slashToken = trimmed.slice(1).split(/\s+/u)[0] || '';
+  const normalizedToken = slashToken.toLowerCase();
+
+  const shouldTreatAsUnknownSlashCommand = normalizedToken === 'new'
+    || normalizedToken === 'help'
+    || normalizedToken === 'skill'
+    || normalizedToken.startsWith('skill:')
+    || FOREMAN_UNSUPPORTED_TUI_COMMANDS.has(normalizedToken);
+
+  if (shouldTreatAsUnknownSlashCommand) {
+    return {
+      kind: 'unknown',
+      command: slashToken ? `/${slashToken}` : '/',
+    };
+  }
+
+  return { kind: 'none' };
+}
+
+export function buildForemanSlashHelpText(): string {
+  return 'Foreman slash commands: `/new` resets the planning conversation, `/skill:<name> [args]` runs a loaded skill command, and `/help` shows this guidance.';
+}
+
+function buildForemanStateTurnContext(): string {
+  const stateBlock = buildStateBlock({
+    mode: 'foreman',
+    phase: 'none',
+    planningStatus: 'none',
+  });
+
+  return `## Current Turn State\n${stateBlock}\n\n${FOREMAN_STATE_ENFORCEMENT_LINE}`;
+}
+
+function buildRestoredHistoryText(priorMessages: PlanningMessage[]): string {
+  let text = '';
+  const recentHistory = priorMessages.slice(-10);
+
+  for (const msg of recentHistory) {
+    const role = msg.role === 'user'
+      ? 'User'
+      : msg.role === 'system'
+        ? 'System'
+        : 'Assistant';
+
+    const truncated = msg.content.length > 500
+      ? `${msg.content.slice(0, 500)}... [truncated]`
+      : msg.content;
+
+    text += `**${role}:** ${truncated}\n\n`;
+  }
+
+  return text;
+}
+
+function buildFirstTurnPrompt(
+  turnContent: string,
+  systemPrompt: string,
+  priorMessages: PlanningMessage[],
+): string {
+  let fullPrompt = systemPrompt;
+
+  if (priorMessages.length > 0) {
+    fullPrompt += '\n\n---\n\n## Conversation History (restored)\n\n';
+    fullPrompt += buildRestoredHistoryText(priorMessages);
+    fullPrompt += '---\n\n## Current Message\n\n';
+  } else {
+    fullPrompt += '\n\n---\n\n# User Message\n\n';
+  }
+
+  fullPrompt += turnContent;
+  return fullPrompt;
+}
+
+function buildFirstTurnSkillBootstrapContext(
+  systemPrompt: string,
+  priorMessages: PlanningMessage[],
+): string {
+  let bootstrap = '## Foreman Bootstrap Context\n';
+  bootstrap += 'Apply the following planning instructions and restored conversation context to this turn.\n\n';
+  bootstrap += systemPrompt;
+
+  if (priorMessages.length > 0) {
+    bootstrap += '\n\n---\n\n## Conversation History (restored)\n\n';
+    bootstrap += buildRestoredHistoryText(priorMessages);
+  }
+
+  return bootstrap;
+}
+
+export function buildForemanTurnContent(
+  content: string,
+  options: { additionalContextSections?: string[] } = {},
+): string {
+  const slashCommand = parseForemanSlashCommand(content);
+  if (slashCommand.kind !== 'skill') {
+    return prependStateToTurn(content, {
+      mode: 'foreman',
+      phase: 'none',
+      planningStatus: 'none',
+    });
+  }
+
+  const contextSections = [
+    buildForemanStateTurnContext(),
+    ...(options.additionalContextSections ?? []),
+  ]
+    .map((section) => section.trim())
+    .filter((section) => section.length > 0);
+
+  const args = [slashCommand.args, ...contextSections]
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0)
+    .join('\n\n');
+
+  if (args.length === 0) {
+    return `/skill:${slashCommand.skillName}`;
+  }
+
+  return `/skill:${slashCommand.skillName} ${args}`;
+}
+
+function appendPlanningSystemMessage(
+  workspaceId: string,
+  broadcast: (event: ServerEvent) => void,
+  content: string,
+  metadata?: PlanningMessage['metadata'],
+): void {
+  const activeSession = planningSessions.get(workspaceId);
+  const message: PlanningMessage = {
+    id: crypto.randomUUID(),
+    role: 'system',
+    content,
+    timestamp: new Date().toISOString(),
+    sessionId: activeSession?.sessionId ?? getOrCreateSessionId(workspaceId),
+    ...(metadata ? { metadata } : {}),
+  };
+
+  if (activeSession) {
+    activeSession.messages.push(message);
+    persistMessages(workspaceId, activeSession.messages);
+  } else {
+    const persisted = loadPersistedMessages(workspaceId);
+    persisted.push(message);
+    persistMessagesSync(workspaceId, persisted);
+  }
+
+  broadcast({ type: 'planning:message', workspaceId, message });
+}
 
 async function sendToAgent(
   session: PlanningSession,
@@ -1286,11 +1494,9 @@ async function sendToAgent(
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
-      const turnContent = prependStateToTurn(content, {
-        mode: 'foreman',
-        phase: 'none',
-        planningStatus: 'none',
-      });
+      const slashCommand = parseForemanSlashCommand(content);
+      const turnContent = buildForemanTurnContent(content);
+      const promptOpts = images && images.length > 0 ? { images } : undefined;
 
       if (!session.firstMessageSent) {
         // First message in this Pi session: include system prompt + conversation history
@@ -1301,39 +1507,24 @@ async function sendToAgent(
 
         // If there are prior messages (restored from disk), include them as context
         const priorMessages = session.messages.filter(m => m.id !== session.messages[session.messages.length - 1]?.id);
-        const hasHistory = priorMessages.length > 0;
 
-        let fullPrompt = systemPrompt;
-        if (hasHistory) {
-          fullPrompt += '\n\n---\n\n## Conversation History (restored)\n\n';
-          // Include last ~10 messages, truncate each to ~500 chars to avoid token limits
-          const recentHistory = priorMessages.slice(-10);
-          for (const msg of recentHistory) {
-            const role = msg.role === 'user'
-              ? 'User'
-              : msg.role === 'system'
-                ? 'System'
-                : 'Assistant';
-            const truncated = msg.content.length > 500
-              ? msg.content.slice(0, 500) + '... [truncated]'
-              : msg.content;
-            fullPrompt += `**${role}:** ${truncated}\n\n`;
-          }
-          fullPrompt += '---\n\n## Current Message\n\n';
+        if (slashCommand.kind === 'skill') {
+          const bootstrapContext = buildFirstTurnSkillBootstrapContext(systemPrompt, priorMessages);
+          const firstTurnSkillContent = buildForemanTurnContent(content, {
+            additionalContextSections: [bootstrapContext],
+          });
+          await session.piSession.prompt(firstTurnSkillContent, promptOpts);
         } else {
-          fullPrompt += '\n\n---\n\n# User Message\n\n';
+          const fullPrompt = buildFirstTurnPrompt(turnContent, systemPrompt, priorMessages);
+          await session.piSession.prompt(fullPrompt, promptOpts);
         }
-        fullPrompt += turnContent;
 
-        const promptOpts = images && images.length > 0 ? { images } : undefined;
-        await session.piSession.prompt(fullPrompt, promptOpts);
         session.firstMessageSent = true;
       } else {
         // Use prompt() — not followUp(). followUp() only queues a message for
         // delivery during an active streaming turn. When the agent is idle,
         // the queued message is never processed and the session hangs.
         // prompt() starts a new turn, which is what we need here.
-        const promptOpts = images && images.length > 0 ? { images } : undefined;
         await session.piSession.prompt(turnContent, promptOpts);
       }
 
@@ -1467,6 +1658,39 @@ export async function sendPlanningMessage(
   broadcast: (event: ServerEvent) => void,
   images?: { type: 'image'; data: string; mimeType: string }[],
 ): Promise<void> {
+  const normalizedContent = content.trim();
+  const slashCommand = parseForemanSlashCommand(normalizedContent);
+
+  if (slashCommand.kind === 'new') {
+    await resetPlanningSession(workspaceId, broadcast);
+    return;
+  }
+
+  if (slashCommand.kind === 'help') {
+    appendPlanningSystemMessage(
+      workspaceId,
+      broadcast,
+      buildForemanSlashHelpText(),
+      { kind: 'slash-command-help' },
+    );
+    return;
+  }
+
+  if (slashCommand.kind === 'unknown') {
+    appendPlanningSystemMessage(
+      workspaceId,
+      broadcast,
+      `Unknown slash command \`${slashCommand.command}\`.\n\n${buildForemanSlashHelpText()}`,
+      {
+        kind: 'slash-command-unknown',
+        command: slashCommand.command,
+        supportedCommands: ['/new', '/skill:<name> [args]', '/help'],
+      },
+    );
+    return;
+  }
+
+  const messageContent = normalizedContent.length > 0 ? normalizedContent : content;
   const session = await getOrCreateSession(workspaceId, broadcast);
   session.abortRequested = false;
 
@@ -1474,7 +1698,7 @@ export async function sendPlanningMessage(
   const userMsg: PlanningMessage = {
     id: crypto.randomUUID(),
     role: 'user',
-    content,
+    content: messageContent,
     timestamp: new Date().toISOString(),
     sessionId: session.sessionId,
   };
@@ -1484,7 +1708,7 @@ export async function sendPlanningMessage(
   broadcast({ type: 'planning:message', workspaceId, message: userMsg });
 
   // Send to the agent with retry on failure
-  await sendToAgent(session, content, workspaceId, broadcast, images);
+  await sendToAgent(session, messageContent, workspaceId, broadcast, images);
 }
 
 /**
