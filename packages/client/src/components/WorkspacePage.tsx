@@ -12,10 +12,12 @@ import { ShelfPane } from './ShelfPane'
 import { IdeaBacklogPane } from './IdeaBacklogPane'
 import { ArchivePane } from './ArchivePane'
 import { ResizeHandle } from './ResizeHandle'
+import { ModelSelector } from './ModelSelector'
 import type { WorkspaceWebSocketConnection } from '../hooks/useWebSocket'
 import { useAgentStreaming } from '../hooks/useAgentStreaming'
 import { usePlanningStreaming, PLANNING_TASK_ID } from '../hooks/usePlanningStreaming'
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts'
+import { useForemanModel } from '../hooks/useForemanModel'
 import { DEFAULT_VOICE_INPUT_HOTKEY, normalizeVoiceInputHotkey } from '../voiceHotkey'
 import { TaskChat } from './TaskChat'
 import { QADialog } from './QADialog'
@@ -154,6 +156,7 @@ export function WorkspacePage() {
   const { subscribe, isConnected } = useOutletContext<WorkspaceWebSocketConnection>()
   const agentStream = useAgentStreaming(taskId || null, subscribe)
   const planningStream = usePlanningStreaming(workspaceId || null, subscribe, planningMessages)
+  const { modelConfig: foremanModelConfig, setModelConfig: setForemanModelConfig } = useForemanModel(workspaceId || null)
 
   useEffect(() => {
     let cancelled = false
@@ -1614,40 +1617,59 @@ export function WorkspacePage() {
             style={{ width: leftPaneWidth }}
           >
             {mode === 'foreman' ? (
-              <TaskChat
-                taskId={PLANNING_TASK_ID}
-                workspaceId={workspaceId}
-                entries={planningStream.entries}
-                attachments={[]}
-                agentStream={planningStream.agentStream}
-                onSendMessage={handlePlanningMessage}
-                onSteer={handlePlanningMessage}
-                onFollowUp={handlePlanningMessage}
-                onStop={handleStopPlanningExecution}
-                isStopping={isStoppingPlanning}
-                onUploadFiles={handlePlanningUpload}
-                getAttachmentUrl={(storedName) => api.getPlanningAttachmentUrl(workspaceId!, storedName)}
-                onReset={handleResetPlanning}
-                title="Foreman"
-                emptyState={{ title: 'Foreman', subtitle: 'Ask me to research, plan, or decompose work into tasks' }}
-                bottomSlot={
-                  planningStream.activeQARequest ? (
-                    <QADialog
-                      request={planningStream.activeQARequest}
-                      onSubmit={handleQASubmit}
-                      onAbort={handleQAAbort}
+              <div className="flex flex-col h-full">
+                <div className="flex items-center gap-2 px-4 h-10 border-b border-slate-200 bg-slate-50 shrink-0">
+                  <span className="text-xs font-semibold text-slate-700">Foreman</span>
+                  <div className="h-4 w-px bg-slate-200" />
+                  <div className="flex-1 min-w-0">
+                    <ModelSelector
+                      value={foremanModelConfig ?? undefined}
+                      onChange={(config) => {
+                        setForemanModelConfig(config ?? null).catch((err) => {
+                          console.error('Failed to save foreman model:', err)
+                        })
+                      }}
+                      compact
                     />
-                  ) : undefined
-                }
-                onOpenArtifact={handleOpenArtifact}
-                onOpenDraftTask={handleOpenDraftTask}
-                onCreateDraftTask={handleCreateDraftTaskDirect}
-                onDismissDraftTask={handleDismissDraftTask}
-                draftTaskStates={draftTaskStates}
-                creatingDraftTaskIds={creatingDraftTaskIds}
-                isVoiceHotkeyPressed={isVoiceHotkeyPressed}
-                onVoiceDictationStateChange={handleVoiceDictationStateChange}
-              />
+                  </div>
+                </div>
+                <div className="flex-1 overflow-hidden min-h-0">
+                  <TaskChat
+                    taskId={PLANNING_TASK_ID}
+                    workspaceId={workspaceId}
+                    entries={planningStream.entries}
+                    attachments={[]}
+                    agentStream={planningStream.agentStream}
+                    onSendMessage={handlePlanningMessage}
+                    onSteer={handlePlanningMessage}
+                    onFollowUp={handlePlanningMessage}
+                    onStop={handleStopPlanningExecution}
+                    isStopping={isStoppingPlanning}
+                    onUploadFiles={handlePlanningUpload}
+                    getAttachmentUrl={(storedName) => api.getPlanningAttachmentUrl(workspaceId!, storedName)}
+                    onReset={handleResetPlanning}
+                    title="Foreman"
+                    emptyState={{ title: 'Foreman', subtitle: 'Ask me to research, plan, or decompose work into tasks' }}
+                    bottomSlot={
+                      planningStream.activeQARequest ? (
+                        <QADialog
+                          request={planningStream.activeQARequest}
+                          onSubmit={handleQASubmit}
+                          onAbort={handleQAAbort}
+                        />
+                      ) : undefined
+                    }
+                    onOpenArtifact={handleOpenArtifact}
+                    onOpenDraftTask={handleOpenDraftTask}
+                    onCreateDraftTask={handleCreateDraftTaskDirect}
+                    onDismissDraftTask={handleDismissDraftTask}
+                    draftTaskStates={draftTaskStates}
+                    creatingDraftTaskIds={creatingDraftTaskIds}
+                    isVoiceHotkeyPressed={isVoiceHotkeyPressed}
+                    onVoiceDictationStateChange={handleVoiceDictationStateChange}
+                  />
+                </div>
+              </div>
             ) : (
               /* Task mode: show task chat in left pane */
               <div className="flex flex-col h-full">

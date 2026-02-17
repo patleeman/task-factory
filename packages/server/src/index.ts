@@ -21,6 +21,7 @@ import type {
   ServerEvent,
   ClientEvent,
   TaskDefaults,
+  ModelConfig,
 } from '@pi-factory/shared';
 import {
   PHASES,
@@ -1280,6 +1281,8 @@ import {
   loadWorkspaceSharedContext,
   saveWorkspaceSharedContext,
   WORKSPACE_SHARED_CONTEXT_REL_PATH,
+  loadForemanSettings,
+  saveForemanSettings,
   type PiFactorySettings,
   type WorkspacePiConfig,
 } from './pi-integration.js';
@@ -1481,6 +1484,25 @@ app.post('/api/workspaces/:workspaceId/pi-config', (req, res) => {
     const config = req.body as WorkspacePiConfig;
     saveWorkspacePiConfig(req.params.workspaceId, config);
     res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// Get foreman model configuration
+app.get('/api/workspaces/:workspaceId/foreman-model', (req, res) => {
+  const settings = loadForemanSettings(req.params.workspaceId);
+  res.json({ modelConfig: settings.modelConfig ?? null });
+});
+
+// Save foreman model configuration
+app.put('/api/workspaces/:workspaceId/foreman-model', (req, res) => {
+  try {
+    const body = req.body as { modelConfig?: ModelConfig | null };
+    const settings = loadForemanSettings(req.params.workspaceId);
+    settings.modelConfig = body.modelConfig ?? undefined;
+    saveForemanSettings(req.params.workspaceId, settings);
+    res.json({ modelConfig: settings.modelConfig ?? null });
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }

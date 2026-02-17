@@ -42,6 +42,7 @@ import { getRepoExtensionPaths } from './agent-execution-service.js';
 import {
   loadWorkspaceSharedContext,
   WORKSPACE_SHARED_CONTEXT_REL_PATH,
+  loadForemanSettings,
 } from './pi-integration.js';
 import {
   startQueueProcessing,
@@ -670,13 +671,29 @@ async function getOrCreateSession(
 
     const sessionManager = SessionManager.create(workspace.path);
 
-    const { session: piSession } = await createAgentSession({
+    // Load foreman settings to get model configuration
+    const foremanSettings = loadForemanSettings(workspaceId);
+    const sessionOpts: Parameters<typeof createAgentSession>[0] = {
       cwd: workspace.path,
       authStorage,
       modelRegistry,
       sessionManager,
       resourceLoader: loader,
-    });
+    };
+
+    // Apply foreman model configuration if set
+    if (foremanSettings.modelConfig) {
+      const mc = foremanSettings.modelConfig;
+      const resolved = modelRegistry.find(mc.provider, mc.modelId);
+      if (resolved) {
+        sessionOpts.model = resolved;
+      }
+      if (mc.thinkingLevel) {
+        sessionOpts.thinkingLevel = mc.thinkingLevel;
+      }
+    }
+
+    const { session: piSession } = await createAgentSession(sessionOpts);
 
     session.piSession = piSession;
 
@@ -1346,13 +1363,30 @@ async function sendToAgent(
           });
           await loader.reload();
           const sessionManager = SessionManager.create(workspace.path);
-          const { session: piSession } = await createAgentSession({
+
+          // Load foreman settings to get model configuration
+          const foremanSettings = loadForemanSettings(workspaceId);
+          const sessionOpts: Parameters<typeof createAgentSession>[0] = {
             cwd: workspace.path,
             authStorage,
             modelRegistry,
             sessionManager,
             resourceLoader: loader,
-          });
+          };
+
+          // Apply foreman model configuration if set
+          if (foremanSettings.modelConfig) {
+            const mc = foremanSettings.modelConfig;
+            const resolved = modelRegistry.find(mc.provider, mc.modelId);
+            if (resolved) {
+              sessionOpts.model = resolved;
+            }
+            if (mc.thinkingLevel) {
+              sessionOpts.thinkingLevel = mc.thinkingLevel;
+            }
+          }
+
+          const { session: piSession } = await createAgentSession(sessionOpts);
           session.piSession = piSession;
           registerShelfCallbacks(workspaceId, broadcast, () => planningSessions.get(workspaceId));
           registerFactoryControlCallbacks(workspaceId, broadcast);

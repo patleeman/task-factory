@@ -92,6 +92,15 @@ export interface PlanningGuardrails {
   maxToolCalls: number;
 }
 
+/**
+ * Per-workspace foreman (planning agent) settings.
+ * Stored in ~/.taskfactory/workspaces/<id>/foreman-settings.json
+ */
+export interface ForemanSettings {
+  /** Model configuration for the foreman/planning agent. */
+  modelConfig?: ModelConfig;
+}
+
 export const DEFAULT_PLANNING_GUARDRAILS: PlanningGuardrails = {
   timeoutMs: 30 * 60 * 1000,
   maxToolCalls: 100,

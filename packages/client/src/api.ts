@@ -21,6 +21,7 @@ import type {
   WorkspaceWorkflowOverrides,
   WorkspaceWorkflowSettingsResponse,
   WorkflowDefaultsConfig,
+  ModelConfig,
 } from '@pi-factory/shared'
 
 export interface AvailableModel {
@@ -603,6 +604,28 @@ export const api = {
 
   async resetPlanningSession(workspaceId: string): Promise<void> {
     await fetch(`/api/workspaces/${workspaceId}/planning/reset`, { method: 'POST' })
+  },
+
+  async getForemanModel(workspaceId: string): Promise<{ modelConfig: ModelConfig | null }> {
+    const res = await fetch(`/api/workspaces/${workspaceId}/foreman-model`)
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to load foreman model' }))
+      throw new Error(err.error || `Failed to load foreman model (${res.status})`)
+    }
+    return res.json()
+  },
+
+  async saveForemanModel(workspaceId: string, modelConfig: ModelConfig | null): Promise<{ modelConfig: ModelConfig | null }> {
+    const res = await fetch(`/api/workspaces/${workspaceId}/foreman-model`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ modelConfig }),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to save foreman model' }))
+      throw new Error(err.error || `Failed to save foreman model (${res.status})`)
+    }
+    return res.json()
   },
 
   // ─────────────────────────────────────────────────────────────────────────

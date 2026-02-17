@@ -5,18 +5,20 @@ import { api, type AvailableModel } from '../api'
 interface ModelSelectorProps {
   value?: ModelConfig
   onChange: (config: ModelConfig | undefined) => void
+  /** Render in compact mode for inline use in headers/toolbars */
+  compact?: boolean
 }
 
 const THINKING_LEVELS = [
   { value: 'off', label: 'Off' },
-  { value: 'minimal', label: 'Minimal' },
+  { value: 'minimal', label: 'Min' },
   { value: 'low', label: 'Low' },
-  { value: 'medium', label: 'Medium' },
+  { value: 'medium', label: 'Med' },
   { value: 'high', label: 'High' },
-  { value: 'xhigh', label: 'XHigh' },
+  { value: 'xhigh', label: 'XHi' },
 ] as const
 
-export function ModelSelector({ value, onChange }: ModelSelectorProps) {
+export function ModelSelector({ value, onChange, compact }: ModelSelectorProps) {
   const [models, setModels] = useState<AvailableModel[]>([])
   const [isLoading, setIsLoading] = useState(true)
 
@@ -62,13 +64,51 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
 
   if (isLoading) {
     return (
-      <div className="text-xs text-slate-400">Loading models…</div>
+      <div className="text-xs text-slate-400">Loading…</div>
     )
   }
 
   if (models.length === 0) {
     return (
-      <div className="text-xs text-slate-400">No models available</div>
+      <div className="text-xs text-slate-400">No models</div>
+    )
+  }
+
+  // Compact mode: single-line dropdown for headers/toolbars
+  if (compact) {
+    return (
+      <div className="flex items-center gap-2">
+        <select
+          value={selectedKey}
+          onChange={(e) => handleModelChange(e.target.value)}
+          className="text-xs border border-slate-200 rounded px-2 py-1 bg-white text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-400 focus:border-transparent max-w-[200px]"
+        >
+          <option value="">Default model</option>
+          {Object.entries(grouped).map(([provider, providerModels]) => (
+            <optgroup key={provider} label={provider}>
+              {providerModels.map(model => (
+                <option key={`${model.provider}/${model.id}`} value={`${model.provider}/${model.id}`}>
+                  {model.name || model.id}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+
+        {value && selectedModel?.reasoning && (
+          <select
+            value={value.thinkingLevel || 'medium'}
+            onChange={(e) => handleThinkingChange(e.target.value)}
+            className="text-xs border border-slate-200 rounded px-1.5 py-1 bg-white text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-400 focus:border-transparent"
+          >
+            {THINKING_LEVELS.map(level => (
+              <option key={level.value} value={level.value}>
+                {level.label}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
     )
   }
 

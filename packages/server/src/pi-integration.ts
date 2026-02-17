@@ -12,7 +12,7 @@ import {
 } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
-import type { TaskDefaults, PlanningGuardrails, WorkflowDefaultsConfig } from '@pi-factory/shared';
+import type { TaskDefaults, PlanningGuardrails, WorkflowDefaultsConfig, ForemanSettings } from '@pi-factory/shared';
 import { getTaskFactoryHomeDir } from './taskfactory-home.js';
 
 const PI_AGENT_DIR = join(homedir(), '.pi', 'agent');
@@ -450,6 +450,36 @@ export function saveWorkspacePiConfig(workspaceId: string, config: WorkspacePiCo
   
   const configPath = join(workspaceDir, 'pi-config.json');
   writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+}
+
+// =============================================================================
+// Foreman Settings (per-workspace)
+// =============================================================================
+
+export function loadForemanSettings(workspaceId: string): ForemanSettings {
+  const settingsPath = join(PI_FACTORY_DIR, 'workspaces', workspaceId, 'foreman-settings.json');
+  
+  if (!existsSync(settingsPath)) {
+    return {};
+  }
+
+  try {
+    const content = readFileSync(settingsPath, 'utf-8');
+    return JSON.parse(content);
+  } catch (err) {
+    console.error(`Failed to load foreman settings for workspace ${workspaceId}:`, err);
+    return {};
+  }
+}
+
+export function saveForemanSettings(workspaceId: string, settings: ForemanSettings): void {
+  const workspaceDir = join(PI_FACTORY_DIR, 'workspaces', workspaceId);
+  if (!existsSync(workspaceDir)) {
+    mkdirSync(workspaceDir, { recursive: true });
+  }
+  
+  const settingsPath = join(workspaceDir, 'foreman-settings.json');
+  writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
 }
 
 // =============================================================================
