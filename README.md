@@ -99,6 +99,21 @@ npm run check:deadcode
 npm run check:release
 ```
 
+## Documentation
+
+- [Documentation index](docs/README.md)
+- [Getting Started](docs/getting-started.md)
+- [CLI Reference](docs/cli-reference.md)
+- [Workflow and Queue](docs/workflow-and-queue.md)
+- [System Architecture](docs/system-architecture.md)
+- [Runtime Flows](docs/runtime-flows.md)
+- [State Contract](docs/state-contract.md)
+- [REST API Reference](docs/api-rest-reference.md)
+- [WebSocket Event Reference](docs/api-websocket-events.md)
+- [Operations Security Posture](docs/operations-security-posture.md)
+- [Contribution Commands](docs/contribution-commands.md)
+- [Contribution: Extensions and Skills](docs/contribution-extensions-skills.md)
+
 ## Feature gallery
 
 Provider setup supports all providers [pi supports](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/providers.md)
