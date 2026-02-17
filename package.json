@@ -34,8 +34,12 @@
     "check:release": "npm run lint && npm run typecheck && npm run test && npm run build && npm run check:deadcode"
   },
   "dependencies": {
+    "@clack/prompts": "^0.10.0",
     "@mariozechner/pi-coding-agent": "^0.52.10",
-    "@sinclair/typebox": "^0.34.48"
+    "@sinclair/typebox": "^0.34.48",
+    "chalk": "^5.4.1",
+    "cli-table3": "^0.6.5",
+    "commander": "^13.1.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.35.0",
