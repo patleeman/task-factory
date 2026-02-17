@@ -1,6 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import type { ServerEvent, PlanningMessage, ActivityEntry, Shelf, QARequest } from '@task-factory/shared'
 import type { AgentStreamState, ToolCallState } from './useAgentStreaming'
+import {
+  createPlanningQALifecycleState,
+  hydratePlanningQALifecycleFromMessages,
+  reducePlanningQALifecycleState,
+  type PlanningQALifecycleEvent,
+} from './planning-qa-state'
 import { api } from '../api'
 
 export interface PlanningStreamState {
@@ -103,33 +109,83 @@ export function usePlanningStreaming(
   const [agentStream, setAgentStream] = useState<AgentStreamState>(INITIAL_AGENT_STREAM)
   const [shelf, setShelf] = useState<Shelf | null>(null)
   const [activeQARequest, setActiveQARequest] = useState<QARequest | null>(null)
+
   const workspaceIdRef = useRef(workspaceId)
   workspaceIdRef.current = workspaceId
+
+  const messagesRef = useRef<PlanningMessage[]>(messages)
+  messagesRef.current = messages
+
+  const qaLifecycleRef = useRef(createPlanningQALifecycleState())
   const qaPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const stopQAPoll = useCallback(() => {
-    if (qaPollRef.current) { clearInterval(qaPollRef.current); qaPollRef.current = null }
+    if (qaPollRef.current) {
+      clearInterval(qaPollRef.current)
+      qaPollRef.current = null
+    }
+  }, [])
+
+  const applyQALifecycleEvent = useCallback((
+    event: PlanningQALifecycleEvent,
+    options: { markAwaitingOnOpen?: boolean } = {},
+  ) => {
+    const previousState = qaLifecycleRef.current
+    const nextState = reducePlanningQALifecycleState(previousState, event)
+    qaLifecycleRef.current = nextState
+
+    if (nextState !== previousState) {
+      setActiveQARequest(nextState.activeRequest)
+    }
+
+    const requestId = event.type === 'request'
+      ? event.request.requestId
+      : event.type === 'message'
+        ? event.message.metadata?.qaRequest?.requestId
+        : null
+
+    if (options.markAwaitingOnOpen && requestId && nextState.activeRequest?.requestId === requestId) {
+      setAgentStream((prev) => ({
+        ...prev,
+        status: 'awaiting_qa' as any,
+        isActive: false,
+      }))
+    }
+
+    return nextState
   }, [])
 
   // Poll for pending QA request via HTTP (reliable fallback for WebSocket broadcasts)
   const startQAPoll = useCallback((wsId: string) => {
     if (qaPollRef.current) return
+
     qaPollRef.current = setInterval(async () => {
       try {
         const request = await api.getPendingQA(wsId)
-        if (request) {
-          setActiveQARequest(request)
-          setAgentStream((prev) => ({ ...prev, status: 'awaiting_qa' as any, isActive: false }))
+        if (!request) return
+
+        const nextState = applyQALifecycleEvent(
+          { type: 'request', request },
+          { markAwaitingOnOpen: true },
+        )
+
+        if (
+          nextState.activeRequest?.requestId === request.requestId
+          || nextState.resolvedRequestIds.has(request.requestId)
+        ) {
           stopQAPoll()
         }
-      } catch { /* ignore */ }
+      } catch {
+        // ignore
+      }
     }, 500)
-  }, [stopQAPoll])
+  }, [applyQALifecycleEvent, stopQAPoll])
 
   useEffect(() => {
     setMessages([])
     setAgentStream(INITIAL_AGENT_STREAM)
     setActiveQARequest(null)
+    qaLifecycleRef.current = createPlanningQALifecycleState()
     stopQAPoll()
   }, [workspaceId, stopQAPoll])
 
@@ -138,23 +194,45 @@ export function usePlanningStreaming(
   // Seed with initial messages loaded from server, or clear on reset
   useEffect(() => {
     if (!initialMessages) return
+
     if (initialMessages.length === 0) {
       setMessages([])
       setAgentStream(INITIAL_AGENT_STREAM)
-    } else {
-      setMessages((prev) => {
-        // Merge: keep HTTP-loaded messages as the base, then append any
-        // WS-delivered messages that arrived before the HTTP response.
-        const byId = new Map(initialMessages.map((m) => [m.id, m]))
-        for (const m of prev) {
-          if (!byId.has(m.id)) byId.set(m.id, m)
-        }
-        return Array.from(byId.values()).sort((a, b) =>
-          (a.timestamp || '').localeCompare(b.timestamp || '')
-        )
-      })
+      setActiveQARequest(null)
+      qaLifecycleRef.current = createPlanningQALifecycleState()
+      stopQAPoll()
+      return
     }
-  }, [initialMessages])
+
+    // Merge: keep HTTP-loaded messages as the base, then append any
+    // WS-delivered messages that arrived before the HTTP response.
+    const byId = new Map(initialMessages.map((m) => [m.id, m]))
+    for (const message of messagesRef.current) {
+      if (!byId.has(message.id)) {
+        byId.set(message.id, message)
+      }
+    }
+
+    const mergedMessages = Array.from(byId.values()).sort((a, b) =>
+      (a.timestamp || '').localeCompare(b.timestamp || '')
+    )
+
+    setMessages(mergedMessages)
+
+    const restoredQAState = hydratePlanningQALifecycleFromMessages(mergedMessages)
+    qaLifecycleRef.current = restoredQAState
+    setActiveQARequest(restoredQAState.activeRequest)
+
+    if (restoredQAState.activeRequest) {
+      setAgentStream((prev) => ({
+        ...prev,
+        status: 'awaiting_qa' as any,
+        isActive: false,
+      }))
+    } else {
+      stopQAPoll()
+    }
+  }, [initialMessages, stopQAPoll])
 
   useEffect(() => {
     return subscribe((msg) => {
@@ -164,19 +242,20 @@ export function usePlanningStreaming(
       if ('workspaceId' in msg && (msg as any).workspaceId !== currentWsId) return
 
       switch (msg.type) {
-        case 'planning:status':
+        case 'planning:status': {
           setAgentStream((prev) => ({
             ...prev,
             status: msg.status as any,
             contextUsage: msg.contextUsage !== undefined ? msg.contextUsage : prev.contextUsage,
             isActive: msg.status !== 'idle' && msg.status !== 'error' && msg.status !== 'awaiting_qa',
           }))
-          // Clear QA dialog when agent resumes (not awaiting anymore)
-          if (msg.status !== 'awaiting_qa') {
-            setActiveQARequest(null)
+
+          const nextQAState = applyQALifecycleEvent({ type: 'status', status: msg.status })
+          if (msg.status !== 'awaiting_qa' && !nextQAState.activeRequest) {
             stopQAPoll()
           }
           break
+        }
 
         case 'planning:context_usage':
           setAgentStream((prev) => ({
@@ -185,26 +264,49 @@ export function usePlanningStreaming(
           }))
           break
 
-        case 'qa:request':
-          setActiveQARequest(msg.request)
-          break
+        case 'qa:request': {
+          const nextQAState = applyQALifecycleEvent(
+            { type: 'request', request: msg.request },
+            { markAwaitingOnOpen: true },
+          )
 
-        case 'planning:message':
-          setMessages((prev) => {
-            if (prev.some((m) => m.id === msg.message.id)) return prev
-            return [...prev, msg.message]
-          })
-          // Fallback: also derive activeQARequest from the persisted QA message.
-          // This covers cases where the separate qa:request event doesn't arrive.
-          if (msg.message.role === 'qa' && msg.message.metadata?.qaRequest && !msg.message.metadata?.qaResponse) {
-            setActiveQARequest(msg.message.metadata.qaRequest as QARequest)
-            setAgentStream((prev) => ({
-              ...prev,
-              status: 'awaiting_qa' as any,
-              isActive: false,
-            }))
+          if (
+            nextQAState.activeRequest?.requestId === msg.request.requestId
+            || nextQAState.resolvedRequestIds.has(msg.request.requestId)
+          ) {
+            stopQAPoll()
           }
           break
+        }
+
+        case 'planning:message': {
+          setMessages((prev) => {
+            if (prev.some((m) => m.id === msg.message.id)) {
+              return prev
+            }
+
+            return [...prev, msg.message]
+          })
+
+          // Fallback: also derive activeQARequest from persisted QA messages.
+          // This covers cases where the separate qa:request event doesn't arrive.
+          const nextQAState = applyQALifecycleEvent(
+            { type: 'message', message: msg.message },
+            { markAwaitingOnOpen: true },
+          )
+
+          const responseRequestId = msg.message.metadata?.qaResponse?.requestId
+          if (responseRequestId && nextQAState.resolvedRequestIds.has(responseRequestId)) {
+            stopQAPoll()
+          }
+
+          const messageRequestId = msg.message.metadata?.qaRequest?.requestId
+          if (messageRequestId && nextQAState.activeRequest?.requestId === messageRequestId) {
+            stopQAPoll()
+          }
+
+          break
+        }
 
         case 'planning:streaming_text':
           setAgentStream((prev) => ({
@@ -251,7 +353,8 @@ export function usePlanningStreaming(
               } as ToolCallState,
             ],
           }))
-          // When ask_questions starts, poll for the QA request via HTTP
+
+          // When ask_questions starts, poll for the QA request via HTTP.
           if (msg.toolName === 'ask_questions' && currentWsId) {
             startQAPoll(currentWsId)
           }
@@ -286,10 +389,11 @@ export function usePlanningStreaming(
           break
 
         case 'planning:session_reset':
-          // Server has reset the session — clear all local state
+          // Server has reset the session — clear all local state.
           setMessages([])
           setAgentStream(INITIAL_AGENT_STREAM)
           setActiveQARequest(null)
+          qaLifecycleRef.current = createPlanningQALifecycleState()
           stopQAPoll()
           break
 
@@ -298,24 +402,10 @@ export function usePlanningStreaming(
           break
       }
     })
-  }, [subscribe])
+  }, [applyQALifecycleEvent, startQAPoll, stopQAPoll, subscribe])
 
   // Convert messages to entries for TaskChat
   const entries = messagesToEntries(messages)
-
-  // Restore active QA request from persisted messages on load
-  // (if the last qa message is a request without a matching response)
-  useEffect(() => {
-    if (messages.length === 0) return
-    // Find the last QA request message that doesn't have a corresponding response
-    const qaMessages = messages.filter((m) => m.role === 'qa')
-    if (qaMessages.length === 0) return
-
-    const lastQA = qaMessages[qaMessages.length - 1]
-    if (lastQA.metadata?.qaRequest && !lastQA.metadata?.qaResponse) {
-      setActiveQARequest(lastQA.metadata.qaRequest as QARequest)
-    }
-  }, [initialMessages]) // Only on initial load
 
   return { agentStream, entries, shelf, activeQARequest }
 }
