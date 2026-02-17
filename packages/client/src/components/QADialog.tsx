@@ -1,67 +1,132 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { Loader2, SendHorizontal } from 'lucide-react'
 import type { QARequest, QAAnswer } from '@task-factory/shared'
 import { AppIcon } from './AppIcon'
 
 interface QADialogProps {
   request: QARequest
-  onSubmit: (answers: QAAnswer[]) => void
+  onSubmit: (answers: QAAnswer[]) => Promise<boolean>
   onAbort: () => void
 }
 
 export function QADialog({ request, onSubmit, onAbort }: QADialogProps) {
   const [currentIndex, setCurrentIndex] = useState(0)
-  const [answers, setAnswers] = useState<QAAnswer[]>([])
+  const [answersByQuestionId, setAnswersByQuestionId] = useState<Record<string, string>>({})
   const [customInput, setCustomInput] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const question = request.questions[currentIndex]
   const total = request.questions.length
-  const isLast = currentIndex === total - 1
+
+  const uniqueQuestionIds = useMemo(() => {
+    const seen = new Set<string>()
+    const ids: string[] = []
+    for (const item of request.questions) {
+      if (seen.has(item.id)) continue
+      seen.add(item.id)
+      ids.push(item.id)
+    }
+    return ids
+  }, [request.questions])
+
+  const answeredCount = useMemo(
+    () => uniqueQuestionIds.reduce((count, questionId) => {
+      const answer = answersByQuestionId[questionId]
+      return answer && answer.trim() ? count + 1 : count
+    }, 0),
+    [uniqueQuestionIds, answersByQuestionId],
+  )
+
+  const allAnswered = uniqueQuestionIds.length > 0 && answeredCount === uniqueQuestionIds.length
+  const selectedAnswer = question ? answersByQuestionId[question.id] ?? '' : ''
 
   // Reset when request changes
   useEffect(() => {
     setCurrentIndex(0)
-    setAnswers([])
+    setAnswersByQuestionId({})
     setCustomInput('')
     setSubmitting(false)
   }, [request.requestId])
+
+  // Show existing answer when revisiting a question
+  useEffect(() => {
+    if (!question) return
+    setCustomInput(answersByQuestionId[question.id] ?? '')
+  }, [question?.id, answersByQuestionId])
 
   // Auto-focus input on each question
   useEffect(() => {
     inputRef.current?.focus()
   }, [currentIndex, request.requestId])
 
-  function advanceOrSubmit(answer: QAAnswer) {
-    const updated = [...answers, answer]
-    setAnswers(updated)
-    setCustomInput('')
+  function saveAnswer(selectedOption: string) {
+    if (submitting || !question) return
 
-    if (isLast) {
-      setSubmitting(true)
-      onSubmit(updated)
-    } else {
-      setCurrentIndex((i) => i + 1)
+    const trimmed = selectedOption.trim()
+    if (!trimmed) return
+
+    setAnswersByQuestionId((prev) => ({
+      ...prev,
+      [question.id]: trimmed,
+    }))
+    setCustomInput(trimmed)
+
+    if (currentIndex < total - 1) {
+      setCurrentIndex((index) => Math.min(total - 1, index + 1))
     }
   }
 
   function handleOptionClick(option: string) {
-    if (submitting) return
-    advanceOrSubmit({ questionId: question.id, selectedOption: option })
+    saveAnswer(option)
   }
 
   function handleInputSubmit() {
     const trimmed = customInput.trim()
-    if (!trimmed || submitting) return
+    if (!trimmed || submitting || !question) return
 
     // If user typed a number, pick the corresponding option
     const num = parseInt(trimmed, 10)
     if (num >= 1 && num <= question.options.length) {
-      advanceOrSubmit({ questionId: question.id, selectedOption: question.options[num - 1] })
-    } else {
-      // Custom free-text answer
-      advanceOrSubmit({ questionId: question.id, selectedOption: trimmed })
+      saveAnswer(question.options[num - 1])
+      return
+    }
+
+    // Custom free-text answer
+    saveAnswer(trimmed)
+  }
+
+  function handleBack() {
+    if (submitting || currentIndex === 0) return
+    setCurrentIndex((index) => Math.max(0, index - 1))
+  }
+
+  function handleForward() {
+    if (submitting || currentIndex >= total - 1) return
+    setCurrentIndex((index) => Math.min(total - 1, index + 1))
+  }
+
+  async function handleFinalSubmit() {
+    if (submitting || !allAnswered) return
+
+    const submissionAnswers = uniqueQuestionIds.map((questionId) => ({
+      questionId,
+      selectedOption: (answersByQuestionId[questionId] || '').trim(),
+    }))
+
+    if (submissionAnswers.some((answer) => !answer.selectedOption)) {
+      return
+    }
+
+    setSubmitting(true)
+
+    try {
+      const submitted = await onSubmit(submissionAnswers)
+      if (!submitted) {
+        setSubmitting(false)
+      }
+    } catch {
+      setSubmitting(false)
     }
   }
 
@@ -87,14 +152,21 @@ export function QADialog({ request, onSubmit, onAbort }: QADialogProps) {
           </span>
           {total > 1 && (
             <div className="flex gap-0.5">
-              {request.questions.map((_, i) => (
-                <span
-                  key={i}
-                  className={`w-1.5 h-1.5 rounded-full ${
-                    i < currentIndex ? 'bg-amber-400' : i === currentIndex ? 'bg-amber-600' : 'bg-amber-200'
-                  }`}
-                />
-              ))}
+              {request.questions.map((item, i) => {
+                const answered = Boolean(answersByQuestionId[item.id]?.trim())
+                return (
+                  <span
+                    key={item.id + i}
+                    className={`w-1.5 h-1.5 rounded-full ${
+                      i === currentIndex
+                        ? 'bg-amber-600'
+                        : answered
+                          ? 'bg-amber-400'
+                          : 'bg-amber-200'
+                    }`}
+                  />
+                )
+              })}
             </div>
           )}
         </div>
@@ -112,20 +184,25 @@ export function QADialog({ request, onSubmit, onAbort }: QADialogProps) {
 
       {/* Numbered options — clickable */}
       <div className="space-y-1 mb-2.5">
-        {question.options.map((option, i) => (
-          <button
-            key={option}
-            onClick={() => handleOptionClick(option)}
-            disabled={submitting}
-            className="flex items-baseline gap-2 w-full text-left px-2.5 py-1.5 rounded-md text-sm
-                       border border-slate-200 bg-white text-slate-700
-                       hover:border-amber-300 hover:bg-amber-50 hover:text-slate-900
-                       transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <span className="text-xs font-mono text-amber-600 shrink-0 w-4 text-right">{i + 1}.</span>
-            <span className="leading-snug">{option}</span>
-          </button>
-        ))}
+        {question.options.map((option, i) => {
+          const isSelected = selectedAnswer === option
+          return (
+            <button
+              key={`${i}:${option}`}
+              onClick={() => handleOptionClick(option)}
+              disabled={submitting}
+              className={`flex items-baseline gap-2 w-full text-left px-2.5 py-1.5 rounded-md text-sm
+                         border bg-white text-slate-700
+                         hover:border-amber-300 hover:bg-amber-50 hover:text-slate-900
+                         transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
+                           isSelected ? 'border-amber-400 bg-amber-100 text-slate-900' : 'border-slate-200'
+                         }`}
+            >
+              <span className="text-xs font-mono text-amber-600 shrink-0 w-4 text-right">{i + 1}.</span>
+              <span className="leading-snug">{option}</span>
+            </button>
+          )
+        })}
       </div>
 
       {/* Input for typing a number or custom answer */}
@@ -148,14 +225,48 @@ export function QADialog({ request, onSubmit, onAbort }: QADialogProps) {
           className="text-sm font-medium px-3 py-1.5 rounded-md bg-amber-600 text-white
                      hover:bg-amber-700 disabled:bg-slate-200 disabled:text-slate-400
                      disabled:cursor-not-allowed transition-colors shrink-0"
-          aria-label={submitting ? 'Submitting answer' : 'Submit answer'}
-          title={submitting ? 'Submitting answer' : 'Submit answer'}
+          aria-label={submitting ? 'Saving answer' : 'Save answer'}
+          title={submitting ? 'Saving answer' : 'Save answer'}
         >
           {submitting ? (
             <AppIcon icon={Loader2} size="sm" className="animate-spin" />
           ) : (
             <AppIcon icon={SendHorizontal} size="sm" />
           )}
+        </button>
+      </div>
+
+      {/* Navigation + final submit */}
+      <div className="flex items-center gap-2 mt-2.5">
+        <button
+          onClick={handleBack}
+          disabled={submitting || currentIndex === 0}
+          className="text-[11px] font-mono uppercase px-2.5 py-1 rounded border border-slate-300 text-slate-600
+                     hover:border-slate-400 hover:text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          back
+        </button>
+        <button
+          onClick={handleForward}
+          disabled={submitting || currentIndex >= total - 1}
+          className="text-[11px] font-mono uppercase px-2.5 py-1 rounded border border-slate-300 text-slate-600
+                     hover:border-slate-400 hover:text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          next
+        </button>
+
+        <span className="ml-auto text-[11px] text-slate-500 font-mono">
+          {answeredCount}/{uniqueQuestionIds.length} answered
+        </span>
+
+        <button
+          onClick={handleFinalSubmit}
+          disabled={!allAnswered || submitting}
+          className="text-[11px] font-mono uppercase px-2.5 py-1 rounded bg-emerald-600 text-white
+                     hover:bg-emerald-700 disabled:bg-slate-200 disabled:text-slate-400
+                     disabled:cursor-not-allowed transition-colors"
+        >
+          {submitting ? 'submitting…' : 'submit all'}
         </button>
       </div>
     </div>

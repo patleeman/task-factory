@@ -1158,13 +1158,15 @@ export function WorkspacePage() {
   }, [])
 
   // Q&A disambiguation handlers
-  const handleQASubmit = async (answers: QAAnswer[]) => {
-    if (!workspaceId || !planningStream.activeQARequest) return
+  const handleQASubmit = async (answers: QAAnswer[]): Promise<boolean> => {
+    if (!workspaceId || !planningStream.activeQARequest) return false
     try {
       await api.submitQAResponse(workspaceId, planningStream.activeQARequest.requestId, answers)
+      return true
     } catch (err) {
       console.error('Failed to submit Q&A response:', err)
       showToast('Failed to submit answers')
+      return false
     }
   }
 
