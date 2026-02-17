@@ -1175,4 +1175,4 @@ export interface PostExecutionSkill {
 export const DEFAULT_PRE_EXECUTION_SKILLS: string[] = [];
 
 /** Default post-execution skills applied to new tasks when none are specified. */
-export const DEFAULT_POST_EXECUTION_SKILLS: string[] = ['checkpoint', 'code-review'];
+export const DEFAULT_POST_EXECUTION_SKILLS: string[] = ['checkpoint', 'code-review', 'update-docs'];

@@ -16,12 +16,13 @@ const AVAILABLE_MODELS = [
 const AVAILABLE_SKILLS: Array<{ id: string; hooks: Array<'pre' | 'post'> }> = [
   { id: 'checkpoint', hooks: ['post'] },
   { id: 'code-review', hooks: ['post'] },
+  { id: 'update-docs', hooks: ['post'] },
   { id: 'security-review', hooks: ['post'] },
   { id: 'tdd-test-first', hooks: ['pre'] },
 ];
 
 describe('validateTaskDefaults', () => {
-  it('accepts valid planning and execution model configs', () => {
+  it('accepts valid planning and execution model configs with update-docs in post skills', () => {
     const defaults: TaskDefaults = {
       planningModelConfig: {
         provider: 'anthropic',
@@ -37,7 +38,7 @@ describe('validateTaskDefaults', () => {
         modelId: 'gpt-4o',
       },
       preExecutionSkills: [],
-      postExecutionSkills: ['checkpoint', 'code-review'],
+      postExecutionSkills: ['checkpoint', 'code-review', 'update-docs'],
     };
 
     expect(validateTaskDefaults(defaults, AVAILABLE_MODELS, AVAILABLE_SKILLS)).toEqual({ ok: true });
@@ -180,6 +181,10 @@ describe('validateTaskDefaults', () => {
 describe('resolveTaskDefaults', () => {
   it('falls back to built-in defaults when taskDefaults are missing', () => {
     expect(resolveTaskDefaults(null)).toEqual(getBuiltInTaskDefaults());
+  });
+
+  it('includes update-docs in built-in post-execution skills', () => {
+    expect(getBuiltInTaskDefaults().postExecutionSkills).toContain('update-docs');
   });
 
   it('falls back to built-in skills when settings are malformed and maps legacy modelConfig to executionModelConfig', () => {

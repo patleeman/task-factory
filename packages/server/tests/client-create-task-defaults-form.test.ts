@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { TaskDefaults } from '@task-factory/shared';
+import { DEFAULT_POST_EXECUTION_SKILLS, type TaskDefaults } from '@task-factory/shared';
 import { buildCreateTaskFormDefaults } from '../../client/src/components/task-default-form';
 
 describe('create-task form defaults', () => {
@@ -19,14 +19,14 @@ describe('create-task form defaults', () => {
         modelId: 'gpt-4o',
       },
       preExecutionSkills: ['checkpoint'],
-      postExecutionSkills: ['checkpoint', 'code-review'],
+      postExecutionSkills: ['checkpoint', 'code-review', 'update-docs'],
     };
 
     const formDefaults = buildCreateTaskFormDefaults(defaults);
 
     expect(formDefaults).toEqual({
       selectedPreSkillIds: ['checkpoint'],
-      selectedSkillIds: ['checkpoint', 'code-review'],
+      selectedSkillIds: ['checkpoint', 'code-review', 'update-docs'],
       planningModelConfig: {
         provider: 'anthropic',
         modelId: 'claude-sonnet-4',
@@ -37,6 +37,20 @@ describe('create-task form defaults', () => {
         modelId: 'gpt-4o',
       },
     });
+  });
+
+  it('includes update-docs in selected post skills when defaults use built-in post skill list', () => {
+    const defaults: TaskDefaults = {
+      planningModelConfig: undefined,
+      executionModelConfig: undefined,
+      modelConfig: undefined,
+      preExecutionSkills: [],
+      postExecutionSkills: [...DEFAULT_POST_EXECUTION_SKILLS],
+    };
+
+    const formDefaults = buildCreateTaskFormDefaults(defaults);
+
+    expect(formDefaults.selectedSkillIds).toContain('update-docs');
   });
 
   it('falls back to legacy modelConfig when executionModelConfig is absent', () => {

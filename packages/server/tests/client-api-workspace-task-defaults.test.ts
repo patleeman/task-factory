@@ -16,7 +16,7 @@ const DEFAULTS: TaskDefaults = {
     modelId: 'gpt-4o',
   },
   preExecutionSkills: [],
-  postExecutionSkills: ['checkpoint', 'code-review'],
+  postExecutionSkills: ['checkpoint', 'code-review', 'update-docs'],
 };
 
 describe('client api workspace task defaults', () => {

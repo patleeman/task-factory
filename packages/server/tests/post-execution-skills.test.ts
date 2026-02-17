@@ -14,6 +14,22 @@ describe('execution skill discovery', () => {
     expect(captureScreenshot?.promptTemplate).toContain('agent-browser screenshot');
   });
 
+  it('discovers update-docs as a starter post hook with documentation guidance', () => {
+    const skills = reloadPostExecutionSkills();
+    const updateDocs = skills.find((skill) => skill.id === 'update-docs');
+
+    expect(updateDocs).toBeDefined();
+    expect(updateDocs?.source).toBe('starter');
+    expect(updateDocs?.type).toBe('follow-up');
+    expect(updateDocs?.hooks).toEqual(['post']);
+
+    const prompt = updateDocs?.promptTemplate ?? '';
+    expect(prompt).toContain('README.md');
+    expect(prompt).toContain('docs/**');
+    expect(prompt).toContain('CHANGELOG.md');
+    expect(prompt).toContain('No documentation updates were needed for this task.');
+  });
+
   it('discovers tdd skills as a paired workflow split across pre/post hooks', () => {
     const skills = reloadPostExecutionSkills();
 

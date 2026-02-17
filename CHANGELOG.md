@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Starter post-execution skill `update-docs` to keep `README.md`, `docs/**`, and `CHANGELOG.md` aligned with implementation changes.
+
+### Changed
+- Default post-execution skill order now includes `update-docs` for new tasks.
+
 ## [0.2.0] - 2026-02-17
 
 ### Added

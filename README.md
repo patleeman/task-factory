@@ -20,7 +20,7 @@ Task Factory has a fairly opinionated workflow. Tasks progress through stages:
 
 - **Backlog**: Tasks are staged in the backlog as an agent is run to generate a plan. You can review the plan before marking it as ready.
 - **Ready**: Once a task is ready for execution, place it in the ready queue, or let it Auto Promote from the backlog.
-- **Executing**: Tasks are executed one at a time by default (but that number is configurable). Pre and post execution skill are fired before and after the task is implemented.
+- **Executing**: Tasks are executed one at a time by default (but that number is configurable). Pre/post execution skills run around implementation; starter post hooks include `checkpoint`, `code-review`, and `update-docs`.
 - **Completed**: Once in completed state, you can review the task before archiving it.
 
 This keeps agent output aligned to your review capacity and prevents overproduction.

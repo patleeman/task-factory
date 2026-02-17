@@ -51,6 +51,38 @@ How to safely customize Task Factory with repo extensions (`extensions/`) and ex
 | `pre` | Runs before execution; failure aborts execution |
 | `post` | Runs after `task_complete`; failure is logged and next post hook continues |
 
+### Starter post-execution skills
+
+| Skill | Purpose |
+|---|---|
+| `checkpoint` | Commits and pushes agent-authored changes |
+| `code-review` | Reviews task changes for correctness, quality, and safety |
+| `update-docs` | Reviews implementation deltas and updates impacted docs (`README.md`, `docs/**`, `CHANGELOG.md` when applicable), or explicitly reports when no docs are needed |
+
+Built-in post-execution order for new tasks (when no global/workspace/task override is set) is:
+
+1. `checkpoint`
+2. `code-review`
+3. `update-docs`
+
+### Customizing post-execution order (global/workspace/task)
+
+| Scope | Where to change it | Field |
+|---|---|---|
+| Global default | `~/.taskfactory/settings.json` (or Settings UI) | `taskDefaults.postExecutionSkills` |
+| Workspace override | `~/.taskfactory/workspaces/<workspace-id>/task-defaults.json` (or Workspace Settings) | `postExecutionSkills` |
+| Single task | Create Task form / API request payload | `postExecutionSkills` |
+
+Example global default override:
+
+```json
+{
+  "taskDefaults": {
+    "postExecutionSkills": ["code-review", "update-docs", "checkpoint"]
+  }
+}
+```
+
 ### Security guardrails
 
 - Apply least-privilege tool design.
