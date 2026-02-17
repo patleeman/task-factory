@@ -167,7 +167,7 @@ app.get('/api/browse', async (req, res) => {
   try {
     const entries = await readdir(dir, { withFileTypes: true });
     const folders = entries
-      .filter(e => e.isDirectory() && !e.name.startsWith('.'))
+      .filter(e => (e.isDirectory() || e.isSymbolicLink()) && !e.name.startsWith('.'))
       .map(e => ({
         name: e.name,
         path: join(dir, e.name),
