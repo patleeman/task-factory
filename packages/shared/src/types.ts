@@ -85,7 +85,141 @@ export interface TaskDefaults {
   modelConfig?: ModelConfig;
   preExecutionSkills: string[];
   postExecutionSkills: string[];
+  /**
+   * Custom planning prompt template.
+   * When provided, this replaces the built-in planning prompt.
+   * The template can use {{variable}} placeholders for dynamic values.
+   */
+  planningPromptTemplate?: string;
+  /**
+   * Custom execution prompt template.
+   * When provided, this replaces the built-in execution/rework prompt.
+   * The template can use {{variable}} placeholders for dynamic values.
+   */
+  executionPromptTemplate?: string;
 }
+
+/**
+ * Default planning prompt template.
+ * Available variables: {{taskId}}, {{title}}, {{stateBlock}}, {{contractReference}},
+ * {{acceptanceCriteria}}, {{description}}, {{sharedContext}}, {{attachments}}, {{maxToolCalls}}
+ */
+export const DEFAULT_PLANNING_PROMPT_TEMPLATE = `# Planning Task: {{title}}
+
+You are a planning agent. Your job is to research the codebase, generate strong acceptance criteria, and then produce a structured plan that is easy for humans to scan quickly.
+
+**Task ID:** {{taskId}}
+
+{{contractReference}}
+## Current State
+{{stateBlock}}
+
+{{acceptanceCriteria}}
+{{description}}
+{{sharedContext}}
+{{attachments}}
+## Instructions
+
+1. Research the codebase to understand the current state. Read relevant files, understand architecture, and trace call sites.
+2. You are in planning-only mode. Do not edit files, do not run write/edit tools, and do not implement code changes.
+3. Do NOT read other task files in .taskfactory/tasks/ (or legacy .pi/tasks/). They are irrelevant to your investigation and waste your tool budget.
+4. From your investigation, produce 3-7 specific, testable acceptance criteria for this task.
+5. Then produce a plan that directly satisfies those acceptance criteria.
+6. The plan is a high-level task summary for humans. Keep it concise and easy to parse.
+7. Keep wording short and scannable: goal should be 1-2 short sentences, and each step/validation/cleanup item should be a short outcome-focused line. Avoid walls of text.
+8. Steps should be short outcome-focused summaries (usually 3-6 steps). Avoid line-level implementation details, exact file paths, and low-level function-by-function instructions.
+9. Validation items must verify the acceptance criteria and overall outcome without turning into a detailed test script.
+10. Call the \`save_plan\` tool **exactly once** with taskId "{{taskId}}", acceptanceCriteria, goal, steps, validation, and cleanup.
+11. Cleanup items are post-completion tasks (pass an empty array if none needed).
+12. After calling \`save_plan\`, stop immediately. Do not run any further tools or actions.
+13. Stay within planning guardrails: at most {{maxToolCalls}} tool calls.`;
+
+/**
+ * Default execution prompt template.
+ * Available variables: {{taskId}}, {{title}}, {{stateBlock}}, {{contractReference}},
+ * {{acceptanceCriteria}}, {{testingInstructions}}, {{description}}, {{sharedContext}},
+ * {{attachments}}, {{skills}}
+ */
+export const DEFAULT_EXECUTION_PROMPT_TEMPLATE = `# Task: {{title}}
+
+**Task ID:** {{taskId}}
+
+{{contractReference}}
+## Current State
+{{stateBlock}}
+
+{{acceptanceCriteria}}
+{{testingInstructions}}
+{{description}}
+{{sharedContext}}
+{{attachments}}
+{{skills}}
+## Instructions
+1. Start by understanding the task requirements and acceptance criteria
+2. Plan your approach before implementing
+3. Use the available skills when appropriate
+4. Run tests to verify your implementation
+5. When you are DONE with the task and all acceptance criteria are met, call the \`task_complete\` tool with this task's ID ("{{taskId}}") and a brief summary (1-2 short sentences, easy to scan).
+6. If you have questions, need clarification, or hit a blocker, do NOT call task_complete — just explain the situation and stop. The user will respond.`;
+
+/**
+ * Default planning resume prompt template.
+ * Available variables: {{taskId}}, {{title}}, {{stateBlock}}, {{contractReference}},
+ * {{acceptanceCriteria}}, {{description}}, {{sharedContext}}, {{attachments}}, {{maxToolCalls}}
+ */
+export const DEFAULT_PLANNING_RESUME_PROMPT_TEMPLATE = `# Resume Planning Task: {{title}}
+
+Continue the existing planning conversation for this task. Reuse prior investigation and avoid repeating the same broad repo scans unless needed for new evidence.
+
+**Task ID:** {{taskId}}
+
+{{contractReference}}
+## Current State
+{{stateBlock}}
+
+{{acceptanceCriteria}}
+{{description}}
+{{sharedContext}}
+{{attachments}}
+## Instructions
+
+1. Continue from prior context and investigation.
+2. Fill only remaining gaps needed to produce a strong plan package.
+3. Do NOT read other task files in .taskfactory/tasks/ (or legacy .pi/tasks/). They are irrelevant and waste your tool budget.
+4. Produce 3-7 specific, testable acceptance criteria.
+5. Produce a concise high-level plan aligned to those criteria.
+6. Keep wording short and easy to scan: goal should be 1-2 short sentences, and each step/validation/cleanup item should be one short line when possible. Avoid walls of text.
+7. Call the \`save_plan\` tool exactly once with taskId "{{taskId}}", acceptanceCriteria, goal, steps, validation, and cleanup.
+8. After calling \`save_plan\`, stop immediately.
+9. Stay within planning guardrails: at most {{maxToolCalls}} tool calls.`;
+
+/**
+ * Default rework prompt template.
+ * Available variables: {{taskId}}, {{title}}, {{stateBlock}}, {{contractReference}},
+ * {{acceptanceCriteria}}, {{description}}, {{sharedContext}}, {{attachments}}
+ */
+export const DEFAULT_REWORK_PROMPT_TEMPLATE = `# Rework: {{title}}
+
+This task was previously completed but has been moved back for rework. You have the full conversation history from the previous execution above.
+
+**Task ID:** {{taskId}}
+
+{{contractReference}}
+## Current State
+{{stateBlock}}
+
+{{acceptanceCriteria}}
+{{description}}
+{{sharedContext}}
+{{attachments}}
+## Instructions
+1. Review what was done in the previous execution (you have the full history)
+2. Identify what needs to be fixed or improved
+3. Make the necessary changes
+4. Re-verify all acceptance criteria are met
+5. Run tests to confirm everything works
+6. When DONE, call the \`task_complete\` tool with task ID "{{taskId}}" and a brief summary (1-2 short sentences, easy to scan).
+7. If you have questions or hit a blocker, do NOT call task_complete — just explain and stop.`;
 
 export interface PlanningGuardrails {
   timeoutMs: number;

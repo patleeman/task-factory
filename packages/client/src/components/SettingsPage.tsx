@@ -4,6 +4,8 @@ import { useNavigate } from 'react-router-dom'
 import {
   DEFAULT_PLANNING_GUARDRAILS,
   DEFAULT_WORKFLOW_SETTINGS,
+  DEFAULT_PLANNING_PROMPT_TEMPLATE,
+  DEFAULT_EXECUTION_PROMPT_TEMPLATE,
   type ModelConfig,
   type TaskDefaults,
   type PlanningGuardrails,
@@ -78,6 +80,8 @@ function normalizeTaskDefaultsForUi(
       const skill = skillsById.get(skillId)
       return Boolean(skill && skill.hooks.includes('post'))
     }),
+    planningPromptTemplate: defaults.planningPromptTemplate,
+    executionPromptTemplate: defaults.executionPromptTemplate,
   }
 }
 
@@ -339,6 +343,8 @@ export function SettingsPage() {
           : undefined,
         preExecutionSkills: [...form.preExecutionSkills],
         postExecutionSkills: [...form.postExecutionSkills],
+        planningPromptTemplate: form.planningPromptTemplate?.trim() || undefined,
+        executionPromptTemplate: form.executionPromptTemplate?.trim() || undefined,
       }
 
       const savedDefaults = await api.saveTaskDefaults(payload)
@@ -991,6 +997,67 @@ export function SettingsPage() {
                   }}
                   showSkillConfigControls={false}
                 />
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-3">
+                <div>
+                  <h4 className="text-sm font-semibold text-slate-800">Planning Prompt Template</h4>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {'Custom prompt template for planning tasks. Leave empty to use the default.'}
+                    {' Available variables: {{taskId}}, {{title}}, {{stateBlock}}, {{contractReference}},'}
+                    {' {{acceptanceCriteria}}, {{description}}, {{sharedContext}}, {{attachments}}, {{maxToolCalls}}'}
+                  </p>
+                </div>
+                <textarea
+                  value={form.planningPromptTemplate || ''}
+                  onChange={(event) => {
+                    const value = event.target.value.trim() || undefined
+                    setForm({ ...form, planningPromptTemplate: value })
+                  }}
+                  placeholder={DEFAULT_PLANNING_PROMPT_TEMPLATE}
+                  rows={8}
+                  className="w-full text-xs font-mono border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent resize-y"
+                />
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setForm({ ...form, planningPromptTemplate: undefined })}
+                    className="text-xs text-slate-500 hover:text-slate-700 underline"
+                    type="button"
+                  >
+                    Reset to default
+                  </button>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-3">
+                <div>
+                  <h4 className="text-sm font-semibold text-slate-800">Execution Prompt Template</h4>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {'Custom prompt template for task execution. Leave empty to use the default.'}
+                    {' Available variables: {{taskId}}, {{title}}, {{stateBlock}}, {{contractReference}},'}
+                    {' {{acceptanceCriteria}}, {{testingInstructions}}, {{description}}, {{sharedContext}},'}
+                    {' {{attachments}}, {{skills}}'}
+                  </p>
+                </div>
+                <textarea
+                  value={form.executionPromptTemplate || ''}
+                  onChange={(event) => {
+                    const value = event.target.value.trim() || undefined
+                    setForm({ ...form, executionPromptTemplate: value })
+                  }}
+                  placeholder={DEFAULT_EXECUTION_PROMPT_TEMPLATE}
+                  rows={8}
+                  className="w-full text-xs font-mono border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent resize-y"
+                />
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setForm({ ...form, executionPromptTemplate: undefined })}
+                    className="text-xs text-slate-500 hover:text-slate-700 underline"
+                    type="button"
+                  >
+                    Reset to default
+                  </button>
+                </div>
               </div>
 
               <div className="pt-2">

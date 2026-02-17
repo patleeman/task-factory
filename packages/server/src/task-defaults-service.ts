@@ -3,6 +3,8 @@ import { dirname, join } from 'path';
 import {
   DEFAULT_PRE_EXECUTION_SKILLS,
   DEFAULT_POST_EXECUTION_SKILLS,
+  DEFAULT_PLANNING_PROMPT_TEMPLATE,
+  DEFAULT_EXECUTION_PROMPT_TEMPLATE,
   type CreateTaskRequest,
   type ModelConfig,
   type TaskDefaults,
@@ -43,6 +45,8 @@ const BUILT_IN_TASK_DEFAULTS: TaskDefaults = {
   modelConfig: undefined,
   preExecutionSkills: [...DEFAULT_PRE_EXECUTION_SKILLS],
   postExecutionSkills: [...DEFAULT_POST_EXECUTION_SKILLS],
+  planningPromptTemplate: DEFAULT_PLANNING_PROMPT_TEMPLATE,
+  executionPromptTemplate: DEFAULT_EXECUTION_PROMPT_TEMPLATE,
 };
 
 const PI_FACTORY_DIR = getTaskFactoryHomeDir();
@@ -55,6 +59,8 @@ interface TaskDefaultsOverride {
   modelConfig?: ModelConfig;
   preExecutionSkills?: string[];
   postExecutionSkills?: string[];
+  planningPromptTemplate?: string;
+  executionPromptTemplate?: string;
 }
 
 function cloneModelConfig(modelConfig: ModelConfig | undefined): ModelConfig | undefined {
@@ -77,6 +83,8 @@ function cloneTaskDefaults(defaults: TaskDefaults): TaskDefaults {
     modelConfig: cloneModelConfig(executionModelConfig),
     preExecutionSkills: [...defaults.preExecutionSkills],
     postExecutionSkills: [...defaults.postExecutionSkills],
+    planningPromptTemplate: defaults.planningPromptTemplate,
+    executionPromptTemplate: defaults.executionPromptTemplate,
   };
 }
 
@@ -90,6 +98,8 @@ function normalizeTaskDefaults(defaults: TaskDefaults): TaskDefaults {
     modelConfig: cloneModelConfig(executionModelConfig),
     preExecutionSkills: [...defaults.preExecutionSkills],
     postExecutionSkills: [...defaults.postExecutionSkills],
+    planningPromptTemplate: defaults.planningPromptTemplate,
+    executionPromptTemplate: defaults.executionPromptTemplate,
   };
 }
 
@@ -144,6 +154,14 @@ function sanitizeOptionalSkillIds(raw: unknown): string[] | undefined {
   }
 
   return raw.filter((skillId): skillId is string => typeof skillId === 'string');
+}
+
+function sanitizePromptTemplate(raw: unknown): string | undefined {
+  if (typeof raw !== 'string') {
+    return undefined;
+  }
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
 }
 
 function areModelConfigsEqual(left: ModelConfig | undefined, right: ModelConfig | undefined): boolean {
@@ -204,12 +222,22 @@ function buildWorkspaceTaskDefaultsOverride(
     override.postExecutionSkills = [...normalizedDefaults.postExecutionSkills];
   }
 
+  if (normalizedDefaults.planningPromptTemplate !== normalizedGlobalDefaults.planningPromptTemplate) {
+    override.planningPromptTemplate = normalizedDefaults.planningPromptTemplate;
+  }
+
+  if (normalizedDefaults.executionPromptTemplate !== normalizedGlobalDefaults.executionPromptTemplate) {
+    override.executionPromptTemplate = normalizedDefaults.executionPromptTemplate;
+  }
+
   const hasOverrides =
     override.planningModelConfig !== undefined
     || override.executionModelConfig !== undefined
     || override.modelConfig !== undefined
     || override.preExecutionSkills !== undefined
-    || override.postExecutionSkills !== undefined;
+    || override.postExecutionSkills !== undefined
+    || override.planningPromptTemplate !== undefined
+    || override.executionPromptTemplate !== undefined;
 
   return hasOverrides ? override : null;
 }
@@ -225,6 +253,8 @@ function resolveTaskDefaultsOverride(raw: unknown): TaskDefaultsOverride | null 
     modelConfig?: unknown;
     preExecutionSkills?: unknown;
     postExecutionSkills?: unknown;
+    planningPromptTemplate?: unknown;
+    executionPromptTemplate?: unknown;
   };
 
   const override: TaskDefaultsOverride = {
@@ -233,6 +263,8 @@ function resolveTaskDefaultsOverride(raw: unknown): TaskDefaultsOverride | null 
     modelConfig: sanitizeModelConfig(defaults.modelConfig),
     preExecutionSkills: sanitizeOptionalSkillIds(defaults.preExecutionSkills),
     postExecutionSkills: sanitizeOptionalSkillIds(defaults.postExecutionSkills),
+    planningPromptTemplate: sanitizePromptTemplate(defaults.planningPromptTemplate),
+    executionPromptTemplate: sanitizePromptTemplate(defaults.executionPromptTemplate),
   };
 
   const hasOverrides =
@@ -240,7 +272,9 @@ function resolveTaskDefaultsOverride(raw: unknown): TaskDefaultsOverride | null 
     || override.executionModelConfig !== undefined
     || override.modelConfig !== undefined
     || override.preExecutionSkills !== undefined
-    || override.postExecutionSkills !== undefined;
+    || override.postExecutionSkills !== undefined
+    || override.planningPromptTemplate !== undefined
+    || override.executionPromptTemplate !== undefined;
 
   return hasOverrides ? override : null;
 }
@@ -268,6 +302,12 @@ function mergeTaskDefaults(base: TaskDefaults, workspaceOverride: TaskDefaultsOv
     postExecutionSkills: workspaceOverride.postExecutionSkills !== undefined
       ? [...workspaceOverride.postExecutionSkills]
       : [...base.postExecutionSkills],
+    planningPromptTemplate: workspaceOverride.planningPromptTemplate !== undefined
+      ? workspaceOverride.planningPromptTemplate
+      : base.planningPromptTemplate,
+    executionPromptTemplate: workspaceOverride.executionPromptTemplate !== undefined
+      ? workspaceOverride.executionPromptTemplate
+      : base.executionPromptTemplate,
   };
 }
 
@@ -340,6 +380,8 @@ export function resolveTaskDefaults(rawSettings: PiFactorySettings | null | unde
     modelConfig: executionModelConfig,
     preExecutionSkills: sanitizePreSkillIds((defaults as { preExecutionSkills?: unknown }).preExecutionSkills),
     postExecutionSkills: sanitizePostSkillIds((defaults as { postExecutionSkills?: unknown }).postExecutionSkills),
+    planningPromptTemplate: sanitizePromptTemplate((defaults as { planningPromptTemplate?: unknown }).planningPromptTemplate),
+    executionPromptTemplate: sanitizePromptTemplate((defaults as { executionPromptTemplate?: unknown }).executionPromptTemplate),
   };
 }
 
@@ -405,6 +447,8 @@ export function applyTaskDefaultsToRequest(request: CreateTaskRequest, defaults:
   modelConfig: ModelConfig | undefined;
   preExecutionSkills: string[];
   postExecutionSkills: string[];
+  planningPromptTemplate: string | undefined;
+  executionPromptTemplate: string | undefined;
 } {
   const resolvedExecutionDefaults = defaults.executionModelConfig ?? defaults.modelConfig;
 
@@ -433,6 +477,8 @@ export function applyTaskDefaultsToRequest(request: CreateTaskRequest, defaults:
     modelConfig: cloneModelConfig(executionModelConfig),
     preExecutionSkills,
     postExecutionSkills,
+    planningPromptTemplate: defaults.planningPromptTemplate,
+    executionPromptTemplate: defaults.executionPromptTemplate,
   };
 }
 
@@ -530,6 +576,8 @@ export function parseTaskDefaultsPayload(raw: unknown): { ok: true; value: TaskD
     modelConfig?: unknown;
     preExecutionSkills?: unknown;
     postExecutionSkills?: unknown;
+    planningPromptTemplate?: unknown;
+    executionPromptTemplate?: unknown;
   };
 
   if (!Array.isArray(payload.postExecutionSkills)) {
@@ -572,6 +620,8 @@ export function parseTaskDefaultsPayload(raw: unknown): { ok: true; value: TaskD
       modelConfig: executionModelConfig,
       preExecutionSkills: [...preExecutionSkills],
       postExecutionSkills: [...payload.postExecutionSkills],
+      planningPromptTemplate: sanitizePromptTemplate(payload.planningPromptTemplate),
+      executionPromptTemplate: sanitizePromptTemplate(payload.executionPromptTemplate),
     },
   };
 }

@@ -19,6 +19,10 @@ import {
 } from '@mariozechner/pi-coding-agent';
 import {
   DEFAULT_PLANNING_GUARDRAILS,
+  DEFAULT_PLANNING_PROMPT_TEMPLATE,
+  DEFAULT_PLANNING_RESUME_PROMPT_TEMPLATE,
+  DEFAULT_EXECUTION_PROMPT_TEMPLATE,
+  DEFAULT_REWORK_PROMPT_TEMPLATE,
   resolveGlobalWorkflowSettings,
   resolveWorkspaceWorkflowSettings,
   type Task,
@@ -168,6 +172,26 @@ export function getRepoExtensionPaths(audience: RepoExtensionAudience = 'all'): 
 export function reloadRepoExtensions(): string[] {
   _repoExtensionPaths = null;
   return getRepoExtensionPaths();
+}
+
+// =============================================================================
+// Prompt Template Rendering
+// =============================================================================
+
+/**
+ * Render a prompt template with variable substitution.
+ * Variables use {{variableName}} syntax.
+ */
+function renderPromptTemplate(
+  template: string,
+  variables: Record<string, string | undefined>,
+): string {
+  let result = template;
+  for (const [key, value] of Object.entries(variables)) {
+    const placeholder = new RegExp(`\\{\\{${key}\\}\\}`, 'g');
+    result = result.replace(placeholder, value ?? '');
+  }
+  return result;
 }
 
 // =============================================================================
@@ -582,67 +606,41 @@ function buildTaskPrompt(
   skills: PiSkill[],
   attachmentSection: string,
   workspaceSharedContext: string | null,
+  promptTemplate?: string,
 ): string {
   const { frontmatter, content } = task;
-
-  let prompt = `# Task: ${frontmatter.title}\n\n`;
-  prompt += `**Task ID:** ${task.id}\n\n`;
   const currentState = buildTaskStateSnapshot(frontmatter);
-  prompt += buildContractReference() + '\n';
-  prompt += `## Current State\n`;
-  prompt += `${buildStateBlock(currentState)}\n\n`;
 
-  if (frontmatter.acceptanceCriteria.length > 0) {
-    prompt += `## Acceptance Criteria\n`;
-    frontmatter.acceptanceCriteria.forEach((criteria, i) => {
-      prompt += `${i + 1}. [ ] ${criteria}\n`;
-    });
-    prompt += '\n';
-  }
+  // Build sections for template substitution
+  const acceptanceCriteria = frontmatter.acceptanceCriteria.length > 0
+    ? `## Acceptance Criteria\n${frontmatter.acceptanceCriteria.map((c, i) => `${i + 1}. [ ] ${c}`).join('\n')}\n`
+    : '';
 
-  if (frontmatter.testingInstructions.length > 0) {
-    prompt += `## Testing Instructions\n`;
-    frontmatter.testingInstructions.forEach((instruction, i) => {
-      prompt += `${i + 1}. ${instruction}\n`;
-    });
-    prompt += '\n';
-  }
+  const testingInstructions = frontmatter.testingInstructions.length > 0
+    ? `## Testing Instructions\n${frontmatter.testingInstructions.map((t, i) => `${i + 1}. ${t}`).join('\n')}\n`
+    : '';
 
-  if (content) {
-    prompt += `## Description\n${content}\n\n`;
-  }
+  const description = content ? `## Description\n${content}\n` : '';
+  const sharedContext = buildWorkspaceSharedContextSection(workspaceSharedContext) ?? '';
 
-  const sharedContextSection = buildWorkspaceSharedContextSection(workspaceSharedContext);
-  if (sharedContextSection) {
-    prompt += sharedContextSection;
-  }
+  const skillsSection = skills.length > 0
+    ? `## Available Skills\n${skills.map(s => `- **${s.name}**: ${s.description}${s.allowedTools.length > 0 ? `\n  - Tools: ${s.allowedTools.join(', ')}` : ''}`).join('\n')}\n`
+    : '';
 
-  // Add attachments section (images are sent separately as ImageContent)
-  if (attachmentSection) {
-    prompt += attachmentSection;
-  }
+  const template = promptTemplate?.trim() || DEFAULT_EXECUTION_PROMPT_TEMPLATE;
 
-  // Add available skills
-  if (skills.length > 0) {
-    prompt += `## Available Skills\n`;
-    skills.forEach(skill => {
-      prompt += `- **${skill.name}**: ${skill.description}\n`;
-      if (skill.allowedTools.length > 0) {
-        prompt += `  - Tools: ${skill.allowedTools.join(', ')}\n`;
-      }
-    });
-    prompt += '\n';
-  }
-
-  prompt += `## Instructions\n`;
-  prompt += `1. Start by understanding the task requirements and acceptance criteria\n`;
-  prompt += `2. Plan your approach before implementing\n`;
-  prompt += `3. Use the available skills when appropriate\n`;
-  prompt += `4. Run tests to verify your implementation\n`;
-  prompt += `5. When you are DONE with the task and all acceptance criteria are met, call the \`task_complete\` tool with this task's ID ("${task.id}") and a brief summary (1-2 short sentences, easy to scan).\n`;
-  prompt += `6. If you have questions, need clarification, or hit a blocker, do NOT call task_complete — just explain the situation and stop. The user will respond.\n\n`;
-
-  return prompt;
+  return renderPromptTemplate(template, {
+    taskId: task.id,
+    title: frontmatter.title,
+    stateBlock: buildStateBlock(currentState),
+    contractReference: buildContractReference(),
+    acceptanceCriteria,
+    testingInstructions,
+    description,
+    sharedContext,
+    attachments: attachmentSection,
+    skills: skillsSection,
+  });
 }
 
 // =============================================================================
@@ -653,49 +651,31 @@ function buildReworkPrompt(
   task: Task,
   attachmentSection: string,
   workspaceSharedContext: string | null,
+  promptTemplate?: string,
 ): string {
   const { frontmatter, content } = task;
-
-  let prompt = `# Rework: ${frontmatter.title}\n\n`;
-  prompt += `This task was previously completed but has been moved back for rework. `;
-  prompt += `You have the full conversation history from the previous execution above.\n\n`;
-  prompt += `**Task ID:** ${task.id}\n\n`;
   const currentState = buildTaskStateSnapshot(frontmatter);
-  prompt += buildContractReference() + '\n';
-  prompt += `## Current State\n`;
-  prompt += `${buildStateBlock(currentState)}\n\n`;
 
-  if (frontmatter.acceptanceCriteria.length > 0) {
-    prompt += `## Current Acceptance Criteria\n`;
-    frontmatter.acceptanceCriteria.forEach((criteria, i) => {
-      prompt += `${i + 1}. [ ] ${criteria}\n`;
-    });
-    prompt += '\n';
-  }
+  // Build sections for template substitution
+  const acceptanceCriteria = frontmatter.acceptanceCriteria.length > 0
+    ? `## Current Acceptance Criteria\n${frontmatter.acceptanceCriteria.map((c, i) => `${i + 1}. [ ] ${c}`).join('\n')}\n`
+    : '';
 
-  if (content) {
-    prompt += `## Description\n${content}\n\n`;
-  }
+  const description = content ? `## Description\n${content}\n` : '';
+  const sharedContext = buildWorkspaceSharedContextSection(workspaceSharedContext) ?? '';
 
-  const sharedContextSection = buildWorkspaceSharedContextSection(workspaceSharedContext);
-  if (sharedContextSection) {
-    prompt += sharedContextSection;
-  }
+  const template = promptTemplate?.trim() || DEFAULT_REWORK_PROMPT_TEMPLATE;
 
-  if (attachmentSection) {
-    prompt += attachmentSection + '\n';
-  }
-
-  prompt += `## Instructions\n`;
-  prompt += `1. Review what was done in the previous execution (you have the full history)\n`;
-  prompt += `2. Identify what needs to be fixed or improved\n`;
-  prompt += `3. Make the necessary changes\n`;
-  prompt += `4. Re-verify all acceptance criteria are met\n`;
-  prompt += `5. Run tests to confirm everything works\n`;
-  prompt += `6. When DONE, call the \`task_complete\` tool with task ID "${task.id}" and a brief summary (1-2 short sentences, easy to scan).\n`;
-  prompt += `7. If you have questions or hit a blocker, do NOT call task_complete — just explain and stop.\n\n`;
-
-  return prompt;
+  return renderPromptTemplate(template, {
+    taskId: task.id,
+    title: frontmatter.title,
+    stateBlock: buildStateBlock(currentState),
+    contractReference: buildContractReference(),
+    acceptanceCriteria,
+    description,
+    sharedContext,
+    attachments: attachmentSection,
+  });
 }
 
 // =============================================================================
@@ -718,6 +698,10 @@ export async function executeTask(options: ExecuteTaskOptions): Promise<TaskSess
   const agentContext = buildAgentContext(workspaceId, undefined, workspacePath);
   const skills = agentContext.availableSkills;
   const workspaceSharedContext = loadWorkspaceSharedContext(workspacePath);
+
+  // Load task defaults for prompt templates
+  const { loadTaskDefaultsForWorkspacePath } = await import('./task-defaults-service.js');
+  const taskDefaults = loadTaskDefaultsForWorkspacePath(workspacePath);
 
   // Create session
   const session: TaskSession = {
@@ -851,8 +835,8 @@ export async function executeTask(options: ExecuteTaskOptions): Promise<TaskSess
 
     // Build prompt — use a rework prompt if resuming, otherwise the full task prompt
     const prompt = isResumingSession
-      ? buildReworkPrompt(task, attachmentSection, workspaceSharedContext)
-      : buildTaskPrompt(task, skills, attachmentSection, workspaceSharedContext);
+      ? buildReworkPrompt(task, attachmentSection, workspaceSharedContext, taskDefaults.executionPromptTemplate)
+      : buildTaskPrompt(task, skills, attachmentSection, workspaceSharedContext, taskDefaults.executionPromptTemplate);
     runAgentExecution(session, prompt, workspaceId, task, taskImages);
 
   } catch (err) {
@@ -1974,57 +1958,35 @@ export function buildPlanningPrompt(
   attachmentSection: string,
   workspaceSharedContext: string | null,
   guardrails: PlanningGuardrails = DEFAULT_PLANNING_GUARDRAILS,
+  promptTemplate?: string,
 ): string {
   const { frontmatter, content } = task;
-
-  let prompt = `# Planning Task: ${frontmatter.title}\n\n`;
-  prompt += `You are a planning agent. Your job is to research the codebase, generate strong acceptance criteria, and then produce a structured plan that is easy for humans to scan quickly.\n\n`;
-  prompt += `**Task ID:** ${task.id}\n\n`;
   const currentState = {
     ...buildTaskStateSnapshot(frontmatter),
     mode: 'task_planning' as const,
   };
-  prompt += buildContractReference() + '\n';
-  prompt += `## Current State\n`;
-  prompt += `${buildStateBlock(currentState)}\n\n`;
 
-  if (frontmatter.acceptanceCriteria.length > 0) {
-    prompt += `## Acceptance Criteria\n`;
-    frontmatter.acceptanceCriteria.forEach((criteria, i) => {
-      prompt += `${i + 1}. ${criteria}\n`;
-    });
-    prompt += '\n';
-  }
+  // Build sections for template substitution
+  const acceptanceCriteria = frontmatter.acceptanceCriteria.length > 0
+    ? `## Acceptance Criteria\n${frontmatter.acceptanceCriteria.map((c, i) => `${i + 1}. ${c}`).join('\n')}\n`
+    : '';
 
-  if (content) {
-    prompt += `## Task Description\n${content}\n\n`;
-  }
+  const description = content ? `## Task Description\n${content}\n` : '';
+  const sharedContext = buildWorkspaceSharedContextSection(workspaceSharedContext) ?? '';
 
-  const sharedContextSection = buildWorkspaceSharedContextSection(workspaceSharedContext);
-  if (sharedContextSection) {
-    prompt += sharedContextSection;
-  }
+  const template = promptTemplate?.trim() || DEFAULT_PLANNING_PROMPT_TEMPLATE;
 
-  // Add attachments section (images are sent separately as ImageContent)
-  if (attachmentSection) {
-    prompt += attachmentSection;
-  }
-
-  prompt += `## Instructions\n\n`;
-  prompt += `1. Research the codebase to understand the current state. Read relevant files, understand architecture, and trace call sites.\n`;
-  prompt += `2. You are in planning-only mode. Do not edit files, do not run write/edit tools, and do not implement code changes.\n`;
-  prompt += `3. Do NOT read other task files in .taskfactory/tasks/ (or legacy .pi/tasks/). They are irrelevant to your investigation and waste your tool budget.\n`;
-  prompt += `4. From your investigation, produce 3-7 specific, testable acceptance criteria for this task.\n`;
-  prompt += `5. Then produce a plan that directly satisfies those acceptance criteria.\n`;
-  prompt += `6. The plan is a high-level task summary for humans. Keep it concise and easy to parse.\n`;
-  prompt += `7. Keep wording short and scannable: goal should be 1-2 short sentences, and each step/validation/cleanup item should be a short outcome-focused line. Avoid walls of text.\n`;
-  prompt += `8. Steps should be short outcome-focused summaries (usually 3-6 steps). Avoid line-level implementation details, exact file paths, and low-level function-by-function instructions.\n`;
-  prompt += `9. Validation items must verify the acceptance criteria and overall outcome without turning into a detailed test script.\n`;
-  prompt += `10. Call the \`save_plan\` tool **exactly once** with taskId "${task.id}", acceptanceCriteria, goal, steps, validation, and cleanup.\n`;
-  prompt += `11. Cleanup items are post-completion tasks (pass an empty array if none needed).\n`;
-  prompt += `12. After calling \`save_plan\`, stop immediately. Do not run any further tools or actions.\n`;
-  prompt += `13. Stay within planning guardrails: at most ${guardrails.maxToolCalls} tool calls. Prefer targeted reads over broad scans.\n`;
-  return prompt;
+  return renderPromptTemplate(template, {
+    taskId: task.id,
+    title: frontmatter.title,
+    stateBlock: buildStateBlock(currentState),
+    contractReference: buildContractReference(),
+    acceptanceCriteria,
+    description,
+    sharedContext,
+    attachments: attachmentSection,
+    maxToolCalls: String(guardrails.maxToolCalls),
+  });
 }
 
 export function buildPlanningResumePrompt(
@@ -2032,53 +1994,35 @@ export function buildPlanningResumePrompt(
   attachmentSection: string,
   workspaceSharedContext: string | null,
   guardrails: PlanningGuardrails = DEFAULT_PLANNING_GUARDRAILS,
+  promptTemplate?: string,
 ): string {
   const { frontmatter, content } = task;
-
-  let prompt = `# Resume Planning Task: ${frontmatter.title}\n\n`;
-  prompt += 'Continue the existing planning conversation for this task. Reuse prior investigation and avoid repeating the same broad repo scans unless needed for new evidence.\n\n';
-  prompt += `**Task ID:** ${task.id}\n\n`;
   const currentState = {
     ...buildTaskStateSnapshot(frontmatter),
     mode: 'task_planning' as const,
   };
-  prompt += buildContractReference() + '\n';
-  prompt += `## Current State\n`;
-  prompt += `${buildStateBlock(currentState)}\n\n`;
 
-  if (frontmatter.acceptanceCriteria.length > 0) {
-    prompt += `## Existing Acceptance Criteria\n`;
-    frontmatter.acceptanceCriteria.forEach((criteria, i) => {
-      prompt += `${i + 1}. ${criteria}\n`;
-    });
-    prompt += '\n';
-  }
+  // Build sections for template substitution
+  const acceptanceCriteria = frontmatter.acceptanceCriteria.length > 0
+    ? `## Existing Acceptance Criteria\n${frontmatter.acceptanceCriteria.map((c, i) => `${i + 1}. ${c}`).join('\n')}\n`
+    : '';
 
-  if (content) {
-    prompt += `## Task Description\n${content}\n\n`;
-  }
+  const description = content ? `## Task Description\n${content}\n` : '';
+  const sharedContext = buildWorkspaceSharedContextSection(workspaceSharedContext) ?? '';
 
-  const sharedContextSection = buildWorkspaceSharedContextSection(workspaceSharedContext);
-  if (sharedContextSection) {
-    prompt += sharedContextSection;
-  }
+  const template = promptTemplate?.trim() || DEFAULT_PLANNING_RESUME_PROMPT_TEMPLATE;
 
-  if (attachmentSection) {
-    prompt += attachmentSection;
-  }
-
-  prompt += `## Instructions\n\n`;
-  prompt += `1. Continue from prior context and investigation.\n`;
-  prompt += `2. Fill only remaining gaps needed to produce a strong plan package.\n`;
-  prompt += `3. Do NOT read other task files in .taskfactory/tasks/ (or legacy .pi/tasks/). They are irrelevant and waste your tool budget.\n`;
-  prompt += `4. Produce 3-7 specific, testable acceptance criteria.\n`;
-  prompt += `5. Produce a concise high-level plan aligned to those criteria.\n`;
-  prompt += `6. Keep wording short and easy to scan: goal should be 1-2 short sentences, and each step/validation/cleanup item should be one short line when possible. Avoid walls of text.\n`;
-  prompt += `7. Call the \`save_plan\` tool exactly once with taskId "${task.id}", acceptanceCriteria, goal, steps, validation, and cleanup.\n`;
-  prompt += `8. After calling \`save_plan\`, stop immediately.\n`;
-  prompt += `9. Stay within planning guardrails: at most ${guardrails.maxToolCalls} tool calls.\n`;
-
-  return prompt;
+  return renderPromptTemplate(template, {
+    taskId: task.id,
+    title: frontmatter.title,
+    stateBlock: buildStateBlock(currentState),
+    contractReference: buildContractReference(),
+    acceptanceCriteria,
+    description,
+    sharedContext,
+    attachments: attachmentSection,
+    maxToolCalls: String(guardrails.maxToolCalls),
+  });
 }
 
 async function compactTaskSessionAfterPlanning(
@@ -2321,6 +2265,8 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
 
   const registry = ensurePlanCallbackRegistry();
   const planningGuardrails = loadPlanningGuardrails();
+  const { loadTaskDefaultsForWorkspacePath } = await import('./task-defaults-service.js');
+  const taskDefaults = loadTaskDefaultsForWorkspacePath(workspacePath);
   let savedPlan: TaskPlan | null = null;
   let hasPersistedPlan = false;
   let planningToolCallCount = 0;
@@ -2432,8 +2378,8 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
     // Send the planning prompt
     const workspaceSharedContext = loadWorkspaceSharedContext(workspacePath);
     const prompt = isResumingPlanningSession
-      ? buildPlanningResumePrompt(task, planAttachmentSection, workspaceSharedContext, planningGuardrails)
-      : buildPlanningPrompt(task, planAttachmentSection, workspaceSharedContext, planningGuardrails);
+      ? buildPlanningResumePrompt(task, planAttachmentSection, workspaceSharedContext, planningGuardrails, taskDefaults.planningPromptTemplate)
+      : buildPlanningPrompt(task, planAttachmentSection, workspaceSharedContext, planningGuardrails, taskDefaults.planningPromptTemplate);
     const planPromptOpts = planImages.length > 0 ? { images: planImages } : undefined;
     const planningTimeoutMessage = `Planning timed out after ${Math.round(planningGuardrails.timeoutMs / 1000)} seconds`;
     await withTimeout(

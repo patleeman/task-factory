@@ -1,7 +1,13 @@
 import { useState, useEffect } from 'react'
 import { ArrowLeft, Check, CheckCircle2 } from 'lucide-react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { DEFAULT_PRE_EXECUTION_SKILLS, DEFAULT_POST_EXECUTION_SKILLS, type TaskDefaults } from '@pi-factory/shared'
+import {
+  DEFAULT_PRE_EXECUTION_SKILLS,
+  DEFAULT_POST_EXECUTION_SKILLS,
+  DEFAULT_PLANNING_PROMPT_TEMPLATE,
+  DEFAULT_EXECUTION_PROMPT_TEMPLATE,
+  type TaskDefaults,
+} from '@pi-factory/shared'
 import type { PiSkill, PiExtension, PostExecutionSkill } from '../types/pi'
 import { api, type WorkflowAutomationResponse, type WorkflowAutomationUpdate } from '../api'
 import { AppIcon } from './AppIcon'
@@ -614,6 +620,73 @@ export function WorkspaceConfigPage() {
                   }}
                   showSkillConfigControls={false}
                 />
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-3">
+                <div>
+                  <h4 className="text-sm font-semibold text-slate-800">Planning Prompt Template</h4>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {'Custom prompt template for planning tasks in this workspace. Leave empty to inherit from global defaults.'}
+                    {' Available variables: {{taskId}}, {{title}}, {{stateBlock}}, {{contractReference}},'}
+                    {' {{acceptanceCriteria}}, {{description}}, {{sharedContext}}, {{attachments}}, {{maxToolCalls}}'}
+                  </p>
+                </div>
+                <textarea
+                  value={taskDefaults.planningPromptTemplate || ''}
+                  onChange={(event) => {
+                    const value = event.target.value.trim() || undefined
+                    updateTaskDefaults((current) => ({
+                      ...current,
+                      planningPromptTemplate: value,
+                    }))
+                  }}
+                  placeholder={DEFAULT_PLANNING_PROMPT_TEMPLATE}
+                  rows={8}
+                  className="w-full text-xs font-mono border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent resize-y"
+                />
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => updateTaskDefaults((current) => ({ ...current, planningPromptTemplate: undefined }))}
+                    className="text-xs text-slate-500 hover:text-slate-700 underline"
+                    type="button"
+                  >
+                    Clear (inherit from global)
+                  </button>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-3">
+                <div>
+                  <h4 className="text-sm font-semibold text-slate-800">Execution Prompt Template</h4>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {'Custom prompt template for task execution in this workspace. Leave empty to inherit from global defaults.'}
+                    {' Available variables: {{taskId}}, {{title}}, {{stateBlock}}, {{contractReference}},'}
+                    {' {{acceptanceCriteria}}, {{testingInstructions}}, {{description}}, {{sharedContext}},'}
+                    {' {{attachments}}, {{skills}}'}
+                  </p>
+                </div>
+                <textarea
+                  value={taskDefaults.executionPromptTemplate || ''}
+                  onChange={(event) => {
+                    const value = event.target.value.trim() || undefined
+                    updateTaskDefaults((current) => ({
+                      ...current,
+                      executionPromptTemplate: value,
+                    }))
+                  }}
+                  placeholder={DEFAULT_EXECUTION_PROMPT_TEMPLATE}
+                  rows={8}
+                  className="w-full text-xs font-mono border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent resize-y"
+                />
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => updateTaskDefaults((current) => ({ ...current, executionPromptTemplate: undefined }))}
+                    className="text-xs text-slate-500 hover:text-slate-700 underline"
+                    type="button"
+                  >
+                    Clear (inherit from global)
+                  </button>
+                </div>
               </div>
             </div>
           )}
