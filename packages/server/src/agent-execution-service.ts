@@ -49,7 +49,7 @@ import {
   discoverTasks,
 } from './task-service.js';
 import { persistTaskUsageFromAssistantMessage } from './task-usage-service.js';
-import { runPreExecutionSkills, runPostExecutionSkills } from './post-execution-skills.js';
+import { runPrePlanningSkills, runPreExecutionSkills, runPostExecutionSkills } from './post-execution-skills.js';
 import { withTimeout } from './with-timeout.js';
 import { generateAndPersistSummary } from './summary-service.js';
 import { attachTaskFileAndBroadcast, type AttachTaskFileRequest } from './task-attachment-service.js';
@@ -2257,10 +2257,13 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
 
   registerActiveSession(session);
 
+  const prePlanningSkillIds = task.frontmatter.prePlanningSkills;
+  const hasPrePlanningSkills = Array.isArray(prePlanningSkillIds) && prePlanningSkillIds.length > 0;
+
   broadcastToWorkspace?.({
     type: 'agent:execution_status',
     taskId: task.id,
-    status: 'streaming',
+    status: hasPrePlanningSkills ? 'pre-planning-hooks' : 'streaming',
   });
 
   const registry = ensurePlanCallbackRegistry();
@@ -2367,6 +2370,51 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
 
     });
     broadcastTaskContextUsage(session, task.id);
+
+    if (hasPrePlanningSkills && prePlanningSkillIds && prePlanningSkillIds.length > 0 && session.piSession) {
+      broadcastActivityEntry(
+        broadcastToWorkspace,
+        createSystemEvent(
+          workspaceId,
+          task.id,
+          'phase-change',
+          `Running ${prePlanningSkillIds.length} pre-planning skill(s): ${prePlanningSkillIds.join(', ')}`,
+          { skillIds: prePlanningSkillIds },
+        ),
+        'pre-planning start event',
+      );
+
+      try {
+        await runPrePlanningSkills(session.piSession, prePlanningSkillIds, {
+          taskId: task.id,
+          workspaceId,
+          broadcastToWorkspace,
+          skillConfigs: task.frontmatter.skillConfigs,
+        });
+      } catch (prePlanningErr) {
+        console.error('Pre-planning skills failed:', prePlanningErr);
+
+        broadcastActivityEntry(
+          broadcastToWorkspace,
+          createSystemEvent(
+            workspaceId,
+            task.id,
+            'phase-change',
+            `Pre-planning skills failed — skipping planning prompt: ${prePlanningErr}`,
+            { error: String(prePlanningErr) },
+          ),
+          'pre-planning error event',
+        );
+
+        throw prePlanningErr;
+      }
+
+      broadcastToWorkspace?.({
+        type: 'agent:execution_status',
+        taskId: task.id,
+        status: 'streaming',
+      });
+    }
 
     // Load task attachments for the planning prompt
     const { images: planImages, promptSection: planAttachmentSection } = loadAttachments(

@@ -61,6 +61,9 @@ export function TaskDetailPane({
     formatAcceptanceCriteriaForEditor(task.frontmatter.acceptanceCriteria)
   )
   const [availableSkills, setAvailableSkills] = useState<PostExecutionSkill[]>([])
+  const [selectedPrePlanningSkillIds, setSelectedPrePlanningSkillIds] = useState<string[]>(
+    task.frontmatter.prePlanningSkills || []
+  )
   const [selectedPreSkillIds, setSelectedPreSkillIds] = useState<string[]>(
     task.frontmatter.preExecutionSkills || []
   )
@@ -101,6 +104,7 @@ export function TaskDetailPane({
     setEditedTitle(task.frontmatter.title)
     setEditedContent(task.content)
     setEditedCriteria(formatAcceptanceCriteriaForEditor(task.frontmatter.acceptanceCriteria))
+    setSelectedPrePlanningSkillIds(task.frontmatter.prePlanningSkills || [])
     setSelectedPreSkillIds(task.frontmatter.preExecutionSkills || [])
     setSelectedSkillIds(task.frontmatter.postExecutionSkills || [])
     setEditedPlanningModelConfig(
@@ -121,6 +125,12 @@ export function TaskDetailPane({
     try {
       const shouldSanitizeByHooks = availableSkills.length > 0
       const skillById = new Map(availableSkills.map((skill) => [skill.id, skill]))
+      const sanitizedPrePlanningSkillIds = shouldSanitizeByHooks
+        ? selectedPrePlanningSkillIds.filter((skillId) => {
+            const skill = skillById.get(skillId)
+            return Boolean(skill && skill.hooks.includes('pre-planning'))
+          })
+        : [...selectedPrePlanningSkillIds]
       const sanitizedPreSkillIds = shouldSanitizeByHooks
         ? selectedPreSkillIds.filter((skillId) => {
             const skill = skillById.get(skillId)
@@ -144,6 +154,7 @@ export function TaskDetailPane({
             .split('\n')
             .map((s) => s.trim())
             .filter(Boolean),
+          prePlanningSkills: sanitizedPrePlanningSkillIds,
           preExecutionSkills: sanitizedPreSkillIds,
           postExecutionSkills: sanitizedPostSkillIds,
           skillConfigs: Object.keys(editedSkillConfigs).length > 0 ? editedSkillConfigs : undefined,
@@ -276,6 +287,8 @@ export function TaskDetailPane({
           setEditedPlanningModelConfig={setEditedPlanningModelConfig}
           editedExecutionModelConfig={editedExecutionModelConfig}
           setEditedExecutionModelConfig={setEditedExecutionModelConfig}
+          selectedPrePlanningSkillIds={selectedPrePlanningSkillIds}
+          setSelectedPrePlanningSkillIds={setSelectedPrePlanningSkillIds}
           selectedPreSkillIds={selectedPreSkillIds}
           setSelectedPreSkillIds={setSelectedPreSkillIds}
           selectedSkillIds={selectedSkillIds}
@@ -297,7 +310,7 @@ export function TaskDetailPane({
 // Details Content — shared between tabbed and side-by-side layouts
 // =============================================================================
 
-function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditing, editedTitle, setEditedTitle, editedContent, setEditedContent, editedCriteria, setEditedCriteria, editedPlanningModelConfig, setEditedPlanningModelConfig, editedExecutionModelConfig, setEditedExecutionModelConfig, selectedPreSkillIds, setSelectedPreSkillIds, selectedSkillIds, setSelectedSkillIds, editedSkillConfigs, setEditedSkillConfigs, availableSkills, missingAcceptanceCriteria, isPlanGenerating, onSaveEdit, onDelete }: any) {
+function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditing, editedTitle, setEditedTitle, editedContent, setEditedContent, editedCriteria, setEditedCriteria, editedPlanningModelConfig, setEditedPlanningModelConfig, editedExecutionModelConfig, setEditedExecutionModelConfig, selectedPrePlanningSkillIds, setSelectedPrePlanningSkillIds, selectedPreSkillIds, setSelectedPreSkillIds, selectedSkillIds, setSelectedSkillIds, editedSkillConfigs, setEditedSkillConfigs, availableSkills, missingAcceptanceCriteria, isPlanGenerating, onSaveEdit, onDelete }: any) {
   const isCompleted = frontmatter.phase === 'complete' || frontmatter.phase === 'archived'
   const hasSummary = Boolean(task.frontmatter.postExecutionSummary)
   const normalizedFrontmatterCriteria = normalizeAcceptanceCriteria(frontmatter.acceptanceCriteria)
@@ -462,7 +475,7 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
             />
             <div className="flex items-center gap-2 shrink-0">
               <button onClick={onSaveEdit} className="btn btn-primary text-xs py-1.5 px-3">Save Changes</button>
-              <button onClick={() => { setIsEditing(false); setEditedTitle(task.frontmatter.title); setEditedContent(task.content); setEditedCriteria(formatAcceptanceCriteriaForEditor(task.frontmatter.acceptanceCriteria)); setSelectedPreSkillIds(task.frontmatter.preExecutionSkills || []); setSelectedSkillIds(task.frontmatter.postExecutionSkills || []); setEditedSkillConfigs(task.frontmatter.skillConfigs || {}); setEditedPlanningModelConfig(task.frontmatter.planningModelConfig ?? task.frontmatter.executionModelConfig ?? task.frontmatter.modelConfig); setEditedExecutionModelConfig(task.frontmatter.executionModelConfig ?? task.frontmatter.modelConfig) }} className="btn btn-secondary text-xs py-1.5 px-3">Discard</button>
+              <button onClick={() => { setIsEditing(false); setEditedTitle(task.frontmatter.title); setEditedContent(task.content); setEditedCriteria(formatAcceptanceCriteriaForEditor(task.frontmatter.acceptanceCriteria)); setSelectedPrePlanningSkillIds(task.frontmatter.prePlanningSkills || []); setSelectedPreSkillIds(task.frontmatter.preExecutionSkills || []); setSelectedSkillIds(task.frontmatter.postExecutionSkills || []); setEditedSkillConfigs(task.frontmatter.skillConfigs || {}); setEditedPlanningModelConfig(task.frontmatter.planningModelConfig ?? task.frontmatter.executionModelConfig ?? task.frontmatter.modelConfig); setEditedExecutionModelConfig(task.frontmatter.executionModelConfig ?? task.frontmatter.modelConfig) }} className="btn btn-secondary text-xs py-1.5 px-3">Discard</button>
             </div>
           </div>
         ) : (
@@ -506,20 +519,41 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
         </div>
       )}
 
-      {/* Execution Pipeline (editing) */}
+      {/* Planning + Execution Pipelines (editing) */}
       {isEditing && (
         <div>
-          <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Execution Pipeline</h3>
-          <p className="text-xs text-slate-400 mb-2">Add skills, then drag cards to pre/post lanes to control execution order.</p>
+          <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Planning + Execution Pipelines</h3>
+          <p className="text-xs text-slate-400 mb-2">Add skills, then drag cards to pre-planning, pre-execution, and post-execution lanes.</p>
           <ExecutionPipelineEditor
             availableSkills={availableSkills}
+            selectedPrePlanningSkillIds={selectedPrePlanningSkillIds}
             selectedPreSkillIds={selectedPreSkillIds}
             selectedSkillIds={selectedSkillIds}
+            onPrePlanningSkillsChange={setSelectedPrePlanningSkillIds}
             onPreSkillsChange={setSelectedPreSkillIds}
             onPostSkillsChange={setSelectedSkillIds}
             skillConfigs={editedSkillConfigs}
             onSkillConfigChange={setEditedSkillConfigs}
           />
+        </div>
+      )}
+
+      {/* Pre-Planning Skills */}
+      {!isEditing && (frontmatter.prePlanningSkills || []).length > 0 && (
+        <div>
+          <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Pre-Planning Skills</h3>
+          <div className="flex flex-wrap gap-1.5">
+            {(frontmatter.prePlanningSkills || []).map((skillId: string, index: number) => {
+              const skill = availableSkills.find((s: any) => s.id === skillId)
+              return (
+                <span key={skillId} className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-violet-50 border border-violet-200 text-xs font-medium text-violet-700">
+                  <span className="text-[10px] text-violet-400 font-bold">{index + 1}.</span>
+                  <span className="text-[10px] text-slate-400 font-mono">{skill?.type === 'loop' ? 'loop' : 'gate'}</span>
+                  {skill?.name || skillId}
+                </span>
+              )
+            })}
+          </div>
         </div>
       )}
 

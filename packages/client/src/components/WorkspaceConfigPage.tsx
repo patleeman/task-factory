@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { ArrowLeft, Check, CheckCircle2 } from 'lucide-react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
+  DEFAULT_PRE_PLANNING_SKILLS,
   DEFAULT_PRE_EXECUTION_SKILLS,
   DEFAULT_POST_EXECUTION_SKILLS,
   DEFAULT_PLANNING_PROMPT_TEMPLATE,
@@ -29,6 +30,7 @@ const EMPTY_TASK_DEFAULTS: TaskDefaults = {
   planningModelConfig: undefined,
   executionModelConfig: undefined,
   modelConfig: undefined,
+  prePlanningSkills: [...DEFAULT_PRE_PLANNING_SKILLS],
   preExecutionSkills: [...DEFAULT_PRE_EXECUTION_SKILLS],
   postExecutionSkills: [...DEFAULT_POST_EXECUTION_SKILLS],
 }
@@ -148,6 +150,10 @@ export function WorkspaceConfigPage() {
         const skillsById = new Map(taskSkillsData.map((skill) => [skill.id, skill]))
         setTaskDefaults({
           ...workspaceTaskDefaults,
+          prePlanningSkills: workspaceTaskDefaults.prePlanningSkills.filter((skillId) => {
+            const skill = skillsById.get(skillId)
+            return Boolean(skill && skill.hooks.includes('pre-planning'))
+          }),
           preExecutionSkills: workspaceTaskDefaults.preExecutionSkills.filter((skillId) => {
             const skill = skillsById.get(skillId)
             return Boolean(skill && skill.hooks.includes('pre'))
@@ -599,13 +605,20 @@ export function WorkspaceConfigPage() {
 
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Execution Pipeline
+                  Planning + Execution Pipelines
                 </label>
-                <p className="text-xs text-slate-500 mb-2">Set workspace-specific default pre/post execution order.</p>
+                <p className="text-xs text-slate-500 mb-2">Set workspace-specific default pre-planning, pre-execution, and post-execution order.</p>
                 <ExecutionPipelineEditor
                   availableSkills={taskSkills}
+                  selectedPrePlanningSkillIds={taskDefaults.prePlanningSkills}
                   selectedPreSkillIds={taskDefaults.preExecutionSkills}
                   selectedSkillIds={taskDefaults.postExecutionSkills}
+                  onPrePlanningSkillsChange={(skillIds) => {
+                    updateTaskDefaults((current) => ({
+                      ...current,
+                      prePlanningSkills: skillIds,
+                    }))
+                  }}
                   onPreSkillsChange={(skillIds) => {
                     updateTaskDefaults((current) => ({
                       ...current,

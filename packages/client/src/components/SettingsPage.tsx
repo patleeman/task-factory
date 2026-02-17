@@ -72,6 +72,10 @@ function normalizeTaskDefaultsForUi(
     executionModelConfig,
     // Keep legacy alias aligned for backward compatibility.
     modelConfig: executionModelConfig,
+    prePlanningSkills: defaults.prePlanningSkills.filter((skillId) => {
+      const skill = skillsById.get(skillId)
+      return Boolean(skill && skill.hooks.includes('pre-planning'))
+    }),
     preExecutionSkills: defaults.preExecutionSkills.filter((skillId) => {
       const skill = skillsById.get(skillId)
       return Boolean(skill && skill.hooks.includes('pre'))
@@ -278,6 +282,10 @@ export function SettingsPage() {
       const skillsById = new Map(nextSkills.map((skill) => [skill.id, skill]))
       return {
         ...current,
+        prePlanningSkills: current.prePlanningSkills.filter((skillId) => {
+          const skill = skillsById.get(skillId)
+          return Boolean(skill && skill.hooks.includes('pre-planning'))
+        }),
         preExecutionSkills: current.preExecutionSkills.filter((skillId) => {
           const skill = skillsById.get(skillId)
           return Boolean(skill && skill.hooks.includes('pre'))
@@ -341,6 +349,7 @@ export function SettingsPage() {
         modelConfig: executionModelConfig
           ? { ...executionModelConfig }
           : undefined,
+        prePlanningSkills: [...form.prePlanningSkills],
         preExecutionSkills: [...form.preExecutionSkills],
         postExecutionSkills: [...form.postExecutionSkills],
         planningPromptTemplate: form.planningPromptTemplate?.trim() || undefined,
@@ -982,13 +991,17 @@ export function SettingsPage() {
 
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Execution Pipeline
+                  Planning + Execution Pipelines
                 </label>
-                <p className="text-xs text-slate-500 mb-2">Set default pre/post execution order with one visual pipeline.</p>
+                <p className="text-xs text-slate-500 mb-2">Set default pre-planning, pre-execution, and post-execution order with one visual pipeline.</p>
                 <ExecutionPipelineEditor
                   availableSkills={skills}
+                  selectedPrePlanningSkillIds={form.prePlanningSkills}
                   selectedPreSkillIds={form.preExecutionSkills}
                   selectedSkillIds={form.postExecutionSkills}
+                  onPrePlanningSkillsChange={(skillIds) => {
+                    setForm({ ...form, prePlanningSkills: skillIds })
+                  }}
                   onPreSkillsChange={(skillIds) => {
                     setForm({ ...form, preExecutionSkills: skillIds })
                   }}

@@ -18,6 +18,7 @@ describe('create-task form defaults', () => {
         provider: 'openai',
         modelId: 'gpt-4o',
       },
+      prePlanningSkills: ['plan-context'],
       preExecutionSkills: ['checkpoint'],
       postExecutionSkills: ['checkpoint', 'code-review', 'update-docs'],
     };
@@ -25,6 +26,7 @@ describe('create-task form defaults', () => {
     const formDefaults = buildCreateTaskFormDefaults(defaults);
 
     expect(formDefaults).toEqual({
+      selectedPrePlanningSkillIds: ['plan-context'],
       selectedPreSkillIds: ['checkpoint'],
       selectedSkillIds: ['checkpoint', 'code-review', 'update-docs'],
       planningModelConfig: {
@@ -44,6 +46,7 @@ describe('create-task form defaults', () => {
       planningModelConfig: undefined,
       executionModelConfig: undefined,
       modelConfig: undefined,
+      prePlanningSkills: [],
       preExecutionSkills: [],
       postExecutionSkills: [...DEFAULT_POST_EXECUTION_SKILLS],
     };
@@ -62,6 +65,7 @@ describe('create-task form defaults', () => {
         modelId: 'claude-sonnet-4',
         thinkingLevel: 'medium',
       },
+      prePlanningSkills: [],
       preExecutionSkills: [],
       postExecutionSkills: ['checkpoint'],
     };

@@ -377,6 +377,7 @@ export function createTask(
     // Keep legacy field aligned for backward compatibility.
     modelConfig: resolvedDefaults.modelConfig,
     usageMetrics: createEmptyTaskUsageMetrics(),
+    prePlanningSkills: resolvedDefaults.prePlanningSkills,
     preExecutionSkills: resolvedDefaults.preExecutionSkills,
     postExecutionSkills: resolvedDefaults.postExecutionSkills,
     skillConfigs: request.skillConfigs,
@@ -421,6 +422,10 @@ export function updateTask(
 
   if (request.plan !== undefined) {
     task.frontmatter.plan = request.plan;
+  }
+
+  if (request.prePlanningSkills !== undefined) {
+    task.frontmatter.prePlanningSkills = request.prePlanningSkills;
   }
 
   if (request.preExecutionSkills !== undefined) {

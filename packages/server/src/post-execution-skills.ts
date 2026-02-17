@@ -18,7 +18,8 @@ import { resolveTaskFactoryHomePath } from './taskfactory-home.js';
 // =============================================================================
 
 const DEFAULT_SKILL_HOOKS: SkillHook[] = ['pre', 'post'];
-const SKILL_HOOK_SET = new Set<SkillHook>(DEFAULT_SKILL_HOOKS);
+const SUPPORTED_SKILL_HOOKS: SkillHook[] = ['pre-planning', 'pre', 'post'];
+const SKILL_HOOK_SET = new Set<SkillHook>(SUPPORTED_SKILL_HOOKS);
 const USER_SKILLS_DIR = resolveTaskFactoryHomePath('skills');
 
 /** Cached skills (discovered once, reloaded on demand) */
@@ -262,23 +263,25 @@ interface SkillSession {
   messages?: any[];
 }
 
-/**
- * Run pre-execution skills sequentially on an existing Pi session.
- * Each skill runs as a fresh prompt turn. Unlike post-execution skills,
- * pre-execution skills throw on first failure — preventing main execution
- * and post-execution from running.
- */
-export async function runPreExecutionSkills(
+function toHookDisplayName(hookLabel: 'pre-planning' | 'pre-execution'): string {
+  if (hookLabel === 'pre-planning') return 'Pre-planning';
+  return 'Pre-execution';
+}
+
+async function runFailFastPreHookSkills(
   piSession: SkillSession,
   skillIds: string[],
   ctx: RunSkillsContext,
+  hook: 'pre-planning' | 'pre',
+  hookLabel: 'pre-planning' | 'pre-execution',
 ): Promise<void> {
   const { taskId, workspaceId, broadcastToWorkspace, skillConfigs } = ctx;
+  const hookDisplay = toHookDisplayName(hookLabel);
 
   for (const skillId of skillIds) {
     let skill = getPostExecutionSkill(skillId);
     if (!skill) {
-      const errMsg = `Pre-execution skill "${skillId}" not found`;
+      const errMsg = `${hookDisplay} skill "${skillId}" not found`;
       console.warn(`[Skills] ${errMsg}`);
       const notFoundEntry = await createSystemEvent(
         workspaceId,
@@ -291,8 +294,8 @@ export async function runPreExecutionSkills(
       throw new Error(errMsg);
     }
 
-    if (!skillSupportsHook(skill, 'pre')) {
-      const errMsg = `Skill "${skillId}" does not support the pre-execution hook`;
+    if (!skillSupportsHook(skill, hook)) {
+      const errMsg = `Skill "${skillId}" does not support the ${hookLabel} hook`;
       console.warn(`[Skills] ${errMsg}`);
       const invalidHookEntry = await createSystemEvent(
         workspaceId,
@@ -313,7 +316,7 @@ export async function runPreExecutionSkills(
       workspaceId,
       taskId,
       'phase-change',
-      `Running pre-execution skill: ${skill.name}`,
+      `Running ${hookLabel} skill: ${skill.name}`,
       { skillId: skill.id, skillType: skill.type }
     );
     broadcastToWorkspace?.({ type: 'activity:entry', entry: startEntry });
@@ -325,28 +328,52 @@ export async function runPreExecutionSkills(
         await runFollowUpSkill(piSession, skill, ctx);
       }
     } catch (err) {
-      console.error(`[Skills] Pre-execution skill "${skillId}" failed:`, err);
+      console.error(`[Skills] ${hookDisplay} skill "${skillId}" failed:`, err);
       const errEntry = await createSystemEvent(
         workspaceId,
         taskId,
         'phase-change',
-        `Pre-execution skill "${skill.name}" failed: ${err}`,
+        `${hookDisplay} skill "${skill.name}" failed: ${err}`,
         { skillId: skill.id, error: String(err) }
       );
       broadcastToWorkspace?.({ type: 'activity:entry', entry: errEntry });
-      // Throw to prevent main execution and post-execution from running
-      throw new Error(`Pre-execution skill "${skill.name}" failed: ${err}`);
+      // Throw to prevent the main phase prompt from running.
+      throw new Error(`${hookDisplay} skill "${skill.name}" failed: ${err}`);
     }
 
     const doneEntry = await createSystemEvent(
       workspaceId,
       taskId,
       'phase-change',
-      `Pre-execution skill completed: ${skill.name}`,
+      `${hookDisplay} skill completed: ${skill.name}`,
       { skillId: skill.id }
     );
     broadcastToWorkspace?.({ type: 'activity:entry', entry: doneEntry });
   }
+}
+
+/**
+ * Run pre-planning skills sequentially on an existing Pi session.
+ * These are fail-fast: any error prevents the planning prompt from running.
+ */
+export async function runPrePlanningSkills(
+  piSession: SkillSession,
+  skillIds: string[],
+  ctx: RunSkillsContext,
+): Promise<void> {
+  await runFailFastPreHookSkills(piSession, skillIds, ctx, 'pre-planning', 'pre-planning');
+}
+
+/**
+ * Run pre-execution skills sequentially on an existing Pi session.
+ * These are fail-fast: any error prevents the execution prompt from running.
+ */
+export async function runPreExecutionSkills(
+  piSession: SkillSession,
+  skillIds: string[],
+  ctx: RunSkillsContext,
+): Promise<void> {
+  await runFailFastPreHookSkills(piSession, skillIds, ctx, 'pre', 'pre-execution');
 }
 
 /**

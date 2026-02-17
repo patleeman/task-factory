@@ -72,6 +72,7 @@ describe('workspace task defaults', () => {
           provider: 'openai',
           modelId: 'gpt-4o',
         },
+        prePlanningSkills: [],
         preExecutionSkills: ['checkpoint'],
         postExecutionSkills: ['checkpoint', 'code-review'],
       },
@@ -114,6 +115,7 @@ describe('workspace task defaults', () => {
           provider: 'openai',
           modelId: 'gpt-4o',
         },
+        prePlanningSkills: [],
         preExecutionSkills: ['checkpoint'],
         postExecutionSkills: ['checkpoint', 'code-review'],
       },
@@ -134,6 +136,7 @@ describe('workspace task defaults', () => {
         provider: 'anthropic',
         modelId: 'claude-sonnet-4',
       },
+      prePlanningSkills: [],
       preExecutionSkills: ['security-review'],
       postExecutionSkills: ['security-review'],
     });
@@ -161,6 +164,7 @@ describe('workspace task defaults', () => {
           provider: 'openai',
           modelId: 'gpt-4o',
         },
+        prePlanningSkills: [],
         preExecutionSkills: ['checkpoint'],
         postExecutionSkills: ['checkpoint', 'code-review'],
       },
@@ -181,6 +185,7 @@ describe('workspace task defaults', () => {
         provider: 'openai',
         modelId: 'gpt-4o',
       },
+      prePlanningSkills: [],
       preExecutionSkills: ['checkpoint'],
       postExecutionSkills: ['security-review'],
     });
@@ -195,6 +200,7 @@ describe('workspace task defaults', () => {
           provider: 'anthropic',
           modelId: 'claude-sonnet-4',
         },
+        prePlanningSkills: [],
         preExecutionSkills: ['security-review'],
         postExecutionSkills: ['checkpoint', 'code-review'],
       },
@@ -232,6 +238,7 @@ describe('workspace task defaults', () => {
           provider: 'openai',
           modelId: 'gpt-4o',
         },
+        prePlanningSkills: [],
         preExecutionSkills: ['checkpoint'],
         postExecutionSkills: ['checkpoint', 'code-review'],
       },
@@ -259,6 +266,7 @@ describe('workspace task defaults', () => {
       provider: 'anthropic',
       modelId: 'claude-sonnet-4',
     });
+    expect(created.frontmatter.prePlanningSkills).toEqual([]);
     expect(created.frontmatter.preExecutionSkills).toEqual(['checkpoint']);
     expect(created.frontmatter.postExecutionSkills).toEqual(['security-review']);
   });
@@ -281,6 +289,7 @@ describe('workspace task defaults', () => {
           provider: 'openai',
           modelId: 'gpt-4o',
         },
+        prePlanningSkills: [],
         preExecutionSkills: ['checkpoint'],
         postExecutionSkills: ['checkpoint', 'code-review'],
       },
@@ -295,6 +304,7 @@ describe('workspace task defaults', () => {
         provider: 'anthropic',
         modelId: 'claude-sonnet-4',
       },
+      prePlanningSkills: [],
       preExecutionSkills: ['security-review'],
       postExecutionSkills: ['security-review'],
     });
@@ -311,6 +321,7 @@ describe('workspace task defaults', () => {
         provider: 'openai',
         modelId: 'gpt-5',
       },
+      prePlanningSkills: [],
       preExecutionSkills: [],
       postExecutionSkills: ['checkpoint'],
     });
@@ -323,6 +334,7 @@ describe('workspace task defaults', () => {
       provider: 'openai',
       modelId: 'gpt-5',
     });
+    expect(created.frontmatter.prePlanningSkills).toEqual([]);
     expect(created.frontmatter.preExecutionSkills).toEqual([]);
     expect(created.frontmatter.postExecutionSkills).toEqual(['checkpoint']);
   });

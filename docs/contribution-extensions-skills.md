@@ -7,7 +7,7 @@ How to safely customize Task Factory with repo extensions (`extensions/`) and ex
 ## Use when
 
 - You need to add a new agent tool
-- You want to add/update pre/post execution skills
+- You want to add/update pre-planning, pre-execution, or post-execution skills
 - You are reviewing extension/skill safety and compatibility
 
 ## Quick start
@@ -23,7 +23,7 @@ How to safely customize Task Factory with repo extensions (`extensions/`) and ex
 | Surface | Location | Runtime role |
 |---|---|---|
 | Repo extension | `extensions/<id>.ts` or `extensions/<id>/index.ts` | Registers Pi tools for sessions |
-| Execution skill | `skills/<id>/SKILL.md` and `~/.taskfactory/skills/<id>/SKILL.md` | Adds pre/post hook prompt behavior |
+| Execution skill | `skills/<id>/SKILL.md` and `~/.taskfactory/skills/<id>/SKILL.md` | Adds pre-planning / pre / post hook prompt behavior |
 
 ### Extension discovery and audience scoping
 
@@ -42,13 +42,14 @@ How to safely customize Task Factory with repo extensions (`extensions/`) and ex
 | Merge rule | User skill with same ID overrides starter skill |
 | Required file | `SKILL.md` with YAML frontmatter + markdown body |
 | Required fields | `name`, `description` (`name` must match directory ID) |
-| Hook metadata | `hooks` supports `pre`, `post`, or both |
+| Hook metadata | `hooks` supports `pre-planning`, `pre`, `post`, or combinations |
 
 ### Hook execution semantics
 
 | Hook | Behavior |
 |---|---|
-| `pre` | Runs before execution; failure aborts execution |
+| `pre-planning` | Runs before task planning prompt; failure aborts planning |
+| `pre` | Runs before execution prompt; failure aborts execution |
 | `post` | Runs after `task_complete`; failure is logged and next post hook continues |
 
 ### Starter post-execution skills
@@ -65,19 +66,20 @@ Built-in post-execution order for new tasks (when no global/workspace/task overr
 2. `code-review`
 3. `update-docs`
 
-### Customizing post-execution order (global/workspace/task)
+### Customizing hook order (global/workspace/task)
 
-| Scope | Where to change it | Field |
+| Scope | Where to change it | Fields |
 |---|---|---|
-| Global default | `~/.taskfactory/settings.json` (or Settings UI) | `taskDefaults.postExecutionSkills` |
-| Workspace override | `~/.taskfactory/workspaces/<workspace-id>/task-defaults.json` (or Workspace Settings) | `postExecutionSkills` |
-| Single task | Create Task form / API request payload | `postExecutionSkills` |
+| Global default | `~/.taskfactory/settings.json` (or Settings UI) | `taskDefaults.prePlanningSkills`, `taskDefaults.preExecutionSkills`, `taskDefaults.postExecutionSkills` |
+| Workspace override | `~/.taskfactory/workspaces/<workspace-id>/task-defaults.json` (or Workspace Settings) | `prePlanningSkills`, `preExecutionSkills`, `postExecutionSkills` |
+| Single task | Create Task form / API request payload | `prePlanningSkills`, `preExecutionSkills`, `postExecutionSkills` |
 
 Example global default override:
 
 ```json
 {
   "taskDefaults": {
+    "prePlanningSkills": ["plan-context"],
     "postExecutionSkills": ["code-review", "update-docs", "checkpoint"]
   }
 }

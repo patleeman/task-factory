@@ -1,5 +1,9 @@
 import { useState, useCallback, useRef, useMemo, useEffect } from 'react'
-import { DEFAULT_PRE_EXECUTION_SKILLS, DEFAULT_POST_EXECUTION_SKILLS } from '@task-factory/shared'
+import {
+  DEFAULT_PRE_PLANNING_SKILLS,
+  DEFAULT_PRE_EXECUTION_SKILLS,
+  DEFAULT_POST_EXECUTION_SKILLS,
+} from '@task-factory/shared'
 
 const STORAGE_KEY_PREFIX = 'task-factory:create-task-draft'
 
@@ -13,6 +17,7 @@ export interface TaskDraft {
   content: string
   selectedSkillIds: string[]
   selectedPreSkillIds: string[]
+  selectedPrePlanningSkillIds: string[]
   planningModelConfig?: DraftModelConfig
   executionModelConfig?: DraftModelConfig
   /** Legacy single-model field (treated as execution model). */
@@ -23,6 +28,7 @@ const EMPTY_DRAFT: TaskDraft = {
   content: '',
   selectedSkillIds: [...DEFAULT_POST_EXECUTION_SKILLS],
   selectedPreSkillIds: [...DEFAULT_PRE_EXECUTION_SKILLS],
+  selectedPrePlanningSkillIds: [...DEFAULT_PRE_PLANNING_SKILLS],
   planningModelConfig: undefined,
   executionModelConfig: undefined,
   modelConfig: undefined,
@@ -50,6 +56,9 @@ function loadDraft(storageKey: string): TaskDraft | null {
       content: parsed.content || '',
       selectedSkillIds: Array.isArray(parsed.selectedSkillIds) ? parsed.selectedSkillIds : [],
       selectedPreSkillIds: Array.isArray(parsed.selectedPreSkillIds) ? parsed.selectedPreSkillIds : [],
+      selectedPrePlanningSkillIds: Array.isArray(parsed.selectedPrePlanningSkillIds)
+        ? parsed.selectedPrePlanningSkillIds
+        : [...DEFAULT_PRE_PLANNING_SKILLS],
       planningModelConfig: parsed.planningModelConfig || undefined,
       executionModelConfig,
       modelConfig: executionModelConfig,

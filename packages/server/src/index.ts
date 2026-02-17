@@ -121,6 +121,104 @@ function parseTaskListScope(value: unknown): TaskListScope | null {
   return null;
 }
 
+function normalizeSkillIdList(
+  value: unknown,
+  fieldName: string,
+): { ok: true; value: string[] | undefined } | { ok: false; error: string } {
+  if (value === undefined) {
+    return { ok: true, value: undefined };
+  }
+
+  if (!Array.isArray(value)) {
+    return { ok: false, error: `${fieldName} must be an array of skill IDs` };
+  }
+
+  const hasNonString = value.some((entry) => typeof entry !== 'string');
+  if (hasNonString) {
+    return { ok: false, error: `${fieldName} must contain only string skill IDs` };
+  }
+
+  return {
+    ok: true,
+    value: value.map((entry) => String(entry).trim()).filter(Boolean),
+  };
+}
+
+function validateHookSkillIds(
+  fieldName: string,
+  hookLabel: string,
+  hook: 'pre-planning' | 'pre' | 'post',
+  skillIds: string[] | undefined,
+  skillsById: Map<string, { hooks: string[] }>,
+): string | null {
+  if (!skillIds) return null;
+
+  const unknown = skillIds.filter((skillId) => !skillsById.has(skillId));
+  if (unknown.length > 0) {
+    return `Unknown ${fieldName}: ${unknown.join(', ')}`;
+  }
+
+  const incompatible = skillIds.filter((skillId) => {
+    const skill = skillsById.get(skillId);
+    return skill ? !skill.hooks.includes(hook) : false;
+  });
+
+  if (incompatible.length > 0) {
+    return `${hookLabel} do not support ${hook} hook: ${incompatible.join(', ')}`;
+  }
+
+  return null;
+}
+
+function validateTaskHookSelection(
+  request: Pick<CreateTaskRequest, 'prePlanningSkills' | 'preExecutionSkills' | 'postExecutionSkills'>,
+): { ok: true } | { ok: false; error: string } {
+  const parsedPrePlanning = normalizeSkillIdList(request.prePlanningSkills, 'prePlanningSkills');
+  if (!parsedPrePlanning.ok) return parsedPrePlanning;
+
+  const parsedPreExecution = normalizeSkillIdList(request.preExecutionSkills, 'preExecutionSkills');
+  if (!parsedPreExecution.ok) return parsedPreExecution;
+
+  const parsedPostExecution = normalizeSkillIdList(request.postExecutionSkills, 'postExecutionSkills');
+  if (!parsedPostExecution.ok) return parsedPostExecution;
+
+  request.prePlanningSkills = parsedPrePlanning.value;
+  request.preExecutionSkills = parsedPreExecution.value;
+  request.postExecutionSkills = parsedPostExecution.value;
+
+  const skills = discoverPostExecutionSkills();
+  const skillsById = new Map(skills.map((skill) => [skill.id, { hooks: skill.hooks as string[] }]));
+
+  const prePlanningValidation = validateHookSkillIds(
+    'pre-planning skills',
+    'Pre-planning skills',
+    'pre-planning',
+    request.prePlanningSkills,
+    skillsById,
+  );
+  if (prePlanningValidation) return { ok: false, error: prePlanningValidation };
+
+  const preExecutionValidation = validateHookSkillIds(
+    'pre-execution skills',
+    'Pre-execution skills',
+    'pre',
+    request.preExecutionSkills,
+    skillsById,
+  );
+  if (preExecutionValidation) return { ok: false, error: preExecutionValidation };
+
+  const postExecutionValidation = validateHookSkillIds(
+    'post-execution skills',
+    'Post-execution skills',
+    'post',
+    request.postExecutionSkills,
+    skillsById,
+  );
+  if (postExecutionValidation) return { ok: false, error: postExecutionValidation };
+
+  return { ok: true };
+}
+
 // =============================================================================
 // State
 // =============================================================================
@@ -384,6 +482,12 @@ app.post('/api/workspaces/:id/tasks', async (req, res) => {
   const request = req.body as CreateTaskRequest;
 
   try {
+    const hookValidation = validateTaskHookSelection(request);
+    if (!hookValidation.ok) {
+      res.status(400).json({ error: hookValidation.error });
+      return;
+    }
+
     // Generate title if not provided
     let title = request.title;
     if (!title && request.content) {
@@ -468,6 +572,13 @@ app.patch('/api/workspaces/:workspaceId/tasks/:taskId', async (req, res) => {
 
   try {
     const request = req.body as UpdateTaskRequest;
+
+    const hookValidation = validateTaskHookSelection(request as Pick<CreateTaskRequest, 'prePlanningSkills' | 'preExecutionSkills' | 'postExecutionSkills'>);
+    if (!hookValidation.ok) {
+      res.status(400).json({ error: hookValidation.error });
+      return;
+    }
+
     const preparedUpdate = await prepareTaskUpdateRequest(task, request);
 
     task = updateTask(task, preparedUpdate.request);

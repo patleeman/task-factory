@@ -83,7 +83,11 @@ export interface TaskDefaults {
    * Kept for backward compatibility with existing settings/task files.
    */
   modelConfig?: ModelConfig;
+  /** Pre-planning skills (run before the planning prompt). */
+  prePlanningSkills: string[];
+  /** Pre-execution skills (run before the execution prompt). */
   preExecutionSkills: string[];
+  /** Post-execution skills (run after task_complete). */
   postExecutionSkills: string[];
   /**
    * Custom planning prompt template.
@@ -463,6 +467,9 @@ export interface TaskFrontmatter {
 
   // Ordering (position within a column; lower = closer to top)
   order: number;
+
+  // Pre-planning skills (run before main planning prompt)
+  prePlanningSkills?: string[];
 
   // Pre-execution skills (run before main agent execution)
   preExecutionSkills?: string[];
@@ -857,6 +864,7 @@ export interface CreateTaskRequest {
   content: string; // Task description
   acceptanceCriteria?: string[]; // Auto-generated if not provided
   plan?: TaskPlan;
+  prePlanningSkills?: string[];
   preExecutionSkills?: string[];
   postExecutionSkills?: string[];
   skillConfigs?: Record<string, Record<string, string>>;
@@ -874,6 +882,7 @@ export interface UpdateTaskRequest {
   assigned?: string | null;
   plan?: TaskPlan;
   blocked?: Partial<BlockedState>;
+  prePlanningSkills?: string[];
   preExecutionSkills?: string[];
   postExecutionSkills?: string[];
   skillConfigs?: Record<string, Record<string, string>>;
@@ -945,7 +954,7 @@ export type ServerEvent =
   // Planning agent events
   | PlanningEvent;
 
-export type AgentExecutionStatus = 'idle' | 'awaiting_input' | 'streaming' | 'tool_use' | 'thinking' | 'completed' | 'error' | 'pre-hooks' | 'post-hooks';
+export type AgentExecutionStatus = 'idle' | 'awaiting_input' | 'streaming' | 'tool_use' | 'thinking' | 'completed' | 'error' | 'pre-planning-hooks' | 'pre-hooks' | 'post-hooks';
 
 export type ClientEvent =
   | { type: 'subscribe'; workspaceId: string }
@@ -1077,6 +1086,7 @@ export interface NewTaskFormState {
   content: string;
   selectedSkillIds: string[];
   selectedPreSkillIds?: string[];
+  selectedPrePlanningSkillIds?: string[];
   planningModelConfig?: ModelConfig;
   executionModelConfig?: ModelConfig;
   /** Legacy single-model field (treated as execution model). */
@@ -1137,7 +1147,7 @@ export interface SortOptions {
 // Execution Skills (Agent Skills spec compliant)
 // =============================================================================
 
-export type SkillHook = 'pre' | 'post';
+export type SkillHook = 'pre-planning' | 'pre' | 'post';
 export type SkillSource = 'starter' | 'user';
 
 export interface SkillConfigField {
@@ -1170,6 +1180,9 @@ export interface PostExecutionSkill {
   metadata: Record<string, string>;
   configSchema: SkillConfigField[];
 }
+
+/** Default pre-planning skills applied to new tasks when none are specified. */
+export const DEFAULT_PRE_PLANNING_SKILLS: string[] = [];
 
 /** Default pre-execution skills applied to new tasks when none are specified. */
 export const DEFAULT_PRE_EXECUTION_SKILLS: string[] = [];

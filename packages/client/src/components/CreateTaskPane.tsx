@@ -1,7 +1,11 @@
 import { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react'
 import { ArrowLeft, X } from 'lucide-react'
 import type { ModelConfig, NewTaskFormState, TaskDefaults } from '@task-factory/shared'
-import { DEFAULT_PRE_EXECUTION_SKILLS, DEFAULT_POST_EXECUTION_SKILLS } from '@task-factory/shared'
+import {
+  DEFAULT_PRE_PLANNING_SKILLS,
+  DEFAULT_PRE_EXECUTION_SKILLS,
+  DEFAULT_POST_EXECUTION_SKILLS,
+} from '@task-factory/shared'
 import { AppIcon } from './AppIcon'
 import { MarkdownEditor } from './MarkdownEditor'
 import { ModelSelector } from './ModelSelector'
@@ -15,6 +19,7 @@ import type { PostExecutionSkill } from '../types/pi'
 
 export interface CreateTaskData {
   content: string
+  prePlanningSkills?: string[]
   preExecutionSkills?: string[]
   postExecutionSkills?: string[]
   skillConfigs?: Record<string, Record<string, string>>
@@ -64,6 +69,11 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
       ? prefillRequest.formState.selectedSkillIds
       : initialDraft.selectedSkillIds,
   )
+  const [selectedPrePlanningSkillIds, setSelectedPrePlanningSkillIds] = useState<string[]>(
+    Array.isArray(prefillRequest?.formState.selectedPrePlanningSkillIds)
+      ? prefillRequest.formState.selectedPrePlanningSkillIds
+      : (initialDraft.selectedPrePlanningSkillIds || []),
+  )
   const [selectedPreSkillIds, setSelectedPreSkillIds] = useState<string[]>(
     Array.isArray(prefillRequest?.formState.selectedPreSkillIds)
       ? prefillRequest.formState.selectedPreSkillIds
@@ -83,6 +93,7 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
     planningModelConfig: undefined,
     executionModelConfig: undefined,
     modelConfig: undefined,
+    prePlanningSkills: [...DEFAULT_PRE_PLANNING_SKILLS],
     preExecutionSkills: [...DEFAULT_PRE_EXECUTION_SKILLS],
     postExecutionSkills: [...DEFAULT_POST_EXECUTION_SKILLS],
   })
@@ -119,6 +130,7 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
         }
 
         const formDefaults = buildCreateTaskFormDefaults(defaults)
+        setSelectedPrePlanningSkillIds(formDefaults.selectedPrePlanningSkillIds)
         setSelectedPreSkillIds(formDefaults.selectedPreSkillIds)
         setSelectedSkillIds(formDefaults.selectedSkillIds)
         setPlanningModelConfig(formDefaults.planningModelConfig)
@@ -135,6 +147,7 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
       content,
       selectedSkillIds,
       selectedPreSkillIds,
+      selectedPrePlanningSkillIds,
       planningModelConfig,
       executionModelConfig,
       // Keep legacy field aligned for older agent extensions.
@@ -155,6 +168,7 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
         content,
         selectedSkillIds,
         selectedPreSkillIds,
+        selectedPrePlanningSkillIds,
         planningModelConfig,
         executionModelConfig,
         // Keep legacy field aligned for older agent extensions.
@@ -162,7 +176,7 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
       }).catch(() => {})
     }, 300)
     return () => { if (syncTimer.current) clearTimeout(syncTimer.current) }
-  }, [workspaceId, content, selectedSkillIds, selectedPreSkillIds, planningModelConfig, executionModelConfig])
+  }, [workspaceId, content, selectedSkillIds, selectedPreSkillIds, selectedPrePlanningSkillIds, planningModelConfig, executionModelConfig])
 
   // Apply incoming updates from the planning agent
   useEffect(() => {
@@ -171,6 +185,9 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
     if (agentFormUpdates.content !== undefined) setContent(agentFormUpdates.content)
     if (agentFormUpdates.selectedSkillIds !== undefined) setSelectedSkillIds(agentFormUpdates.selectedSkillIds)
     if (agentFormUpdates.selectedPreSkillIds !== undefined) setSelectedPreSkillIds(agentFormUpdates.selectedPreSkillIds)
+    if (agentFormUpdates.selectedPrePlanningSkillIds !== undefined) {
+      setSelectedPrePlanningSkillIds(agentFormUpdates.selectedPrePlanningSkillIds)
+    }
     if (agentFormUpdates.planningModelConfig !== undefined) {
       setPlanningModelConfig(agentFormUpdates.planningModelConfig)
     }
@@ -194,6 +211,9 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
     if (updates.content !== undefined) setContent(updates.content)
     if (updates.selectedSkillIds !== undefined) setSelectedSkillIds(updates.selectedSkillIds)
     if (updates.selectedPreSkillIds !== undefined) setSelectedPreSkillIds(updates.selectedPreSkillIds)
+    if (updates.selectedPrePlanningSkillIds !== undefined) {
+      setSelectedPrePlanningSkillIds(updates.selectedPrePlanningSkillIds)
+    }
     if (updates.planningModelConfig !== undefined) setPlanningModelConfig(updates.planningModelConfig)
     if (updates.executionModelConfig !== undefined) {
       setExecutionModelConfig(updates.executionModelConfig)
@@ -229,6 +249,10 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
   }, [selectedPreSkillIds, updateDraft])
 
   useEffect(() => {
+    updateDraft({ selectedPrePlanningSkillIds })
+  }, [selectedPrePlanningSkillIds, updateDraft])
+
+  useEffect(() => {
     updateDraft({ planningModelConfig })
   }, [planningModelConfig, updateDraft])
 
@@ -244,6 +268,7 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
     const formDefaults = buildCreateTaskFormDefaults(taskDefaults)
 
     setContent('')
+    setSelectedPrePlanningSkillIds(formDefaults.selectedPrePlanningSkillIds)
     setSelectedPreSkillIds(formDefaults.selectedPreSkillIds)
     setSelectedSkillIds(formDefaults.selectedSkillIds)
     setSkillConfigs({})
@@ -330,6 +355,12 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
 
       const shouldSanitizeByHooks = availableSkills.length > 0
       const skillById = new Map(availableSkills.map((skill) => [skill.id, skill]))
+      const sanitizedPrePlanningSkillIds = shouldSanitizeByHooks
+        ? selectedPrePlanningSkillIds.filter((skillId) => {
+            const skill = skillById.get(skillId)
+            return Boolean(skill && skill.hooks.includes('pre-planning'))
+          })
+        : [...selectedPrePlanningSkillIds]
       const sanitizedPreSkillIds = shouldSanitizeByHooks
         ? selectedPreSkillIds.filter((skillId) => {
             const skill = skillById.get(skillId)
@@ -345,6 +376,7 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
 
       await onSubmit({
         content,
+        prePlanningSkills: sanitizedPrePlanningSkillIds,
         preExecutionSkills: sanitizedPreSkillIds,
         postExecutionSkills: sanitizedPostSkillIds,
         skillConfigs: hasSkillConfigs ? skillConfigs : undefined,
@@ -498,15 +530,17 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
   const executionPipelineSection = (
     <div className="shrink-0">
       <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
-        Execution Pipeline
+        Planning + Execution Pipelines
       </label>
       <p className="text-xs text-slate-400 mb-2">
-        Add skills, then drag cards to pre/post lanes to control execution order.
+        Add skills, then drag cards to pre-planning, pre-execution, and post-execution lanes.
       </p>
       <ExecutionPipelineEditor
         availableSkills={availableSkills}
+        selectedPrePlanningSkillIds={selectedPrePlanningSkillIds}
         selectedPreSkillIds={selectedPreSkillIds}
         selectedSkillIds={selectedSkillIds}
+        onPrePlanningSkillsChange={setSelectedPrePlanningSkillIds}
         onPreSkillsChange={setSelectedPreSkillIds}
         onPostSkillsChange={setSelectedSkillIds}
         skillConfigs={skillConfigs}

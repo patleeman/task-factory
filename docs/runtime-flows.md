@@ -36,10 +36,11 @@ Follow one task through this order:
 | Step | Summary |
 |---|---|
 | 1 | `planTask` marks `planningStatus=running` |
-| 2 | Planning run enforces `task_planning` contract |
-| 3 | Agent investigates and must call `save_plan` once |
-| 4 | Server persists criteria + plan, sets `planningStatus=completed` |
-| 5 | Optional auto-promotion moves task `backlog -> ready` |
+| 2 | Optional pre-planning skills run (fail-fast on first error) |
+| 3 | Planning run enforces `task_planning` contract |
+| 4 | Agent investigates and must call `save_plan` once |
+| 5 | Server persists criteria + plan, sets `planningStatus=completed` |
+| 6 | Optional auto-promotion moves task `backlog -> ready` |
 
 ### 3) Task execution flow
 

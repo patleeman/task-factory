@@ -9,7 +9,7 @@ function extractResultText(result: any): string {
     .join('\n');
 }
 
-describe('manage_new_task extension - pre-skills support', () => {
+describe('manage_new_task extension - planning/execution hook support', () => {
   let tool: any;
   let mockCallbacks: any;
 
@@ -35,11 +35,12 @@ describe('manage_new_task extension - pre-skills support', () => {
     delete (globalThis as any).__piFactoryTaskFormCallbacks;
   });
 
-  it('reads pre-execution skills in get action', async () => {
+  it('reads pre-planning and pre-execution skills in get action', async () => {
     mockCallbacks.getFormState.mockReturnValue({
       content: 'Test content',
       selectedSkillIds: ['checkpoint', 'code-review'],
       selectedPreSkillIds: ['security-review', 'tdd'],
+      selectedPrePlanningSkillIds: ['plan-context'],
       planningModelConfig: null,
       executionModelConfig: null,
     });
@@ -57,9 +58,11 @@ describe('manage_new_task extension - pre-skills support', () => {
     expect(text).toContain('checkpoint, code-review');
     expect(text).toContain('Selected Pre-Execution Skills');
     expect(text).toContain('security-review, tdd');
+    expect(text).toContain('Selected Pre-Planning Skills');
+    expect(text).toContain('plan-context');
   });
 
-  it('updates pre-execution skills via selectedPreSkillIds', async () => {
+  it('updates pre-execution and pre-planning skills via update action', async () => {
     mockCallbacks.updateFormState.mockReturnValue('Form updated successfully.');
 
     const result = await tool.execute(
@@ -69,6 +72,7 @@ describe('manage_new_task extension - pre-skills support', () => {
         updates: {
           content: 'Updated content',
           selectedPreSkillIds: ['security-review'],
+          selectedPrePlanningSkillIds: ['plan-context'],
         },
       },
       undefined,
@@ -80,12 +84,13 @@ describe('manage_new_task extension - pre-skills support', () => {
       expect.objectContaining({
         content: 'Updated content',
         selectedPreSkillIds: ['security-review'],
+        selectedPrePlanningSkillIds: ['plan-context'],
       }),
     );
     expect(extractResultText(result)).toContain('Form updated successfully');
   });
 
-  it('can update both pre and post skills together', async () => {
+  it('can update pre-planning, pre, and post skills together', async () => {
     mockCallbacks.updateFormState.mockReturnValue('Updated.');
 
     await tool.execute(
@@ -95,6 +100,7 @@ describe('manage_new_task extension - pre-skills support', () => {
         updates: {
           selectedSkillIds: ['checkpoint'],
           selectedPreSkillIds: ['tdd', 'security-review'],
+          selectedPrePlanningSkillIds: ['plan-context', 'scan-context'],
         },
       },
       undefined,
@@ -106,6 +112,7 @@ describe('manage_new_task extension - pre-skills support', () => {
       expect.objectContaining({
         selectedSkillIds: ['checkpoint'],
         selectedPreSkillIds: ['tdd', 'security-review'],
+        selectedPrePlanningSkillIds: ['plan-context', 'scan-context'],
       }),
     );
   });
@@ -115,6 +122,7 @@ describe('manage_new_task extension - pre-skills support', () => {
       content: 'Test',
       selectedSkillIds: [],
       selectedPreSkillIds: [],
+      selectedPrePlanningSkillIds: [],
     });
 
     const result = await tool.execute(
@@ -128,5 +136,6 @@ describe('manage_new_task extension - pre-skills support', () => {
     const text = extractResultText(result);
     expect(text).toContain('Selected Post-Execution Skills:** (none)');
     expect(text).toContain('Selected Pre-Execution Skills:** (none)');
+    expect(text).toContain('Selected Pre-Planning Skills:** (none)');
   });
 });

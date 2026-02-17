@@ -105,6 +105,30 @@ describe('skill-management-service', () => {
     expect(updatedContent).toContain('done-signal: DONE_NOW');
   });
 
+  it('creates a skill with pre-planning hook metadata', () => {
+    const skillsDir = createTempSkillsDir();
+
+    const createdId = createFactorySkill(
+      {
+        id: 'plan-context',
+        description: 'Collect context before planning',
+        type: 'follow-up',
+        hooks: ['pre-planning'],
+        maxIterations: 1,
+        doneSignal: 'HOOK_DONE',
+        promptTemplate: 'Collect context before planning.',
+        configSchema: [],
+      },
+      { skillsDir },
+    );
+
+    expect(createdId).toBe('plan-context');
+
+    const skillMdPath = join(skillsDir, 'plan-context', 'SKILL.md');
+    const content = readFileSync(skillMdPath, 'utf-8');
+    expect(content).toContain('hooks: pre-planning');
+  });
+
   it('imports SKILL.md content and normalizes the skill id from name', () => {
     const skillsDir = createTempSkillsDir();
 
@@ -182,6 +206,21 @@ Use {{style}} tone.
     const skillsDir = getFactoryUserSkillsDirFresh();
     expect(skillsDir).toBe(join(homePath, '.taskfactory', 'skills'));
     expect(existsSync(join(skillsDir, 'legacy-review', 'SKILL.md'))).toBe(true);
+  });
+
+  it('parses pre-planning hook metadata from imported skills', () => {
+    const parsed = parseImportedSkillMarkdown(`---
+name: plan-context
+description: Gather planning context
+metadata:
+  hooks: pre-planning, pre
+---
+
+Collect planning context before starting.
+`);
+
+    expect(parsed.id).toBe('plan-context');
+    expect(parsed.hooks).toEqual(['pre-planning', 'pre']);
   });
 
   it('validates imported markdown shape', () => {

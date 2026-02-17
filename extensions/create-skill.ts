@@ -12,7 +12,7 @@ declare global {
     createSkill: (payload: {
       name: string;
       description: string;
-      hooks: ('pre' | 'post')[];
+      hooks: ('pre-planning' | 'pre' | 'post')[];
       content: string;
     }) => Promise<{ success: boolean; skillId?: string; path?: string; error?: string }>;
     listSkills: () => Promise<Array<{ id: string; name: string; description: string; hooks: string[] }>>;
@@ -44,7 +44,7 @@ export default function (pi: ExtensionAPI) {
     name: 'create_skill',
     label: 'Create Skill',
     description:
-      'Create a new execution skill that can be used by tasks. ' +
+      'Create a new hook skill that can be used by tasks. ' +
       'Skills are stored as SKILL.md files with YAML frontmatter. ' +
       'The skill will be available immediately after creation.',
     parameters: Type.Object({
@@ -55,8 +55,8 @@ export default function (pi: ExtensionAPI) {
         description: 'Short description of what the skill does',
       }),
       hooks: Type.Array(
-        Type.Union([Type.Literal('pre'), Type.Literal('post')]),
-        { description: 'When the skill runs: pre (before task execution) and/or post (after task execution)' }
+        Type.Union([Type.Literal('pre-planning'), Type.Literal('pre'), Type.Literal('post')]),
+        { description: 'When the skill runs: pre-planning (before planning), pre (before execution), and/or post (after execution)' }
       ),
       content: Type.String({
         description: 'Markdown content for the skill (the prompt template that will be sent to the agent)',
@@ -95,7 +95,7 @@ export default function (pi: ExtensionAPI) {
         return {
           content: [{
             type: 'text' as const,
-            text: 'Error: At least one hook (pre or post) must be specified.',
+            text: 'Error: At least one hook (pre-planning, pre, or post) must be specified.',
           }],
           details: { error: 'No hooks specified' },
         };

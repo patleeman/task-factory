@@ -25,6 +25,7 @@ interface SkillFormState {
   description: string
   type: SkillType
   hooks: {
+    prePlanning: boolean
     pre: boolean
     post: boolean
   }
@@ -58,6 +59,7 @@ function createBlankSkillForm(): SkillFormState {
     description: '',
     type: 'follow-up',
     hooks: {
+      prePlanning: false,
       pre: true,
       post: true,
     },
@@ -76,6 +78,7 @@ function toSkillForm(skill: PostExecutionSkill): SkillFormState {
     description: skill.description,
     type: skill.type,
     hooks: {
+      prePlanning: skill.hooks.includes('pre-planning'),
       pre: skill.hooks.includes('pre'),
       post: skill.hooks.includes('post'),
     },
@@ -331,12 +334,13 @@ export function SkillManagementPanel({ skills, onSkillsChange }: SkillManagement
       return
     }
 
-    const hooks: Array<'pre' | 'post'> = []
+    const hooks: Array<'pre-planning' | 'pre' | 'post'> = []
+    if (form.hooks.prePlanning) hooks.push('pre-planning')
     if (form.hooks.pre) hooks.push('pre')
     if (form.hooks.post) hooks.push('post')
 
     if (hooks.length === 0) {
-      setSaveError('Select at least one hook (pre and/or post)')
+      setSaveError('Select at least one hook (pre-planning, pre, and/or post)')
       return
     }
 
@@ -590,7 +594,15 @@ export function SkillManagementPanel({ skills, onSkillsChange }: SkillManagement
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <label className="text-xs text-slate-600">
                 Hooks
-                <div className="mt-1 flex items-center gap-4 rounded-lg border border-slate-200 px-3 py-2 bg-slate-50">
+                <div className="mt-1 flex flex-wrap items-center gap-4 rounded-lg border border-slate-200 px-3 py-2 bg-slate-50">
+                  <label className="inline-flex items-center gap-1.5 text-xs text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={form.hooks.prePlanning}
+                      onChange={(event) => setForm({ ...form, hooks: { ...form.hooks, prePlanning: event.target.checked } })}
+                    />
+                    pre-planning
+                  </label>
                   <label className="inline-flex items-center gap-1.5 text-xs text-slate-700">
                     <input
                       type="checkbox"

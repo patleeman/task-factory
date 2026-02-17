@@ -70,7 +70,7 @@ export interface SkillConfigField {
   };
 }
 
-export type SkillHook = 'pre' | 'post'
+export type SkillHook = 'pre-planning' | 'pre' | 'post'
 export type SkillSource = 'starter' | 'user'
 
 export interface PostExecutionSkill {

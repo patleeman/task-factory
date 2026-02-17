@@ -13,7 +13,7 @@ vi.mock('../src/activity-service.js', () => ({
   })),
 }));
 
-import { runPostExecutionSkills, runPreExecutionSkills } from '../src/post-execution-skills.js';
+import { runPostExecutionSkills, runPreExecutionSkills, runPrePlanningSkills } from '../src/post-execution-skills.js';
 
 function createSession() {
   return {
@@ -36,6 +36,19 @@ describe('hook-aware skill execution', () => {
         workspaceId: 'workspace-1',
       }),
     ).rejects.toThrow('does not support the pre-execution hook');
+
+    expect(session.prompt).not.toHaveBeenCalled();
+  });
+
+  it('blocks pre-planning when a skill does not support the pre-planning hook', async () => {
+    const session = createSession();
+
+    await expect(
+      runPrePlanningSkills(session, ['checkpoint'], {
+        taskId: 'TEST-1A',
+        workspaceId: 'workspace-1',
+      }),
+    ).rejects.toThrow('does not support the pre-planning hook');
 
     expect(session.prompt).not.toHaveBeenCalled();
   });

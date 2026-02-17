@@ -2086,7 +2086,7 @@ declare global {
     createSkill: (payload: {
       name: string;
       description: string;
-      hooks: ('pre' | 'post')[];
+      hooks: ('pre-planning' | 'pre' | 'post')[];
       content: string;
     }) => Promise<{ success: boolean; skillId?: string; path?: string; error?: string }>;
     listSkills: () => Promise<Array<{ id: string; name: string; description: string; hooks: string[] }>>;
@@ -2097,7 +2097,7 @@ function ensureCreateSkillCallbackRegistry(): Map<string, {
   createSkill: (payload: {
     name: string;
     description: string;
-    hooks: ('pre' | 'post')[];
+    hooks: ('pre-planning' | 'pre' | 'post')[];
     content: string;
   }) => Promise<{ success: boolean; skillId?: string; path?: string; error?: string }>;
   listSkills: () => Promise<Array<{ id: string; name: string; description: string; hooks: string[] }>>;

@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
 import {
+  DEFAULT_PRE_PLANNING_SKILLS,
   DEFAULT_PRE_EXECUTION_SKILLS,
   DEFAULT_POST_EXECUTION_SKILLS,
   DEFAULT_PLANNING_PROMPT_TEMPLATE,
@@ -43,6 +44,7 @@ const BUILT_IN_TASK_DEFAULTS: TaskDefaults = {
   planningModelConfig: undefined,
   executionModelConfig: undefined,
   modelConfig: undefined,
+  prePlanningSkills: [...DEFAULT_PRE_PLANNING_SKILLS],
   preExecutionSkills: [...DEFAULT_PRE_EXECUTION_SKILLS],
   postExecutionSkills: [...DEFAULT_POST_EXECUTION_SKILLS],
   planningPromptTemplate: DEFAULT_PLANNING_PROMPT_TEMPLATE,
@@ -57,6 +59,7 @@ interface TaskDefaultsOverride {
   planningModelConfig?: ModelConfig;
   executionModelConfig?: ModelConfig;
   modelConfig?: ModelConfig;
+  prePlanningSkills?: string[];
   preExecutionSkills?: string[];
   postExecutionSkills?: string[];
   planningPromptTemplate?: string;
@@ -81,6 +84,7 @@ function cloneTaskDefaults(defaults: TaskDefaults): TaskDefaults {
     executionModelConfig,
     // Keep legacy field aligned for backward compatibility.
     modelConfig: cloneModelConfig(executionModelConfig),
+    prePlanningSkills: [...defaults.prePlanningSkills],
     preExecutionSkills: [...defaults.preExecutionSkills],
     postExecutionSkills: [...defaults.postExecutionSkills],
     planningPromptTemplate: defaults.planningPromptTemplate,
@@ -96,6 +100,7 @@ function normalizeTaskDefaults(defaults: TaskDefaults): TaskDefaults {
     executionModelConfig,
     // Keep legacy field aligned for backward compatibility.
     modelConfig: cloneModelConfig(executionModelConfig),
+    prePlanningSkills: [...defaults.prePlanningSkills],
     preExecutionSkills: [...defaults.preExecutionSkills],
     postExecutionSkills: [...defaults.postExecutionSkills],
     planningPromptTemplate: defaults.planningPromptTemplate,
@@ -135,6 +140,14 @@ function sanitizeModelConfig(raw: unknown): ModelConfig | undefined {
 function sanitizePostSkillIds(raw: unknown): string[] {
   if (!Array.isArray(raw)) {
     return [...DEFAULT_POST_EXECUTION_SKILLS];
+  }
+
+  return raw.filter((skillId): skillId is string => typeof skillId === 'string');
+}
+
+function sanitizePrePlanningSkillIds(raw: unknown): string[] {
+  if (!Array.isArray(raw)) {
+    return [...DEFAULT_PRE_PLANNING_SKILLS];
   }
 
   return raw.filter((skillId): skillId is string => typeof skillId === 'string');
@@ -214,6 +227,10 @@ function buildWorkspaceTaskDefaultsOverride(
     override.modelConfig = cloneModelConfig(normalizedExecutionModel);
   }
 
+  if (!areSkillIdListsEqual(normalizedDefaults.prePlanningSkills, normalizedGlobalDefaults.prePlanningSkills)) {
+    override.prePlanningSkills = [...normalizedDefaults.prePlanningSkills];
+  }
+
   if (!areSkillIdListsEqual(normalizedDefaults.preExecutionSkills, normalizedGlobalDefaults.preExecutionSkills)) {
     override.preExecutionSkills = [...normalizedDefaults.preExecutionSkills];
   }
@@ -234,6 +251,7 @@ function buildWorkspaceTaskDefaultsOverride(
     override.planningModelConfig !== undefined
     || override.executionModelConfig !== undefined
     || override.modelConfig !== undefined
+    || override.prePlanningSkills !== undefined
     || override.preExecutionSkills !== undefined
     || override.postExecutionSkills !== undefined
     || override.planningPromptTemplate !== undefined
@@ -251,6 +269,7 @@ function resolveTaskDefaultsOverride(raw: unknown): TaskDefaultsOverride | null 
     planningModelConfig?: unknown;
     executionModelConfig?: unknown;
     modelConfig?: unknown;
+    prePlanningSkills?: unknown;
     preExecutionSkills?: unknown;
     postExecutionSkills?: unknown;
     planningPromptTemplate?: unknown;
@@ -261,6 +280,7 @@ function resolveTaskDefaultsOverride(raw: unknown): TaskDefaultsOverride | null 
     planningModelConfig: sanitizeModelConfig(defaults.planningModelConfig),
     executionModelConfig: sanitizeModelConfig(defaults.executionModelConfig),
     modelConfig: sanitizeModelConfig(defaults.modelConfig),
+    prePlanningSkills: sanitizeOptionalSkillIds(defaults.prePlanningSkills),
     preExecutionSkills: sanitizeOptionalSkillIds(defaults.preExecutionSkills),
     postExecutionSkills: sanitizeOptionalSkillIds(defaults.postExecutionSkills),
     planningPromptTemplate: sanitizePromptTemplate(defaults.planningPromptTemplate),
@@ -271,6 +291,7 @@ function resolveTaskDefaultsOverride(raw: unknown): TaskDefaultsOverride | null 
     override.planningModelConfig !== undefined
     || override.executionModelConfig !== undefined
     || override.modelConfig !== undefined
+    || override.prePlanningSkills !== undefined
     || override.preExecutionSkills !== undefined
     || override.postExecutionSkills !== undefined
     || override.planningPromptTemplate !== undefined
@@ -296,6 +317,9 @@ function mergeTaskDefaults(base: TaskDefaults, workspaceOverride: TaskDefaultsOv
     executionModelConfig,
     // Keep legacy field aligned for backward compatibility.
     modelConfig: cloneModelConfig(executionModelConfig),
+    prePlanningSkills: workspaceOverride.prePlanningSkills !== undefined
+      ? [...workspaceOverride.prePlanningSkills]
+      : [...base.prePlanningSkills],
     preExecutionSkills: workspaceOverride.preExecutionSkills !== undefined
       ? [...workspaceOverride.preExecutionSkills]
       : [...base.preExecutionSkills],
@@ -378,6 +402,7 @@ export function resolveTaskDefaults(rawSettings: PiFactorySettings | null | unde
     executionModelConfig,
     // Keep legacy field aligned for backward compatibility.
     modelConfig: executionModelConfig,
+    prePlanningSkills: sanitizePrePlanningSkillIds((defaults as { prePlanningSkills?: unknown }).prePlanningSkills),
     preExecutionSkills: sanitizePreSkillIds((defaults as { preExecutionSkills?: unknown }).preExecutionSkills),
     postExecutionSkills: sanitizePostSkillIds((defaults as { postExecutionSkills?: unknown }).postExecutionSkills),
     planningPromptTemplate: sanitizePromptTemplate((defaults as { planningPromptTemplate?: unknown }).planningPromptTemplate),
@@ -445,6 +470,7 @@ export function applyTaskDefaultsToRequest(request: CreateTaskRequest, defaults:
   executionModelConfig: ModelConfig | undefined;
   /** Legacy alias for execution model. */
   modelConfig: ModelConfig | undefined;
+  prePlanningSkills: string[];
   preExecutionSkills: string[];
   postExecutionSkills: string[];
   planningPromptTemplate: string | undefined;
@@ -462,6 +488,10 @@ export function applyTaskDefaultsToRequest(request: CreateTaskRequest, defaults:
       ? cloneModelConfig(request.modelConfig)
       : cloneModelConfig(resolvedExecutionDefaults);
 
+  const prePlanningSkills = request.prePlanningSkills !== undefined
+    ? [...request.prePlanningSkills]
+    : [...defaults.prePlanningSkills];
+
   const preExecutionSkills = request.preExecutionSkills !== undefined
     ? [...request.preExecutionSkills]
     : [...defaults.preExecutionSkills];
@@ -475,6 +505,7 @@ export function applyTaskDefaultsToRequest(request: CreateTaskRequest, defaults:
     executionModelConfig,
     // Keep legacy alias aligned to execution model.
     modelConfig: cloneModelConfig(executionModelConfig),
+    prePlanningSkills,
     preExecutionSkills,
     postExecutionSkills,
     planningPromptTemplate: defaults.planningPromptTemplate,
@@ -574,6 +605,7 @@ export function parseTaskDefaultsPayload(raw: unknown): { ok: true; value: TaskD
     planningModelConfig?: unknown;
     executionModelConfig?: unknown;
     modelConfig?: unknown;
+    prePlanningSkills?: unknown;
     preExecutionSkills?: unknown;
     postExecutionSkills?: unknown;
     planningPromptTemplate?: unknown;
@@ -589,9 +621,35 @@ export function parseTaskDefaultsPayload(raw: unknown): { ok: true; value: TaskD
     return { ok: false, error: 'postExecutionSkills must contain only string skill IDs' };
   }
 
-  // preExecutionSkills defaults to empty array if not provided
+  if (payload.prePlanningSkills !== undefined && !Array.isArray(payload.prePlanningSkills)) {
+    return { ok: false, error: 'prePlanningSkills must be an array of skill IDs' };
+  }
+
+  if (Array.isArray(payload.prePlanningSkills)) {
+    const hasNonStringPrePlanningSkill = payload.prePlanningSkills.some((skillId) => typeof skillId !== 'string');
+    if (hasNonStringPrePlanningSkill) {
+      return { ok: false, error: 'prePlanningSkills must contain only string skill IDs' };
+    }
+  }
+
+  if (payload.preExecutionSkills !== undefined && !Array.isArray(payload.preExecutionSkills)) {
+    return { ok: false, error: 'preExecutionSkills must be an array of skill IDs' };
+  }
+
+  if (Array.isArray(payload.preExecutionSkills)) {
+    const hasNonStringPreExecutionSkill = payload.preExecutionSkills.some((skillId) => typeof skillId !== 'string');
+    if (hasNonStringPreExecutionSkill) {
+      return { ok: false, error: 'preExecutionSkills must contain only string skill IDs' };
+    }
+  }
+
+  // pre-planning/execution hooks default to empty arrays if not provided
+  const prePlanningSkills: string[] = Array.isArray(payload.prePlanningSkills)
+    ? [...payload.prePlanningSkills]
+    : [];
+
   const preExecutionSkills: string[] = Array.isArray(payload.preExecutionSkills)
-    ? payload.preExecutionSkills.filter((id): id is string => typeof id === 'string')
+    ? [...payload.preExecutionSkills]
     : [];
 
   const parsedPlanningModelConfig = parseModelConfigPayload(payload.planningModelConfig, 'planningModelConfig');
@@ -618,6 +676,7 @@ export function parseTaskDefaultsPayload(raw: unknown): { ok: true; value: TaskD
       executionModelConfig,
       // Keep legacy field aligned for backward compatibility.
       modelConfig: executionModelConfig,
+      prePlanningSkills: [...prePlanningSkills],
       preExecutionSkills: [...preExecutionSkills],
       postExecutionSkills: [...payload.postExecutionSkills],
       planningPromptTemplate: sanitizePromptTemplate(payload.planningPromptTemplate),
@@ -647,6 +706,14 @@ export function validateTaskDefaults(
     skillById.set(skill.id, skill);
   }
 
+  const unknownPrePlanningSkills = defaults.prePlanningSkills.filter((skillId) => !skillById.has(skillId));
+  if (unknownPrePlanningSkills.length > 0) {
+    return {
+      ok: false,
+      error: `Unknown pre-planning skills: ${unknownPrePlanningSkills.join(', ')}`,
+    };
+  }
+
   const unknownPreSkills = defaults.preExecutionSkills.filter((skillId) => !skillById.has(skillId));
   if (unknownPreSkills.length > 0) {
     return {
@@ -660,6 +727,17 @@ export function validateTaskDefaults(
     return {
       ok: false,
       error: `Unknown post-execution skills: ${unknownPostSkills.join(', ')}`,
+    };
+  }
+
+  const incompatiblePrePlanningSkills = defaults.prePlanningSkills.filter((skillId) => {
+    const skill = skillById.get(skillId);
+    return skill ? !skill.hooks.includes('pre-planning') : false;
+  });
+  if (incompatiblePrePlanningSkills.length > 0) {
+    return {
+      ok: false,
+      error: `Pre-planning skills do not support pre-planning hook: ${incompatiblePrePlanningSkills.join(', ')}`,
     };
   }
 

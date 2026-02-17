@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_POST_EXECUTION_SKILLS, DEFAULT_PRE_EXECUTION_SKILLS, type TaskDefaults } from '@task-factory/shared';
+import {
+  DEFAULT_POST_EXECUTION_SKILLS,
+  DEFAULT_PRE_PLANNING_SKILLS,
+  DEFAULT_PRE_EXECUTION_SKILLS,
+  type TaskDefaults,
+} from '@task-factory/shared';
 import {
   applyTaskDefaultsToRequest,
   getBuiltInTaskDefaults,
@@ -13,7 +18,8 @@ const AVAILABLE_MODELS = [
   { provider: 'openai', id: 'gpt-4o', reasoning: false },
 ];
 
-const AVAILABLE_SKILLS: Array<{ id: string; hooks: Array<'pre' | 'post'> }> = [
+const AVAILABLE_SKILLS: Array<{ id: string; hooks: Array<'pre-planning' | 'pre' | 'post'> }> = [
+  { id: 'plan-context', hooks: ['pre-planning'] },
   { id: 'checkpoint', hooks: ['post'] },
   { id: 'code-review', hooks: ['post'] },
   { id: 'update-docs', hooks: ['post'] },
@@ -37,6 +43,7 @@ describe('validateTaskDefaults', () => {
         provider: 'openai',
         modelId: 'gpt-4o',
       },
+      prePlanningSkills: ['plan-context'],
       preExecutionSkills: [],
       postExecutionSkills: ['checkpoint', 'code-review', 'update-docs'],
     };
@@ -52,6 +59,7 @@ describe('validateTaskDefaults', () => {
       },
       executionModelConfig: undefined,
       modelConfig: undefined,
+      prePlanningSkills: [],
       preExecutionSkills: [],
       postExecutionSkills: ['checkpoint'],
     };
@@ -78,6 +86,7 @@ describe('validateTaskDefaults', () => {
         modelId: 'gpt-4o',
         thinkingLevel: 'high',
       },
+      prePlanningSkills: [],
       preExecutionSkills: [],
       postExecutionSkills: ['checkpoint'],
     };
@@ -100,6 +109,7 @@ describe('validateTaskDefaults', () => {
       },
       executionModelConfig: undefined,
       modelConfig: undefined,
+      prePlanningSkills: [],
       preExecutionSkills: [],
       postExecutionSkills: ['checkpoint'],
     };
@@ -112,6 +122,7 @@ describe('validateTaskDefaults', () => {
       planningModelConfig: undefined,
       executionModelConfig: undefined,
       modelConfig: undefined,
+      prePlanningSkills: [],
       preExecutionSkills: [],
       postExecutionSkills: ['checkpoint', 'not-a-real-skill'],
     };
@@ -129,6 +140,7 @@ describe('validateTaskDefaults', () => {
       planningModelConfig: undefined,
       executionModelConfig: undefined,
       modelConfig: undefined,
+      prePlanningSkills: [],
       preExecutionSkills: ['not-a-real-skill'],
       postExecutionSkills: ['checkpoint'],
     };
@@ -141,11 +153,49 @@ describe('validateTaskDefaults', () => {
     }
   });
 
+  it('rejects unknown pre-planning skill IDs', () => {
+    const defaults: TaskDefaults = {
+      planningModelConfig: undefined,
+      executionModelConfig: undefined,
+      modelConfig: undefined,
+      prePlanningSkills: ['not-a-real-skill'],
+      preExecutionSkills: [],
+      postExecutionSkills: ['checkpoint'],
+    };
+
+    const result = validateTaskDefaults(defaults, AVAILABLE_MODELS, AVAILABLE_SKILLS);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain('Unknown pre-planning skills');
+    }
+  });
+
+  it('rejects pre-planning defaults that reference non-pre-planning skills', () => {
+    const defaults: TaskDefaults = {
+      planningModelConfig: undefined,
+      executionModelConfig: undefined,
+      modelConfig: undefined,
+      prePlanningSkills: ['checkpoint'],
+      preExecutionSkills: [],
+      postExecutionSkills: ['code-review'],
+    };
+
+    const result = validateTaskDefaults(defaults, AVAILABLE_MODELS, AVAILABLE_SKILLS);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain('do not support pre-planning hook');
+      expect(result.error).toContain('checkpoint');
+    }
+  });
+
   it('rejects pre-execution defaults that reference post-only skills', () => {
     const defaults: TaskDefaults = {
       planningModelConfig: undefined,
       executionModelConfig: undefined,
       modelConfig: undefined,
+      prePlanningSkills: [],
       preExecutionSkills: ['checkpoint'],
       postExecutionSkills: ['code-review'],
     };
@@ -164,6 +214,7 @@ describe('validateTaskDefaults', () => {
       planningModelConfig: undefined,
       executionModelConfig: undefined,
       modelConfig: undefined,
+      prePlanningSkills: [],
       preExecutionSkills: [],
       postExecutionSkills: ['tdd-test-first'],
     };
@@ -200,6 +251,7 @@ describe('resolveTaskDefaults', () => {
     } as any);
 
     expect(resolved.postExecutionSkills).toEqual(DEFAULT_POST_EXECUTION_SKILLS);
+    expect(resolved.prePlanningSkills).toEqual(DEFAULT_PRE_PLANNING_SKILLS);
     expect(resolved.preExecutionSkills).toEqual(DEFAULT_PRE_EXECUTION_SKILLS);
     expect(resolved.executionModelConfig).toEqual({
       provider: 'anthropic',
@@ -215,6 +267,7 @@ describe('parseTaskDefaultsPayload', () => {
     const parsed = parseTaskDefaultsPayload({
       planningModelConfig: { provider: 'anthropic', modelId: 'claude-sonnet-4', thinkingLevel: 'low' },
       executionModelConfig: { provider: 'openai', modelId: 'gpt-4o' },
+      prePlanningSkills: [],
       preExecutionSkills: ['checkpoint'],
       postExecutionSkills: ['checkpoint', 'code-review'],
     });
@@ -224,6 +277,7 @@ describe('parseTaskDefaultsPayload', () => {
       expect(parsed.value.planningModelConfig).toEqual({ provider: 'anthropic', modelId: 'claude-sonnet-4', thinkingLevel: 'low' });
       expect(parsed.value.executionModelConfig).toEqual({ provider: 'openai', modelId: 'gpt-4o' });
       expect(parsed.value.modelConfig).toEqual({ provider: 'openai', modelId: 'gpt-4o' });
+      expect(parsed.value.prePlanningSkills).toEqual([]);
     }
   });
 
@@ -237,7 +291,52 @@ describe('parseTaskDefaultsPayload', () => {
     if (parsed.ok) {
       expect(parsed.value.executionModelConfig).toEqual({ provider: 'openai', modelId: 'gpt-4o' });
       expect(parsed.value.modelConfig).toEqual({ provider: 'openai', modelId: 'gpt-4o' });
+      expect(parsed.value.prePlanningSkills).toEqual([]);
     }
+  });
+
+  it('rejects non-array pre-planning/pre-execution hook payloads', () => {
+    const prePlanningParsed = parseTaskDefaultsPayload({
+      prePlanningSkills: 'plan-context',
+      postExecutionSkills: ['checkpoint'],
+    });
+
+    expect(prePlanningParsed).toEqual({
+      ok: false,
+      error: 'prePlanningSkills must be an array of skill IDs',
+    });
+
+    const preExecutionParsed = parseTaskDefaultsPayload({
+      preExecutionSkills: 'tdd-test-first',
+      postExecutionSkills: ['checkpoint'],
+    });
+
+    expect(preExecutionParsed).toEqual({
+      ok: false,
+      error: 'preExecutionSkills must be an array of skill IDs',
+    });
+  });
+
+  it('rejects non-string pre-planning/pre-execution skill IDs', () => {
+    const prePlanningParsed = parseTaskDefaultsPayload({
+      prePlanningSkills: ['plan-context', 123],
+      postExecutionSkills: ['checkpoint'],
+    });
+
+    expect(prePlanningParsed).toEqual({
+      ok: false,
+      error: 'prePlanningSkills must contain only string skill IDs',
+    });
+
+    const preExecutionParsed = parseTaskDefaultsPayload({
+      preExecutionSkills: ['tdd-test-first', 123],
+      postExecutionSkills: ['checkpoint'],
+    });
+
+    expect(preExecutionParsed).toEqual({
+      ok: false,
+      error: 'preExecutionSkills must contain only string skill IDs',
+    });
   });
 });
 
@@ -257,6 +356,7 @@ describe('applyTaskDefaultsToRequest', () => {
         provider: 'openai',
         modelId: 'gpt-4o',
       },
+      prePlanningSkills: [],
       preExecutionSkills: ['checkpoint'],
       postExecutionSkills: ['checkpoint', 'code-review'],
     };
@@ -266,6 +366,7 @@ describe('applyTaskDefaultsToRequest', () => {
     expect(applied.planningModelConfig).toEqual(defaults.planningModelConfig);
     expect(applied.executionModelConfig).toEqual(defaults.executionModelConfig);
     expect(applied.modelConfig).toEqual(defaults.executionModelConfig);
+    expect(applied.prePlanningSkills).toEqual(defaults.prePlanningSkills);
     expect(applied.preExecutionSkills).toEqual(defaults.preExecutionSkills);
     expect(applied.postExecutionSkills).toEqual(defaults.postExecutionSkills);
   });
@@ -284,6 +385,7 @@ describe('applyTaskDefaultsToRequest', () => {
         provider: 'openai',
         modelId: 'gpt-4o',
       },
+      prePlanningSkills: [],
       preExecutionSkills: ['checkpoint'],
       postExecutionSkills: ['checkpoint', 'code-review'],
     };
@@ -299,6 +401,7 @@ describe('applyTaskDefaultsToRequest', () => {
         provider: 'anthropic',
         modelId: 'claude-sonnet-4',
       },
+      prePlanningSkills: [],
       preExecutionSkills: [],
       postExecutionSkills: ['security-review'],
     }, defaults);
@@ -310,6 +413,7 @@ describe('applyTaskDefaultsToRequest', () => {
     });
     expect(applied.executionModelConfig).toEqual({ provider: 'anthropic', modelId: 'claude-sonnet-4' });
     expect(applied.modelConfig).toEqual({ provider: 'anthropic', modelId: 'claude-sonnet-4' });
+    expect(applied.prePlanningSkills).toEqual([]);
     expect(applied.preExecutionSkills).toEqual([]);
     expect(applied.postExecutionSkills).toEqual(['security-review']);
   });
@@ -325,6 +429,7 @@ describe('applyTaskDefaultsToRequest', () => {
         provider: 'openai',
         modelId: 'gpt-4o',
       },
+      prePlanningSkills: [],
       preExecutionSkills: [],
       postExecutionSkills: ['checkpoint'],
     };

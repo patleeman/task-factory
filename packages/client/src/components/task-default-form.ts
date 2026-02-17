@@ -1,6 +1,7 @@
 import type { ModelConfig, TaskDefaults } from '@task-factory/shared'
 
 export interface CreateTaskFormDefaults {
+  selectedPrePlanningSkillIds: string[]
   selectedPreSkillIds: string[]
   selectedSkillIds: string[]
   planningModelConfig: ModelConfig | undefined
@@ -23,6 +24,7 @@ export function buildCreateTaskFormDefaults(defaults: TaskDefaults): CreateTaskF
   const executionModelConfig = defaults.executionModelConfig ?? defaults.modelConfig
 
   return {
+    selectedPrePlanningSkillIds: [...defaults.prePlanningSkills],
     selectedPreSkillIds: [...defaults.preExecutionSkills],
     selectedSkillIds: [...defaults.postExecutionSkills],
     planningModelConfig: cloneModelConfig(defaults.planningModelConfig),

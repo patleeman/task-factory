@@ -15,6 +15,7 @@ const DEFAULTS: TaskDefaults = {
     provider: 'openai',
     modelId: 'gpt-4o',
   },
+  prePlanningSkills: [],
   preExecutionSkills: [],
   postExecutionSkills: ['checkpoint', 'code-review', 'update-docs'],
 };

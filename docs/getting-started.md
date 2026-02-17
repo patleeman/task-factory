@@ -58,7 +58,7 @@ Open `http://127.0.0.1:3000`.
 | Server | `packages/server/` | Change APIs, queue behavior, planning/execution orchestration |
 | Shared | `packages/shared/` | Update shared TypeScript contracts |
 | Extensions | `extensions/` | Add agent tools exposed to sessions |
-| Skills | `skills/` | Add reusable pre/post execution skills |
+| Skills | `skills/` | Add reusable pre-planning / pre-execution / post-execution skills |
 
 ### Common first-run issues
 

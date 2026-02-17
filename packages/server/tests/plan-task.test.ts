@@ -9,6 +9,7 @@ const sessionManagerCreateMock = vi.fn(() => ({}));
 const sessionManagerOpenMock = vi.fn(() => ({}));
 const withTimeoutMock = vi.fn();
 const requestQueueKickMock = vi.fn();
+const runPrePlanningSkillsMock = vi.fn();
 
 vi.mock('@mariozechner/pi-coding-agent', () => ({
   createAgentSession: (...args: any[]) => createAgentSessionMock(...args),
@@ -71,6 +72,14 @@ vi.mock('../src/queue-kick-coordinator.js', () => ({
   requestQueueKick: (...args: any[]) => requestQueueKickMock(...args),
 }));
 
+vi.mock('../src/post-execution-skills.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/post-execution-skills.js')>();
+  return {
+    ...actual,
+    runPrePlanningSkills: (...args: any[]) => runPrePlanningSkillsMock(...args),
+  };
+});
+
 let mockedFactorySettings: Record<string, unknown> | null = null;
 
 vi.mock('../src/pi-integration.js', async (importOriginal) => {
@@ -91,6 +100,8 @@ describe('planTask', () => {
     sessionManagerOpenMock.mockClear();
     withTimeoutMock.mockReset();
     requestQueueKickMock.mockReset();
+    runPrePlanningSkillsMock.mockReset();
+    runPrePlanningSkillsMock.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -193,6 +204,126 @@ describe('planTask', () => {
     });
 
     expect(broadcasts.some((event) => event.type === 'task:plan_generated')).toBe(false);
+  });
+
+  it('runs configured pre-planning skills before the planning prompt', async () => {
+    const workspacePath = mkdtempSync(join(tmpdir(), 'pi-factory-plan-task-'));
+    tempDirs.push(workspacePath);
+
+    const tasksDir = join(workspacePath, '.pi', 'tasks');
+    mkdirSync(tasksDir, { recursive: true });
+
+    const { createTask } = await import('../src/task-service.js');
+    const { planTask } = await import('../src/agent-execution-service.js');
+
+    const task = createTask(workspacePath, tasksDir, {
+      content: 'Run pre-planning hooks before planning prompt',
+      acceptanceCriteria: [],
+      prePlanningSkills: ['plan-context'],
+    });
+
+    let prePlanningRan = false;
+    runPrePlanningSkillsMock.mockImplementation(async () => {
+      prePlanningRan = true;
+    });
+
+    createAgentSessionMock.mockResolvedValue({
+      session: {
+        subscribe: () => () => {},
+        prompt: async () => {
+          expect(prePlanningRan).toBe(true);
+
+          const callback = (globalThis as any).__piFactoryPlanCallbacks?.get(task.id);
+          if (!callback) {
+            throw new Error('save_plan callback not registered');
+          }
+
+          callback({
+            acceptanceCriteria: ['Criterion one'],
+            plan: {
+              goal: 'Goal',
+              steps: ['Step one'],
+              validation: ['Validate one'],
+              cleanup: [],
+              generatedAt: new Date().toISOString(),
+            },
+          });
+        },
+        abort: async () => {},
+      },
+    });
+
+    const broadcasts: any[] = [];
+    const result = await planTask({
+      task,
+      workspaceId: 'workspace-test',
+      workspacePath,
+      broadcastToWorkspace: (event: any) => broadcasts.push(event),
+    });
+
+    expect(result).not.toBeNull();
+    expect(runPrePlanningSkillsMock).toHaveBeenCalledWith(
+      expect.any(Object),
+      ['plan-context'],
+      expect.objectContaining({
+        taskId: task.id,
+        workspaceId: 'workspace-test',
+      }),
+    );
+
+    const statusEvents = broadcasts.filter((event) => event.type === 'agent:execution_status');
+    expect(statusEvents.some((event: any) => event.status === 'pre-planning-hooks')).toBe(true);
+  });
+
+  it('fails planning and skips the planning prompt when a pre-planning hook fails', async () => {
+    const workspacePath = mkdtempSync(join(tmpdir(), 'pi-factory-plan-task-'));
+    tempDirs.push(workspacePath);
+
+    const tasksDir = join(workspacePath, '.pi', 'tasks');
+    mkdirSync(tasksDir, { recursive: true });
+
+    const { createTask, parseTaskFile } = await import('../src/task-service.js');
+    const { planTask } = await import('../src/agent-execution-service.js');
+
+    const task = createTask(workspacePath, tasksDir, {
+      content: 'Pre-planning hook failure should stop planning prompt',
+      acceptanceCriteria: [],
+      prePlanningSkills: ['plan-context'],
+    });
+
+    runPrePlanningSkillsMock.mockRejectedValue(new Error('pre-planning boom'));
+
+    const promptSpy = vi.fn(async () => {});
+
+    createAgentSessionMock.mockResolvedValue({
+      session: {
+        subscribe: () => () => {},
+        prompt: promptSpy,
+        abort: async () => {},
+      },
+    });
+
+    const broadcasts: any[] = [];
+    const result = await planTask({
+      task,
+      workspaceId: 'workspace-test',
+      workspacePath,
+      broadcastToWorkspace: (event: any) => broadcasts.push(event),
+    });
+
+    expect(result).toBeNull();
+    expect(promptSpy).not.toHaveBeenCalled();
+    expect(task.frontmatter.plan).toBeUndefined();
+    expect(task.frontmatter.planningStatus).toBe('error');
+
+    const persistedTask = parseTaskFile(task.filePath);
+    expect(persistedTask.frontmatter.planningStatus).toBe('error');
+
+    const statusEvents = broadcasts.filter((event) => event.type === 'agent:execution_status');
+    expect(statusEvents.at(-1)).toMatchObject({
+      taskId: task.id,
+      status: 'error',
+    });
   });
 
   it('falls back to the 30-minute timeout and 1800-second message when timeout setting is invalid', async () => {

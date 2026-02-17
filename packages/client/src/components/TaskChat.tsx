@@ -70,6 +70,8 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; pulse?: bool
   thinking: { label: 'Thinking', color: 'bg-purple-500', pulse: true },
   completed: { label: 'Done', color: 'bg-green-500' },
   error: { label: 'Error', color: 'bg-red-500' },
+  'pre-planning-hooks': { label: 'Running pre-planning skills', color: 'bg-violet-500', pulse: true },
+  'pre-hooks': { label: 'Running pre-execution skills', color: 'bg-blue-500', pulse: true },
   'post-hooks': { label: 'Running post-execution skills', color: 'bg-orange-500', pulse: true },
   awaiting_qa: { label: 'Waiting for your answers', color: 'bg-amber-500' },
 }
@@ -78,6 +80,8 @@ const STOPPABLE_STATUSES = new Set<AgentExecutionStatus>([
   'streaming',
   'tool_use',
   'thinking',
+  'pre-planning-hooks',
+  'pre-hooks',
   'post-hooks',
 ])
 
