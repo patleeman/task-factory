@@ -38,7 +38,7 @@ import {
 import { getWorkspaceById } from './workspace-service.js';
 import { discoverTasks } from './task-service.js';
 import { getTasksDir } from './workspace-service.js';
-import { getRepoExtensionPaths } from './agent-execution-service.js';
+import { getRepoExtensionPaths, hasLiveExecutionSession } from './agent-execution-service.js';
 import {
   loadWorkspaceSharedContext,
   WORKSPACE_SHARED_CONTEXT_REL_PATH,
@@ -703,8 +703,8 @@ async function getOrCreateSession(
     registerShelfCallbacks(workspaceId, broadcast, () => planningSessions.get(workspaceId));
     registerFactoryControlCallbacks(workspaceId, broadcast);
     registerQACallbacks(workspaceId, broadcast, () => planningSessions.get(workspaceId));
-    registerTaskCallbacks(workspaceId);
-    registerMessageAgentCallbacks(workspaceId, broadcast);
+    await registerTaskCallbacks(workspaceId);
+    await registerMessageAgentCallbacks(workspaceId, broadcast);
     registerCreateSkillCallbacks(workspaceId);
     registerCreateExtensionCallbacks(workspaceId);
 
@@ -1767,14 +1767,14 @@ async function registerTaskCallbacks(workspaceId: string): Promise<void> {
         throw new Error(validation.reason || `Cannot move task to ${toPhase}`);
       }
 
-      return moveTaskToPhase(task, toPhase as any, 'user', undefined, tasks);
+      return moveTaskToPhase(task, toPhase as any, 'agent', undefined, tasks);
     },
     getPromotePhase,
     getDemotePhase,
   });
 }
 
-export function unregisterTaskCallbacks(workspaceId: string): void {
+export function _unregisterTaskCallbacks(workspaceId: string): void {
   globalThis.__piFactoryTaskCallbacks?.delete(workspaceId);
 }
 
@@ -1814,7 +1814,6 @@ async function registerMessageAgentCallbacks(
 
   ensureMessageAgentCallbackRegistry().set(workspaceId, {
     hasActiveSession: (taskId: string) => {
-      const { hasLiveExecutionSession } = require('./agent-execution-service.js');
       return hasLiveExecutionSession(taskId);
     },
     steerTask: async (taskId: string, content: string, _attachmentIds?: string[]) => {
@@ -1850,7 +1849,7 @@ async function registerMessageAgentCallbacks(
   });
 }
 
-export function unregisterMessageAgentCallbacks(workspaceId: string): void {
+export function _unregisterMessageAgentCallbacks(workspaceId: string): void {
   globalThis.__piFactoryMessageAgentCallbacks?.delete(workspaceId);
 }
 
