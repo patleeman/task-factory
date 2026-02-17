@@ -65,6 +65,14 @@ import { buildTaskStateSnapshot } from './state-contract.js';
 import { logTaskStateTransition } from './state-transition.js';
 import { buildWorkspaceAttentionSummary } from './workspace-attention.js';
 import { openInFileExplorer } from './file-explorer.js';
+import { getTaskFactoryAuthPath } from './taskfactory-home.js';
+import {
+  PI_MIGRATION_CATEGORIES,
+  getPiMigrationStatus,
+  migrateFromLegacyPi,
+  skipPiMigration,
+  type PiMigrationCategory,
+} from './pi-migration-service.js';
 
 // =============================================================================
 // Configuration
@@ -996,7 +1004,7 @@ import {
 app.get('/api/pi/available-models', async (_req, res) => {
   try {
     const { AuthStorage, ModelRegistry } = await import('@mariozechner/pi-coding-agent');
-    const authStorage = new AuthStorage();
+    const authStorage = new AuthStorage(getTaskFactoryAuthPath());
     const modelRegistry = new ModelRegistry(authStorage);
     const available = modelRegistry.getAvailable();
     const models = available.map((m: any) => ({
@@ -1009,6 +1017,53 @@ app.get('/api/pi/available-models', async (_req, res) => {
   } catch (err) {
     logger.error('Failed to load available models:', err);
     res.json([]);
+  }
+});
+
+// Get one-time legacy Pi migration status
+app.get('/api/pi-migration/status', (_req, res) => {
+  res.json(getPiMigrationStatus());
+});
+
+// Run one-time legacy Pi migration for selected categories
+app.post('/api/pi-migration/migrate', (req, res) => {
+  const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body)
+    ? req.body as Record<string, unknown>
+    : {};
+
+  const rawCategories = body.categories && typeof body.categories === 'object' && !Array.isArray(body.categories)
+    ? body.categories as Record<string, unknown>
+    : body;
+
+  const requested: Partial<Record<PiMigrationCategory, boolean>> = {};
+
+  for (const category of PI_MIGRATION_CATEGORIES) {
+    const rawValue = rawCategories[category];
+    if (rawValue === undefined) continue;
+    if (typeof rawValue !== 'boolean') {
+      res.status(400).json({ error: `${category} must be a boolean when provided` });
+      return;
+    }
+    requested[category] = rawValue;
+  }
+
+  try {
+    const status = migrateFromLegacyPi(Object.keys(requested).length > 0 ? requested : undefined);
+    res.json(status);
+  } catch (err) {
+    logger.error('Failed to migrate legacy Pi data', err);
+    res.status(500).json({ error: 'Failed to migrate legacy Pi data' });
+  }
+});
+
+// Explicitly skip one-time legacy Pi migration
+app.post('/api/pi-migration/skip', (_req, res) => {
+  try {
+    const status = skipPiMigration();
+    res.json(status);
+  } catch (err) {
+    logger.error('Failed to persist legacy Pi migration skip state', err);
+    res.status(500).json({ error: 'Failed to persist migration state' });
   }
 });
 
@@ -1029,7 +1084,7 @@ app.get('/api/pi/auth', async (_req, res) => {
   }
 });
 
-// Save API key for a provider in ~/.pi/agent/auth.json
+// Save API key for a provider in ~/.taskfactory/agent/auth.json
 app.put('/api/pi/auth/providers/:providerId/api-key', async (req, res) => {
   const providerId = req.params.providerId;
   const apiKey = (req.body as { apiKey?: unknown }).apiKey;
@@ -1161,7 +1216,7 @@ app.get('/api/pi/models', (_req, res) => {
   res.json(models || { providers: {} });
 });
 
-// Get Pi extensions (global, from ~/.pi/agent/extensions/)
+// Get Pi extensions (global, from ~/.taskfactory/extensions after migration)
 app.get('/api/pi/extensions', (_req, res) => {
   const extensions = discoverPiExtensions();
   res.json(extensions);
@@ -2722,7 +2777,7 @@ app.post('/api/workspaces/:workspaceId/task-form/open', async (req, res) => {
     },
     getAvailableModels: async () => {
       const { AuthStorage, ModelRegistry } = await import('@mariozechner/pi-coding-agent');
-      const auth = new AuthStorage();
+      const auth = new AuthStorage(getTaskFactoryAuthPath());
       const registry = new ModelRegistry(auth);
       return registry.getAvailable();
     },

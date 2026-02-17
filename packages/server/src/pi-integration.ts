@@ -13,10 +13,53 @@ import {
 import { join, dirname } from 'path';
 import { homedir } from 'os';
 import type { TaskDefaults, PlanningGuardrails, WorkflowDefaultsConfig, ForemanSettings } from '@task-factory/shared';
-import { getTaskFactoryHomeDir } from './taskfactory-home.js';
+import {
+  getTaskFactoryAgentDir,
+  getTaskFactoryGlobalExtensionsDir,
+  getTaskFactoryHomeDir,
+  getTaskFactoryPiSkillsDir,
+} from './taskfactory-home.js';
 
-const PI_AGENT_DIR = join(homedir(), '.pi', 'agent');
+const LEGACY_PI_AGENT_DIR = join(homedir(), '.pi', 'agent');
+const TASK_FACTORY_AGENT_DIR = getTaskFactoryAgentDir();
 const PI_FACTORY_DIR = getTaskFactoryHomeDir();
+
+function getLegacyPiAgentPath(...segments: string[]): string {
+  return join(LEGACY_PI_AGENT_DIR, ...segments);
+}
+
+function getTaskFactoryPiAgentPath(...segments: string[]): string {
+  return join(TASK_FACTORY_AGENT_DIR, ...segments);
+}
+
+function getPreferredExistingPath(primaryPath: string, legacyPath: string): string | null {
+  if (existsSync(primaryPath)) {
+    return primaryPath;
+  }
+
+  if (existsSync(legacyPath)) {
+    return legacyPath;
+  }
+
+  return null;
+}
+
+function resolveReadablePiAgentPath(...segments: string[]): string | null {
+  return getPreferredExistingPath(
+    getTaskFactoryPiAgentPath(...segments),
+    getLegacyPiAgentPath(...segments),
+  );
+}
+
+function resolveReadablePiSkillsDir(): string | null {
+  const path = getTaskFactoryPiSkillsDir();
+  return existsSync(path) ? path : null;
+}
+
+function resolveReadablePiExtensionsDir(): string | null {
+  const path = getTaskFactoryGlobalExtensionsDir();
+  return existsSync(path) ? path : null;
+}
 
 // =============================================================================
 // Task Factory settings
@@ -78,9 +121,9 @@ export function savePiFactorySettings(settings: PiFactorySettings): void {
 }
 
 export function loadPiSettings(): PiSettings | null {
-  const settingsPath = join(PI_AGENT_DIR, 'settings.json');
-  
-  if (!existsSync(settingsPath)) {
+  const settingsPath = resolveReadablePiAgentPath('settings.json');
+
+  if (!settingsPath) {
     return null;
   }
 
@@ -127,9 +170,9 @@ export interface PiModelsConfig {
 }
 
 export function loadPiModels(): PiModelsConfig | null {
-  const modelsPath = join(PI_AGENT_DIR, 'models.json');
-  
-  if (!existsSync(modelsPath)) {
+  const modelsPath = resolveReadablePiAgentPath('models.json');
+
+  if (!modelsPath) {
     return null;
   }
 
@@ -157,9 +200,9 @@ export interface PiExtension {
 }
 
 export function discoverPiExtensions(): PiExtension[] {
-  const extensionsDir = join(PI_AGENT_DIR, 'extensions');
-  
-  if (!existsSync(extensionsDir)) {
+  const extensionsDir = resolveReadablePiExtensionsDir();
+
+  if (!extensionsDir) {
     return [];
   }
 
@@ -208,9 +251,9 @@ export interface PiSkill {
 }
 
 export function discoverPiSkills(): PiSkill[] {
-  const skillsDir = join(PI_AGENT_DIR, 'skills');
-  
-  if (!existsSync(skillsDir)) {
+  const skillsDir = resolveReadablePiSkillsDir();
+
+  if (!skillsDir) {
     return [];
   }
 
@@ -267,12 +310,13 @@ export function discoverPiSkills(): PiSkill[] {
 }
 
 export function loadPiSkill(skillId: string): PiSkill | null {
-  const skillPath = join(PI_AGENT_DIR, 'skills', skillId);
-  const skillMdPath = join(skillPath, 'SKILL.md');
+  const skillMdPath = join(getTaskFactoryPiSkillsDir(), skillId, 'SKILL.md');
 
   if (!existsSync(skillMdPath)) {
     return null;
   }
+
+  const skillPath = dirname(skillMdPath);
 
   try {
     const content = readFileSync(skillMdPath, 'utf-8');
@@ -311,9 +355,9 @@ export const WORKSPACE_SHARED_CONTEXT_REL_PATH = '.taskfactory/workspace-context
 export const LEGACY_WORKSPACE_SHARED_CONTEXT_REL_PATH = '.pi/workspace-context.md';
 
 export function loadGlobalAgentsMd(): string | null {
-  const agentsPath = join(PI_AGENT_DIR, 'AGENTS.md');
+  const agentsPath = resolveReadablePiAgentPath('AGENTS.md');
 
-  if (!existsSync(agentsPath)) {
+  if (!agentsPath) {
     return null;
   }
 
@@ -623,9 +667,9 @@ export interface PiTheme {
 }
 
 export function discoverPiThemes(): PiTheme[] {
-  const themesDir = join(PI_AGENT_DIR, 'themes');
-  
-  if (!existsSync(themesDir)) {
+  const themesDir = resolveReadablePiAgentPath('themes');
+
+  if (!themesDir) {
     return [];
   }
 

@@ -44,6 +44,15 @@ How to safely customize Task Factory with repo extensions (`extensions/`) and ex
 | Required fields | `name`, `description` (`name` must match directory ID) |
 | Hook metadata | `hooks` supports `pre-planning`, `pre`, `post`, or combinations |
 
+### Tool destination options (`create_skill` / `create_extension`)
+
+| Tool | `destination` | Write target |
+|---|---|---|
+| `create_skill` | `global` (default) | `~/.taskfactory/skills/<id>/SKILL.md` |
+| `create_skill` | `repo-local` | `<workspace>/.taskfactory/skills/<id>/SKILL.md` |
+| `create_extension` | `global` (default) | `~/.taskfactory/extensions/<id>.ts` |
+| `create_extension` | `repo-local` | `<workspace>/.taskfactory/extensions/<id>.ts` |
+
 ### Hook execution semantics
 
 | Hook | Behavior |

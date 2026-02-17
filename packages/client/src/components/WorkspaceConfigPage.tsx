@@ -556,7 +556,7 @@ export function WorkspaceConfigPage() {
 
               {allExtensions.length === 0 && (
                 <p className="text-sm text-slate-400 text-center py-8">
-                  No extensions found in ~/.pi/agent/extensions/
+                  No extensions found in ~/.taskfactory/extensions/
                 </p>
               )}
             </div>

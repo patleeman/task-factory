@@ -55,7 +55,11 @@ import {
   prependStateToTurn,
   stripStateContractEcho,
 } from './state-contract.js';
-import { resolveTaskFactoryHomePath } from './taskfactory-home.js';
+import {
+  getTaskFactoryAuthPath,
+  getWorkspaceTaskFactorySkillsDir,
+  resolveTaskFactoryHomePath,
+} from './taskfactory-home.js';
 import {
   getWorkspaceStoragePath,
   resolveWorkspaceStoragePathForRead,
@@ -656,11 +660,11 @@ async function getOrCreateSession(
   planningSessions.set(workspaceId, session);
 
   try {
-    const authStorage = new AuthStorage();
+    const authStorage = new AuthStorage(getTaskFactoryAuthPath());
     const modelRegistry = new ModelRegistry(authStorage);
     const loader = new DefaultResourceLoader({
       cwd: workspace.path,
-      additionalExtensionPaths: getRepoExtensionPaths('foreman'),
+      additionalExtensionPaths: getRepoExtensionPaths('foreman', workspace.path),
     });
     await loader.reload();
 
@@ -1564,11 +1568,11 @@ async function sendToAgent(
 
           session.workspacePath = workspace.path;
 
-          const authStorage = new AuthStorage();
+          const authStorage = new AuthStorage(getTaskFactoryAuthPath());
           const modelRegistry = new ModelRegistry(authStorage);
           const loader = new DefaultResourceLoader({
             cwd: workspace.path,
-            additionalExtensionPaths: getRepoExtensionPaths('foreman'),
+            additionalExtensionPaths: getRepoExtensionPaths('foreman', workspace.path),
           });
           await loader.reload();
           const sessionManager = SessionManager.create(workspace.path);
@@ -2088,6 +2092,7 @@ declare global {
       description: string;
       hooks: ('pre-planning' | 'pre' | 'post')[];
       content: string;
+      destination?: 'global' | 'repo-local';
     }) => Promise<{ success: boolean; skillId?: string; path?: string; error?: string }>;
     listSkills: () => Promise<Array<{ id: string; name: string; description: string; hooks: string[] }>>;
   }> | undefined;
@@ -2099,6 +2104,7 @@ function ensureCreateSkillCallbackRegistry(): Map<string, {
     description: string;
     hooks: ('pre-planning' | 'pre' | 'post')[];
     content: string;
+    destination?: 'global' | 'repo-local';
   }) => Promise<{ success: boolean; skillId?: string; path?: string; error?: string }>;
   listSkills: () => Promise<Array<{ id: string; name: string; description: string; hooks: string[] }>>;
 }> {
@@ -2116,6 +2122,19 @@ function registerCreateSkillCallbacks(workspaceId: string): void {
       const { join } = await import('path');
 
       try {
+        const workspace = await getWorkspaceById(workspaceId);
+        if (!workspace) {
+          return {
+            success: false,
+            error: `Workspace ${workspaceId} not found`,
+          };
+        }
+
+        const destination = payload.destination === 'repo-local' ? 'repo-local' : 'global';
+        const skillsDir = destination === 'repo-local'
+          ? getWorkspaceTaskFactorySkillsDir(workspace.path)
+          : getFactoryUserSkillsDir();
+
         // Normalize the skill payload to match what createFactorySkill expects
         const skillPayload = {
           id: payload.name,
@@ -2126,12 +2145,11 @@ function registerCreateSkillCallbacks(workspaceId: string): void {
           maxIterations: 1,
         };
 
-        const skillId = createFactorySkill(skillPayload, { skillsDir: getFactoryUserSkillsDir() });
-        
+        const skillId = createFactorySkill(skillPayload, { skillsDir });
+
         // Reload skills so the new skill is immediately available
         reloadPostExecutionSkills();
 
-        const skillsDir = getFactoryUserSkillsDir();
         const skillPath = join(skillsDir, skillId, 'SKILL.md');
 
         return {
@@ -2173,6 +2191,7 @@ declare global {
       name: string;
       audience: 'foreman' | 'task' | 'all';
       typescript: string;
+      destination?: 'global' | 'repo-local';
       confirmed?: boolean;
     }) => Promise<{
       success: boolean;
@@ -2191,6 +2210,7 @@ function ensureCreateExtensionCallbackRegistry(): Map<string, {
     name: string;
     audience: 'foreman' | 'task' | 'all';
     typescript: string;
+    destination?: 'global' | 'repo-local';
     confirmed?: boolean;
   }) => Promise<{
     success: boolean;
@@ -2214,6 +2234,14 @@ function registerCreateExtensionCallbacks(workspaceId: string): void {
       const { createFactoryExtension, validateExtensionTypeScript, scanExtensionSecurity } = await import('./extension-management-service.js');
 
       try {
+        const workspace = await getWorkspaceById(workspaceId);
+        if (!workspace) {
+          return {
+            success: false,
+            error: `Workspace ${workspaceId} not found`,
+          };
+        }
+
         // First, validate the TypeScript code
         const validationResult = await validateExtensionTypeScript(payload.typescript);
         if (!validationResult.valid) {
@@ -2242,12 +2270,14 @@ function registerCreateExtensionCallbacks(workspaceId: string): void {
           name: payload.name,
           audience: payload.audience,
           typescript: payload.typescript,
+          destination: payload.destination,
+          workspacePath: workspace.path,
         });
 
         if (result.success) {
           // Reload extensions so the new extension is immediately available
           const { reloadRepoExtensions } = await import('./agent-execution-service.js');
-          reloadRepoExtensions();
+          reloadRepoExtensions(workspace.path);
 
           return {
             success: true,
@@ -2271,7 +2301,8 @@ function registerCreateExtensionCallbacks(workspaceId: string): void {
       const { getRepoExtensionPaths } = await import('./agent-execution-service.js');
       const { basename, dirname } = await import('path');
 
-      const paths = getRepoExtensionPaths('all');
+      const workspace = await getWorkspaceById(workspaceId);
+      const paths = getRepoExtensionPaths('all', workspace?.path);
       const FOREMAN_ONLY_EXTENSION_IDS = new Set(['web-tools', 'manage-tasks', 'message-agent', 'create-skill', 'create-extension']);
 
       return paths.map(path => {

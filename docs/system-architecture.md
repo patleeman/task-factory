@@ -42,11 +42,11 @@ Stable architectural boundaries for Task Factory.
 
 | Path | Purpose |
 |---|---|
-| `.pi/tasks/<task-id>/task.yaml` | Canonical task state |
-| `.pi/planning-messages.json` | Foreman planning chat history |
-| `.pi/planning-sessions/*.json` | Archived planning sessions |
-| `.pi/workspace-context.md` | Workspace-shared context |
-| `~/.taskfactory/` | Global settings and workspace registry |
+| `<workspace>/.taskfactory/tasks/<task-id>/task.yaml` | Canonical task state (default task location) |
+| `<workspace>/.taskfactory/planning-messages.json` | Foreman planning chat history |
+| `<workspace>/.taskfactory/planning-sessions/*.json` | Archived planning sessions |
+| `<workspace>/.taskfactory/workspace-context.md` | Workspace-shared context |
+| `~/.taskfactory/` | Global settings, migration state, auth/skills, and workspace registry |
 
 ## Examples
 

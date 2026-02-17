@@ -735,7 +735,7 @@ export function SettingsPage() {
               <section className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
                 <h3 className="text-sm font-semibold text-slate-800">API Keys</h3>
                 <p className="text-xs text-slate-500">
-                  Save provider keys into <span className="font-mono">~/.pi/agent/auth.json</span>.
+                  Save provider keys into <span className="font-mono">~/.taskfactory/agent/auth.json</span>.
                 </p>
 
                 <div>

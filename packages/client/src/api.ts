@@ -95,6 +95,28 @@ export interface PiOAuthLoginSession {
   error?: string
 }
 
+export type PiMigrationState = 'pending' | 'migrated' | 'skipped' | 'not_needed'
+
+export interface PiMigrationCategoryAvailability {
+  auth: boolean
+  skills: boolean
+  extensions: boolean
+}
+
+export interface PiMigrationStatus {
+  state: PiMigrationState
+  hasLegacyPiDir: boolean
+  available: PiMigrationCategoryAvailability
+  selectedCategories: Array<'auth' | 'skills' | 'extensions'>
+  decidedAt?: string
+}
+
+export interface PiMigrationSelection {
+  auth?: boolean
+  skills?: boolean
+  extensions?: boolean
+}
+
 export interface PiFactorySettings {
   theme?: string
   voiceInputHotkey?: string
@@ -421,6 +443,47 @@ export const api = {
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: 'Failed to cancel login flow' }))
       throw new Error(err.error || `Failed to cancel login flow (${res.status})`)
+    }
+
+    return res.json()
+  },
+
+  async getPiMigrationStatus(): Promise<PiMigrationStatus> {
+    const res = await fetch('/api/pi-migration/status')
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to load migration status' }))
+      throw new Error(err.error || `Failed to load migration status (${res.status})`)
+    }
+    return res.json()
+  },
+
+  async migrateLegacyPiData(categories?: PiMigrationSelection): Promise<PiMigrationStatus> {
+    const payload = categories
+      ? { categories }
+      : undefined
+
+    const res = await fetch('/api/pi-migration/migrate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload ?? {}),
+    })
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to migrate legacy Pi data' }))
+      throw new Error(err.error || `Failed to migrate legacy Pi data (${res.status})`)
+    }
+
+    return res.json()
+  },
+
+  async skipLegacyPiMigration(): Promise<PiMigrationStatus> {
+    const res = await fetch('/api/pi-migration/skip', {
+      method: 'POST',
+    })
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to skip migration' }))
+      throw new Error(err.error || `Failed to skip migration (${res.status})`)
     }
 
     return res.json()

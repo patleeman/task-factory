@@ -98,6 +98,16 @@ Conventions:
 | POST | `/api/workspaces/:workspaceId/queue/start` | Enable queue |
 | POST | `/api/workspaces/:workspaceId/queue/stop` | Disable queue |
 
+### Pi migration + settings endpoints
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/pi-migration/status` | Read one-time legacy `~/.pi` migration state (`pending`, `migrated`, `skipped`, `not_needed`) |
+| POST | `/api/pi-migration/migrate` | Persist migration decision and copy selected categories (`auth`, `skills`, `extensions`) into `~/.taskfactory` |
+| POST | `/api/pi-migration/skip` | Persist explicit skip decision so startup prompt is suppressed |
+| GET | `/api/pi/settings` | Read Pi agent settings used by Task Factory |
+| GET | `/api/pi/auth` | Read provider auth overview from `~/.taskfactory/agent/auth.json` |
+
 ### Shelf + idea backlog endpoints
 
 | Method | Path | Purpose |

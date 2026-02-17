@@ -34,6 +34,7 @@ All subject docs live as flat markdown files directly under `docs/`.
 | operations-security-posture | [operations-security-posture.md](./operations-security-posture.md) | Security model and accepted-risk handling |
 | contribution-commands | [contribution-commands.md](./contribution-commands.md) | Build/dev/test/release command reference |
 | contribution-extensions-skills | [contribution-extensions-skills.md](./contribution-extensions-skills.md) | Extension and execution-skill customization |
+| settings | [settings.md](./settings.md) | Global + workspace settings files, migration state, and precedence |
 
 ## Examples
 

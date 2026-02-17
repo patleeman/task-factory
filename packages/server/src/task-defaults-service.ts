@@ -16,7 +16,7 @@ import {
   savePiFactorySettings,
   type PiFactorySettings,
 } from './pi-integration.js';
-import { getTaskFactoryHomeDir } from './taskfactory-home.js';
+import { getTaskFactoryAuthPath, getTaskFactoryHomeDir } from './taskfactory-home.js';
 
 export interface AvailableModelForDefaults {
   provider: string;
@@ -768,7 +768,7 @@ export function validateTaskDefaults(
 
 export async function loadAvailableModelsForDefaults(): Promise<AvailableModelForDefaults[]> {
   const { AuthStorage, ModelRegistry } = await import('@mariozechner/pi-coding-agent');
-  const authStorage = new AuthStorage();
+  const authStorage = new AuthStorage(getTaskFactoryAuthPath());
   const modelRegistry = new ModelRegistry(authStorage);
   const available = modelRegistry.getAvailable();
 

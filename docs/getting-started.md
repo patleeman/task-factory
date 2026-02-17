@@ -19,7 +19,7 @@ Local onboarding for running and developing Task Factory from source.
 | Node.js 20+ | Server bundle targets Node 20 |
 | npm | Workspace scripts use npm workspaces |
 | Git | Required for repository workflows |
-| Pi local config | Auth/provider setup under `~/.pi/agent/` |
+| Task Factory local config | Auth/provider setup under `~/.taskfactory/agent/` (or migrate from legacy `~/.pi` on first run) |
 | Open local ports | `3000` (server), `3001` (Vite dev client) |
 
 ### Install
@@ -38,6 +38,8 @@ npm run dev
 
 This starts shared watch, server watch, and the Vite client.
 Open the URL printed by Vite (usually `http://localhost:3001`).
+
+On first startup, Task Factory checks for legacy `~/.pi` data. If found and no prior migration decision exists, the app gates normal flow behind a one-time migration prompt so you can selectively copy auth, skills, and extensions into `~/.taskfactory`.
 
 ### Production-style local run
 
@@ -66,7 +68,7 @@ Open `http://127.0.0.1:3000`.
 |---|---|
 | `EADDRINUSE` on `3000` | Stop the conflicting process or set a different `PORT` |
 | Client opens on `3002+` | Expected when `3001` is busy; use printed Vite URL |
-| Provider/auth errors | Verify `~/.pi/agent/` configuration |
+| Provider/auth errors | Verify `~/.taskfactory/agent/auth.json` (or rerun first-run migration if legacy `~/.pi` data was skipped) |
 
 ## Examples
 
@@ -84,3 +86,4 @@ npm run test -w @task-factory/server
 - [Workflow and Queue](./workflow-and-queue.md)
 - [System Architecture](./system-architecture.md)
 - [Contribution Commands](./contribution-commands.md)
+- [Settings](./settings.md)

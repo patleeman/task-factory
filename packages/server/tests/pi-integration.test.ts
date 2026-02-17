@@ -78,6 +78,41 @@ afterEach(() => {
   tempRoots.length = 0;
 });
 
+describe('pi skill/extension runtime resolution', () => {
+  it('does not load legacy ~/.pi/agent/skills without explicit migration', async () => {
+    const homePath = setTempHome();
+
+    const legacySkillDir = join(homePath, '.pi', 'agent', 'skills', 'legacy-skill');
+    mkdirSync(legacySkillDir, { recursive: true });
+    writeFileSync(
+      join(legacySkillDir, 'SKILL.md'),
+      '---\nname: legacy-skill\ndescription: Legacy skill\n---\n\nLegacy content.\n',
+      'utf-8',
+    );
+
+    const { discoverPiSkills, loadPiSkill } = await import('../src/pi-integration.js');
+
+    expect(discoverPiSkills()).toEqual([]);
+    expect(loadPiSkill('legacy-skill')).toBeNull();
+  });
+
+  it('does not load legacy ~/.pi/agent/extensions without explicit migration', async () => {
+    const homePath = setTempHome();
+
+    const legacyExtensionDir = join(homePath, '.pi', 'agent', 'extensions', 'legacy-ext');
+    mkdirSync(legacyExtensionDir, { recursive: true });
+    writeFileSync(
+      join(legacyExtensionDir, 'package.json'),
+      JSON.stringify({ name: 'legacy-ext', version: '1.0.0' }, null, 2),
+      'utf-8',
+    );
+
+    const { discoverPiExtensions } = await import('../src/pi-integration.js');
+
+    expect(discoverPiExtensions()).toEqual([]);
+  });
+});
+
 describe('workspace shared context', () => {
   it('loads content from .taskfactory/workspace-context.md when present', async () => {
     setTempHome();
@@ -208,7 +243,7 @@ describe('buildAgentContext shared context merge behavior', () => {
     expect(second).not.toContain('SHARED CONTEXT V1');
   });
 
-  it('reads a legacy ~/.pi/factory workspace registry and migrates it to ~/.taskfactory', async () => {
+  it('does not read or migrate legacy ~/.pi/factory workspace registry entries at runtime', async () => {
     const homePath = setTempHome();
     const workspaceId = 'ws-legacy-registry';
     const workspacePath = createTempDir('pi-factory-workspace-');
@@ -223,10 +258,7 @@ describe('buildAgentContext shared context merge behavior', () => {
     expect(context.globalRules).toContain('GLOBAL RULES');
 
     const migratedRegistryPath = join(homePath, '.taskfactory', 'workspaces.json');
-    expect(existsSync(migratedRegistryPath)).toBe(true);
-
-    const migratedEntries = JSON.parse(readFileSync(migratedRegistryPath, 'utf-8')) as Array<{ id: string }>;
-    expect(migratedEntries.some((entry) => entry.id === workspaceId)).toBe(true);
+    expect(existsSync(migratedRegistryPath)).toBe(false);
   });
 });
 
@@ -247,7 +279,7 @@ describe('pi factory settings persistence', () => {
     });
   });
 
-  it('loads and migrates legacy ~/.pi/factory/settings.json into ~/.taskfactory/settings.json', async () => {
+  it('does not load legacy ~/.pi/factory/settings.json without explicit migration', async () => {
     const homePath = setTempHome();
     writeLegacyFactorySettings(homePath, {
       theme: 'legacy-theme',
@@ -256,20 +288,17 @@ describe('pi factory settings persistence', () => {
 
     const { loadPiFactorySettings, savePiFactorySettings } = await import('../src/pi-integration.js');
 
-    expect(loadPiFactorySettings()).toEqual({
-      theme: 'legacy-theme',
-      voiceInputHotkey: 'Alt+V',
-    });
+    expect(loadPiFactorySettings()).toBeNull();
 
-    const migratedSettingsPath = join(homePath, '.taskfactory', 'settings.json');
-    expect(existsSync(migratedSettingsPath)).toBe(true);
+    const settingsPath = join(homePath, '.taskfactory', 'settings.json');
+    expect(existsSync(settingsPath)).toBe(false);
 
     savePiFactorySettings({
       theme: 'new-theme',
       voiceInputHotkey: 'Ctrl+Space',
     });
 
-    expect(JSON.parse(readFileSync(migratedSettingsPath, 'utf-8'))).toEqual({
+    expect(JSON.parse(readFileSync(settingsPath, 'utf-8'))).toEqual({
       theme: 'new-theme',
       voiceInputHotkey: 'Ctrl+Space',
     });

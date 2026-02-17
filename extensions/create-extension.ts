@@ -13,6 +13,7 @@ declare global {
       name: string;
       audience: 'foreman' | 'task' | 'all';
       typescript: string;
+      destination?: 'global' | 'repo-local';
       confirmed?: boolean;
     }) => Promise<{
       success: boolean;
@@ -70,12 +71,18 @@ export default function (pi: ExtensionAPI) {
       typescript: Type.String({
         description: 'TypeScript source code for the extension. Must export a default function that takes an ExtensionAPI parameter.',
       }),
+      destination: Type.Optional(Type.Union([
+        Type.Literal('global', { description: 'Store under ~/.taskfactory/extensions' }),
+        Type.Literal('repo-local', { description: 'Store under <workspace>/.taskfactory/extensions' }),
+      ], {
+        description: 'Write location for the new extension',
+      })),
       confirmed: Type.Optional(Type.Boolean({
         description: 'Set to true to confirm creation after reviewing warnings/errors',
       })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      const { name, audience, typescript, confirmed } = params;
+      const { name, audience, typescript, destination, confirmed } = params;
 
       const callbacks = globalThis.__piFactoryCreateExtensionCallbacks;
       if (!callbacks || callbacks.size === 0) {
@@ -125,10 +132,13 @@ export default function (pi: ExtensionAPI) {
       }
 
       try {
+        const resolvedDestination = destination === 'repo-local' ? 'repo-local' : 'global';
+
         const result = await cb.createExtension({
           name: name.trim().toLowerCase(),
           audience: audience as 'foreman' | 'task' | 'all',
           typescript: typescript.trim(),
+          destination,
           confirmed,
         });
 
@@ -157,7 +167,11 @@ export default function (pi: ExtensionAPI) {
         }
 
         if (result.success) {
-          let message = `Extension "${name}" created successfully.\n\nPath: ${result.path}\n\nThe extension is now available and will appear in GET /api/factory/extensions.`;
+          const destinationNote = resolvedDestination === 'repo-local'
+            ? 'Stored in this workspace’s .taskfactory/extensions directory.'
+            : 'Stored in ~/.taskfactory/extensions.';
+
+          let message = `Extension "${name}" created successfully.\n\nPath: ${result.path}\n\n${destinationNote}`;
 
           if (result.warnings && result.warnings.length > 0) {
             message += '\n\nWarnings:\n' + result.warnings.map(w => `  [WARN] ${w}`).join('\n');
@@ -172,6 +186,7 @@ export default function (pi: ExtensionAPI) {
               name: name.trim().toLowerCase(),
               path: result.path,
               audience,
+              destination: resolvedDestination,
               warnings: result.warnings,
             },
           };

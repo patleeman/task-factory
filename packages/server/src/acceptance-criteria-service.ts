@@ -12,6 +12,7 @@ import {
   SettingsManager,
   DefaultResourceLoader,
 } from '@mariozechner/pi-coding-agent';
+import { getTaskFactoryAuthPath } from './taskfactory-home.js';
 
 function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
   return Promise.race([
@@ -41,7 +42,7 @@ Task Description:
 ${description}${planContext}`;
 
   try {
-    const authStorage = new AuthStorage();
+    const authStorage = new AuthStorage(getTaskFactoryAuthPath());
     const modelRegistry = new ModelRegistry(authStorage);
 
     // Use a fast cheap model for criteria generation

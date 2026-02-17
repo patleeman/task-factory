@@ -1,48 +1,12 @@
-import { cpSync, existsSync, mkdirSync } from 'fs';
+import { existsSync, mkdirSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 
 const TASK_FACTORY_HOME_DIR = join(homedir(), '.taskfactory');
-const LEGACY_TASK_FACTORY_HOME_DIR = join(homedir(), '.pi', 'factory');
-
-let migrationChecked = false;
-let migrationPendingRetry = false;
-
-function migrateLegacyHomeDirIfNeeded(): void {
-  if (migrationChecked) {
-    return;
-  }
-
-  if (existsSync(TASK_FACTORY_HOME_DIR) && !migrationPendingRetry) {
-    migrationChecked = true;
-    return;
-  }
-
-  if (!existsSync(LEGACY_TASK_FACTORY_HOME_DIR)) {
-    migrationChecked = true;
-    migrationPendingRetry = false;
-    return;
-  }
-
-  try {
-    cpSync(LEGACY_TASK_FACTORY_HOME_DIR, TASK_FACTORY_HOME_DIR, {
-      recursive: true,
-      force: false,
-      errorOnExist: false,
-    });
-    migrationChecked = true;
-    migrationPendingRetry = false;
-  } catch (err) {
-    migrationPendingRetry = true;
-    console.warn(
-      `[TaskFactoryHome] Failed to migrate legacy config dir from ${LEGACY_TASK_FACTORY_HOME_DIR} to ${TASK_FACTORY_HOME_DIR}: ${String(err)}`,
-    );
-  }
-}
+const LEGACY_PI_HOME_DIR = join(homedir(), '.pi');
+const LEGACY_TASK_FACTORY_HOME_DIR = join(LEGACY_PI_HOME_DIR, 'factory');
 
 export function getTaskFactoryHomeDir(): string {
-  migrateLegacyHomeDirIfNeeded();
-
   if (!existsSync(TASK_FACTORY_HOME_DIR)) {
     mkdirSync(TASK_FACTORY_HOME_DIR, { recursive: true });
   }
@@ -52,6 +16,46 @@ export function getTaskFactoryHomeDir(): string {
 
 export function resolveTaskFactoryHomePath(...segments: string[]): string {
   return join(getTaskFactoryHomeDir(), ...segments);
+}
+
+export function getTaskFactoryAgentDir(): string {
+  return resolveTaskFactoryHomePath('agent');
+}
+
+export function resolveTaskFactoryAgentPath(...segments: string[]): string {
+  return join(getTaskFactoryAgentDir(), ...segments);
+}
+
+export function getTaskFactoryAuthPath(): string {
+  return resolveTaskFactoryAgentPath('auth.json');
+}
+
+export function getTaskFactoryPiSkillsDir(): string {
+  return resolveTaskFactoryAgentPath('skills');
+}
+
+export function getTaskFactoryGlobalExtensionsDir(): string {
+  return resolveTaskFactoryHomePath('extensions');
+}
+
+export function getTaskFactoryExecutionSkillsDir(): string {
+  return resolveTaskFactoryHomePath('skills');
+}
+
+export function resolveWorkspaceTaskFactoryPath(workspacePath: string, ...segments: string[]): string {
+  return join(workspacePath, '.taskfactory', ...segments);
+}
+
+export function getWorkspaceTaskFactoryExtensionsDir(workspacePath: string): string {
+  return resolveWorkspaceTaskFactoryPath(workspacePath, 'extensions');
+}
+
+export function getWorkspaceTaskFactorySkillsDir(workspacePath: string): string {
+  return resolveWorkspaceTaskFactoryPath(workspacePath, 'skills');
+}
+
+export function getLegacyPiHomeDir(): string {
+  return LEGACY_PI_HOME_DIR;
 }
 
 export function getLegacyTaskFactoryHomeDir(): string {

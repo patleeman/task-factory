@@ -68,21 +68,24 @@ import {
   loadWorkspaceConfigFromDiskSync,
   resolveExistingTasksDirFromWorkspacePath,
 } from './workspace-storage.js';
+import {
+  getTaskFactoryAuthPath,
+  getTaskFactoryGlobalExtensionsDir,
+  getWorkspaceTaskFactoryExtensionsDir,
+} from './taskfactory-home.js';
 
 // =============================================================================
 // Repo-local Extension Discovery
 // =============================================================================
 
 /**
- * Discover extensions from task-factory's own extensions/ directory.
- * These are loaded via additionalExtensionPaths, separate from
- * ~/.pi/agent/extensions/ (global Pi extensions).
+ * Discover extensions from the bundled task-factory `extensions/` directory.
  *
  * Supports:
  *   extensions/my-ext.ts          — single file
  *   extensions/my-ext/index.ts    — directory with index
  */
-function discoverRepoExtensions(): string[] {
+function discoverBundledRepoExtensions(): string[] {
   const __filename = fileURLToPath(import.meta.url);
   let dir = dirname(__filename);
 
@@ -124,6 +127,25 @@ function discoverExtensionsInDir(extensionsDir: string): string[] {
   return paths;
 }
 
+function discoverAdditionalExtensionPaths(workspacePath?: string): string[] {
+  const sources: string[] = [getTaskFactoryGlobalExtensionsDir()];
+
+  if (workspacePath) {
+    sources.push(getWorkspaceTaskFactoryExtensionsDir(workspacePath));
+  }
+
+  const paths: string[] = [];
+  for (const source of sources) {
+    paths.push(...discoverExtensionsInDir(source));
+  }
+
+  return paths;
+}
+
+function dedupePaths(paths: string[]): string[] {
+  return Array.from(new Set(paths));
+}
+
 /**
  * Repo extensions can be scoped by audience so we can keep some tools
  * (for example, web research) available to Foreman only.
@@ -153,25 +175,38 @@ function filterExtensionsForAudience(paths: string[], audience: RepoExtensionAud
   return [...paths];
 }
 
-/** Cached repo extension paths (discovered once at startup) */
-let _repoExtensionPaths: string[] | null = null;
+/** Cached bundled extension paths (discovered once, reloaded on demand). */
+let _bundledRepoExtensionPaths: string[] | null = null;
 
-export function getRepoExtensionPaths(audience: RepoExtensionAudience = 'all'): string[] {
-  if (_repoExtensionPaths === null) {
-    _repoExtensionPaths = discoverRepoExtensions();
-    if (_repoExtensionPaths.length > 0) {
-      console.log(`Discovered ${_repoExtensionPaths.length} repo extension(s):`,
-        _repoExtensionPaths.map(p => p.split('/').slice(-2).join('/')));
+function getBundledRepoExtensionPaths(): string[] {
+  if (_bundledRepoExtensionPaths === null) {
+    _bundledRepoExtensionPaths = discoverBundledRepoExtensions();
+    if (_bundledRepoExtensionPaths.length > 0) {
+      console.log(
+        `Discovered ${_bundledRepoExtensionPaths.length} bundled extension(s):`,
+        _bundledRepoExtensionPaths.map((p) => p.split('/').slice(-2).join('/')),
+      );
     }
   }
 
-  return filterExtensionsForAudience(_repoExtensionPaths, audience);
+  return _bundledRepoExtensionPaths;
+}
+
+export function getRepoExtensionPaths(
+  audience: RepoExtensionAudience = 'all',
+  workspacePath?: string,
+): string[] {
+  const bundled = getBundledRepoExtensionPaths();
+  const additional = discoverAdditionalExtensionPaths(workspacePath);
+  const merged = dedupePaths([...bundled, ...additional]);
+
+  return filterExtensionsForAudience(merged, audience);
 }
 
 /** Force re-discovery (e.g., after adding a new extension) */
-export function reloadRepoExtensions(): string[] {
-  _repoExtensionPaths = null;
-  return getRepoExtensionPaths();
+export function reloadRepoExtensions(workspacePath?: string): string[] {
+  _bundledRepoExtensionPaths = null;
+  return getRepoExtensionPaths('all', workspacePath);
 }
 
 // =============================================================================
@@ -439,11 +474,11 @@ export async function createTaskConversationSession(
     defaultThinkingLevel,
   } = options;
 
-  const authStorage = new AuthStorage();
+  const authStorage = new AuthStorage(getTaskFactoryAuthPath());
   const modelRegistry = new ModelRegistry(authStorage);
   const loader = new DefaultResourceLoader({
     cwd: workspacePath,
-    additionalExtensionPaths: getRepoExtensionPaths('task'),
+    additionalExtensionPaths: getRepoExtensionPaths('task', workspacePath),
   });
   await loader.reload();
 

@@ -1,3 +1,5 @@
+import { getTaskFactoryAuthPath } from './taskfactory-home.js';
+
 export class PiAuthServiceError extends Error {
   readonly status: number;
 
@@ -85,7 +87,7 @@ export interface CreatePiAuthContextFn {
 
 export async function createPiAuthRuntimeContext(): Promise<PiAuthContext> {
   const { AuthStorage, ModelRegistry } = await import('@mariozechner/pi-coding-agent');
-  const authStorage = new AuthStorage();
+  const authStorage = new AuthStorage(getTaskFactoryAuthPath());
   const modelRegistry = new ModelRegistry(authStorage);
 
   return {

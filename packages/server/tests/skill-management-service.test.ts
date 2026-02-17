@@ -46,6 +46,27 @@ describe('skill-management-service', () => {
     expect(getFactoryUserSkillsDir()).toContain(join('.taskfactory', 'skills'));
   });
 
+  it('writes a skill to a repo-local .taskfactory/skills directory when provided', () => {
+    const workspacePath = createTempSkillsDir();
+    const repoSkillsDir = join(workspacePath, '.taskfactory', 'skills');
+
+    const createdId = createFactorySkill(
+      {
+        id: 'repo-skill',
+        description: 'Repo-local skill',
+        type: 'follow-up',
+        maxIterations: 1,
+        doneSignal: 'HOOK_DONE',
+        promptTemplate: 'Use repo-local skill',
+        configSchema: [],
+      },
+      { skillsDir: repoSkillsDir },
+    );
+
+    expect(createdId).toBe('repo-skill');
+    expect(existsSync(join(repoSkillsDir, 'repo-skill', 'SKILL.md'))).toBe(true);
+  });
+
   it('creates and updates a skill in the provided skills directory', () => {
     const skillsDir = createTempSkillsDir();
 
@@ -189,7 +210,7 @@ Use {{style}} tone.
     expect(existsSync(skillDir)).toBe(false);
   });
 
-  it('migrates legacy ~/.pi/factory/skills into ~/.taskfactory/skills', async () => {
+  it('does not read legacy ~/.pi/factory/skills without explicit migration', async () => {
     const homePath = setTempHome();
 
     const legacySkillDir = join(homePath, '.pi', 'factory', 'skills', 'legacy-review');
@@ -205,7 +226,7 @@ Use {{style}} tone.
 
     const skillsDir = getFactoryUserSkillsDirFresh();
     expect(skillsDir).toBe(join(homePath, '.taskfactory', 'skills'));
-    expect(existsSync(join(skillsDir, 'legacy-review', 'SKILL.md'))).toBe(true);
+    expect(existsSync(join(skillsDir, 'legacy-review', 'SKILL.md'))).toBe(false);
   });
 
   it('parses pre-planning hook metadata from imported skills', () => {

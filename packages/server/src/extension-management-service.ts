@@ -3,13 +3,13 @@
 // =============================================================================
 // Handles creation, validation, and security scanning of TypeScript extensions
 
-import { existsSync, writeFileSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import { join } from 'path';
 import * as ts from 'typescript';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+import {
+  getTaskFactoryGlobalExtensionsDir,
+  getWorkspaceTaskFactoryExtensionsDir,
+} from './taskfactory-home.js';
 
 // Valid extension name pattern: lowercase letters, numbers, hyphens (1-64 chars, must start with letter/number)
 const EXTENSION_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -95,24 +95,27 @@ interface CreateExtensionResult {
   error?: string;
 }
 
-/**
- * Find the repo root extensions directory
- */
-function findExtensionsDir(): string | null {
-  let dir = __dirname;
+type ExtensionWriteDestination = 'global' | 'repo-local';
 
-  // Walk up from this file to find the repo root (where extensions/ lives)
-  for (let i = 0; i < 10; i++) {
-    const candidate = join(dir, 'extensions');
-    if (existsSync(candidate)) {
-      return candidate;
-    }
-    const parent = dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
+function resolveExtensionWriteDir(
+  destination: ExtensionWriteDestination | undefined,
+  workspacePath: string | undefined,
+): { ok: true; path: string } | { ok: false; error: string } {
+  const resolvedDestination: ExtensionWriteDestination = destination === 'repo-local' ? 'repo-local' : 'global';
+
+  if (resolvedDestination === 'global') {
+    const base = getTaskFactoryGlobalExtensionsDir();
+    mkdirSync(base, { recursive: true });
+    return { ok: true, path: base };
   }
 
-  return null;
+  if (!workspacePath || workspacePath.trim().length === 0) {
+    return { ok: false, error: 'workspacePath is required for repo-local extension destination' };
+  }
+
+  const base = getWorkspaceTaskFactoryExtensionsDir(workspacePath);
+  mkdirSync(base, { recursive: true });
+  return { ok: true, path: base };
 }
 
 /**
@@ -232,8 +235,10 @@ export async function createFactoryExtension(payload: {
   name: string;
   audience: 'foreman' | 'task' | 'all';
   typescript: string;
+  destination?: ExtensionWriteDestination;
+  workspacePath?: string;
 }): Promise<CreateExtensionResult> {
-  const { name, typescript } = payload;
+  const { name, typescript, destination, workspacePath } = payload;
 
   // Validate name
   const nameValidation = validateExtensionName(name);
@@ -243,11 +248,13 @@ export async function createFactoryExtension(payload: {
 
   const normalizedName = name.trim().toLowerCase();
 
-  // Find extensions directory
-  const extensionsDir = findExtensionsDir();
-  if (!extensionsDir) {
-    return { success: false, error: 'Could not find extensions directory' };
+  // Resolve destination directory
+  const resolvedWriteDir = resolveExtensionWriteDir(destination, workspacePath);
+  if (!resolvedWriteDir.ok) {
+    return { success: false, error: resolvedWriteDir.error };
   }
+
+  const extensionsDir = resolvedWriteDir.path;
 
   // Check for duplicate
   const extensionPath = join(extensionsDir, `${normalizedName}.ts`);

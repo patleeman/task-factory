@@ -14,6 +14,7 @@ declare global {
       description: string;
       hooks: ('pre-planning' | 'pre' | 'post')[];
       content: string;
+      destination?: 'global' | 'repo-local';
     }) => Promise<{ success: boolean; skillId?: string; path?: string; error?: string }>;
     listSkills: () => Promise<Array<{ id: string; name: string; description: string; hooks: string[] }>>;
   }> | undefined;
@@ -61,9 +62,15 @@ export default function (pi: ExtensionAPI) {
       content: Type.String({
         description: 'Markdown content for the skill (the prompt template that will be sent to the agent)',
       }),
+      destination: Type.Optional(Type.Union([
+        Type.Literal('global'),
+        Type.Literal('repo-local'),
+      ], {
+        description: 'Write location: global (~/.taskfactory/skills) or repo-local (<workspace>/.taskfactory/skills)',
+      })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      const { name, description, hooks, content } = params;
+      const { name, description, hooks, content, destination } = params;
 
       const callbacks = globalThis.__piFactoryCreateSkillCallbacks;
       if (!callbacks || callbacks.size === 0) {
@@ -124,23 +131,31 @@ export default function (pi: ExtensionAPI) {
       }
 
       try {
+        const resolvedDestination = destination === 'repo-local' ? 'repo-local' : 'global';
+
         const result = await cb.createSkill({
           name: name.trim().toLowerCase(),
           description: description.trim(),
           hooks,
           content: content.trim(),
+          destination,
         });
 
         if (result.success) {
+          const destinationNote = resolvedDestination === 'repo-local'
+            ? 'Stored in this workspace’s .taskfactory/skills directory.'
+            : 'Stored in ~/.taskfactory/skills.';
+
           return {
             content: [{
               type: 'text' as const,
-              text: `Skill "${result.skillId}" created successfully.\n\nPath: ${result.path}\n\nThe skill is now available and will appear in GET /api/factory/skills.`,
+              text: `Skill "${result.skillId}" created successfully.\n\nPath: ${result.path}\n\n${destinationNote}`,
             }],
             details: { 
               skillId: result.skillId, 
               path: result.path,
               hooks,
+              destination: resolvedDestination,
             },
           };
         } else {
