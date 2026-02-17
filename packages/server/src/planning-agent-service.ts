@@ -1811,31 +1811,34 @@ function registerMessageAgentCallbacks(
       const { hasLiveExecutionSession } = require('./agent-execution-service.js');
       return hasLiveExecutionSession(taskId);
     },
-    steerTask: async (taskId: string, content: string, attachmentIds?: string[]) => {
-      const { steerTask, getActiveSession } = await import('./agent-execution-service.js');
-      // steerTask doesn't accept attachmentIds in current signature
+    steerTask: async (taskId: string, content: string, _attachmentIds?: string[]) => {
+      const { steerTask } = await import('./agent-execution-service.js');
+      // TODO: Pass attachmentIds once steerTask supports attachments
       return steerTask(taskId, content);
     },
-    followUpTask: async (taskId: string, content: string, attachmentIds?: string[]) => {
+    followUpTask: async (taskId: string, content: string, _attachmentIds?: string[]) => {
       const { followUpTask } = await import('./agent-execution-service.js');
+      // TODO: Pass attachmentIds once followUpTask supports attachments
       return followUpTask(taskId, content);
     },
-    startChat: async (taskId: string, content: string, attachmentIds?: string[]) => {
+    startChat: async (taskId: string, content: string, _attachmentIds?: string[]) => {
       const { startChat } = await import('./agent-execution-service.js');
       const { discoverTasks } = await import('./task-service.js');
       const tasksDir = getTasksDir(workspace);
       const tasks = discoverTasks(tasksDir);
       const task = tasks.find(t => t.id === taskId);
       if (!task) throw new Error(`Task ${taskId} not found`);
+      // TODO: Pass attachmentIds once startChat supports attachments
       return startChat(task, workspaceId, workspace.path, content, broadcast);
     },
-    resumeChat: async (taskId: string, content: string, attachmentIds?: string[]) => {
+    resumeChat: async (taskId: string, content: string, _attachmentIds?: string[]) => {
       const { resumeChat } = await import('./agent-execution-service.js');
       const { discoverTasks } = await import('./task-service.js');
       const tasksDir = getTasksDir(workspace);
       const tasks = discoverTasks(tasksDir);
       const task = tasks.find(t => t.id === taskId);
       if (!task) throw new Error(`Task ${taskId} not found`);
+      // TODO: Pass attachmentIds once resumeChat supports attachments
       return resumeChat(task, workspaceId, workspace.path, content, broadcast);
     },
   });
