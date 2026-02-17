@@ -22,11 +22,19 @@ describe('foreman inline draft-task action regression checks', () => {
 
     const createIdx = inlineDraftSection.indexOf('Create Task');
     const editIdx = inlineDraftSection.indexOf('Edit Draft');
-    const wontDoIdx = inlineDraftSection.indexOf('Won’t do');
+    // Curly apostrophe (') as used in the source
+    const wontDoIdx = inlineDraftSection.indexOf('Won\u2019t do');
 
     expect(createIdx).toBeGreaterThanOrEqual(0);
     expect(editIdx).toBeGreaterThan(createIdx);
     expect(wontDoIdx).toBeGreaterThan(editIdx);
+  });
+
+  it('uses theme-safe surface styling for dismissed "Won\u2019t Do" cards', () => {
+    // Dismissed card must use a class that has a dark-mode override to avoid bright backgrounds
+    expect(inlineDraftSection).toMatch(/border-slate-300\s+bg-slate-100\/80|border-slate-300/);
+    // Curly apostrophe (') as used in the source label
+    expect(inlineDraftSection).toContain('Draft Task \u00b7 Won\u2019t Do');
   });
 
   it('collapses draft cards after create or dismissal and wires both create flows', () => {

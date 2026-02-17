@@ -147,6 +147,7 @@
 :root[data-theme='dark'] .bg-slate-50 { background-color: var(--color-app-bg); }
 :root[data-theme='dark'] .bg-slate-50\/40 { background-color: rgba(2, 6, 23, 0.78); }
 :root[data-theme='dark'] .bg-slate-100 { background-color: var(--color-surface-secondary); }
+:root[data-theme='dark'] .bg-slate-100\/80 { background-color: rgba(11, 18, 32, 0.8); }
 :root[data-theme='dark'] .bg-slate-200 { background-color: var(--slate-200); }
 :root[data-theme='dark'] .bg-slate-400 { background-color: #475569; }
 :root[data-theme='dark'] .bg-slate-700 { background-color: #334155; }
