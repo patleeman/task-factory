@@ -3,7 +3,7 @@ name: capture-screenshot
 description: Capture a browser screenshot for task validation and attach it to the active task using attach_task_file.
 allowed-tools: Bash(agent-browser:*), attach_task_file
 metadata:
-  author: pi-factory
+  author: task-factory
   version: "1.0"
   type: follow-up
   hooks: post

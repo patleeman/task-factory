@@ -1,5 +1,5 @@
 {
-  "name": "@pi-factory/shared",
+  "name": "@task-factory/shared",
   "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",

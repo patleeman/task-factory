@@ -1,7 +1,7 @@
 import React from '../../client/node_modules/react';
 import { describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from '../../client/node_modules/react-dom/server';
-import type { Attachment } from '@pi-factory/shared';
+import type { Attachment } from '@task-factory/shared';
 
 vi.mock('../../client/src/components/AppIcon', () => ({
   AppIcon: () => null,

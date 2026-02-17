@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useMemo, useEffect } from 'react'
-import { DEFAULT_PRE_EXECUTION_SKILLS, DEFAULT_POST_EXECUTION_SKILLS } from '@pi-factory/shared'
+import { DEFAULT_PRE_EXECUTION_SKILLS, DEFAULT_POST_EXECUTION_SKILLS } from '@task-factory/shared'
 
-const STORAGE_KEY_PREFIX = 'pi-factory:create-task-draft'
+const STORAGE_KEY_PREFIX = 'task-factory:create-task-draft'
 
 interface DraftModelConfig {
   provider: string

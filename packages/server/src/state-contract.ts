@@ -1,4 +1,4 @@
-import type { Phase, TaskFrontmatter } from '@pi-factory/shared';
+import type { Phase, TaskFrontmatter } from '@task-factory/shared';
 
 // =============================================================================
 // Agent Roles & Modes

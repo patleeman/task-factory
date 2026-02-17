@@ -5,7 +5,7 @@
 // Persisted to .taskfactory/idea-backlog.json and cached in-memory.
 
 import { mkdir, readFile, writeFile } from 'fs/promises';
-import type { IdeaBacklog, IdeaBacklogItem } from '@pi-factory/shared';
+import type { IdeaBacklog, IdeaBacklogItem } from '@task-factory/shared';
 import { getWorkspaceById } from './workspace-service.js';
 import {
   getWorkspaceStoragePath,

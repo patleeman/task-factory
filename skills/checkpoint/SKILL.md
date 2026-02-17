@@ -2,7 +2,7 @@
 name: checkpoint
 description: Commit and push the agent's current work without opening a PR. Stages only files modified by the agent, creates a descriptive commit message, and pushes to the current branch.
 metadata:
-  author: pi-factory
+  author: task-factory
   version: "1.0"
   type: follow-up
   hooks: post

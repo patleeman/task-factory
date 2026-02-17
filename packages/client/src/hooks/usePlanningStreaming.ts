@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import type { ServerEvent, PlanningMessage, ActivityEntry, Shelf, QARequest } from '@pi-factory/shared'
+import type { ServerEvent, PlanningMessage, ActivityEntry, Shelf, QARequest } from '@task-factory/shared'
 import type { AgentStreamState, ToolCallState } from './useAgentStreaming'
 import { api } from '../api'
 

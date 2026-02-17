@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import type { Task } from '@pi-factory/shared';
+import type { Task } from '@task-factory/shared';
 import {
   canMoveToPhase,
   createTask as createTaskFile,

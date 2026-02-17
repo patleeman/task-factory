@@ -8,7 +8,7 @@
 import { existsSync } from 'fs';
 import { mkdir, readFile, writeFile, rm, rename, copyFile, cp, stat } from 'fs/promises';
 import { basename, dirname, join } from 'path';
-import type { Workspace, WorkspaceConfig } from '@pi-factory/shared';
+import type { Workspace, WorkspaceConfig } from '@task-factory/shared';
 import { getTaskFactoryHomeDir } from './taskfactory-home.js';
 import {
   DEFAULT_WORKSPACE_TASK_LOCATION,

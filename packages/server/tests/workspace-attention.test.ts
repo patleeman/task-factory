@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Phase } from '@pi-factory/shared';
+import type { Phase } from '@task-factory/shared';
 import { buildWorkspaceAttentionSummary } from '../src/workspace-attention.js';
 
 describe('buildWorkspaceAttentionSummary', () => {

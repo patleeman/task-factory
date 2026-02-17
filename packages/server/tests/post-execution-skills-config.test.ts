@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { PostExecutionSkill } from '@pi-factory/shared';
+import type { PostExecutionSkill } from '@task-factory/shared';
 import { applySkillConfigOverrides } from '../src/post-execution-skills.js';
 
 function createSkill(): PostExecutionSkill {

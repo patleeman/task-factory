@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { ArrowRight, ArrowUp } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import type { Workspace } from '@pi-factory/shared'
+import type { Workspace } from '@task-factory/shared'
 import { api } from '../api'
 import { AppIcon } from './AppIcon'
 import { ThemeToggle } from './ThemeToggle'

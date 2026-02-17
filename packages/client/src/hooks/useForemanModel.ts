@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import type { ModelConfig } from '@pi-factory/shared'
+import type { ModelConfig } from '@task-factory/shared'
 import { api } from '../api'
 
 interface UseForemanModelResult {

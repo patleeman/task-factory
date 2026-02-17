@@ -1,4 +1,4 @@
-import type { QueueStatus, WorkspaceWorkflowSettings } from '@pi-factory/shared'
+import type { QueueStatus, WorkspaceWorkflowSettings } from '@task-factory/shared'
 
 export function syncAutomationSettingsWithQueue(
   settings: WorkspaceWorkflowSettings,

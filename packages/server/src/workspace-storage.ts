@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'fs';
 import { isAbsolute, join } from 'path';
-import type { WorkspaceConfig } from '@pi-factory/shared';
+import type { WorkspaceConfig } from '@task-factory/shared';
 
 export const WORKSPACE_STORAGE_DIRNAME = '.taskfactory';
 export const LEGACY_WORKSPACE_STORAGE_DIRNAME = '.pi';

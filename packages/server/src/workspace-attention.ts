@@ -1,4 +1,4 @@
-import type { Phase } from '@pi-factory/shared';
+import type { Phase } from '@task-factory/shared';
 
 export interface AwaitingInputSessionLike {
   workspaceId: string;

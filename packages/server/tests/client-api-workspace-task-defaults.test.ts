@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { api } from '../../client/src/api';
-import type { TaskDefaults } from '@pi-factory/shared';
+import type { TaskDefaults } from '@task-factory/shared';
 
 const DEFAULTS: TaskDefaults = {
   planningModelConfig: {

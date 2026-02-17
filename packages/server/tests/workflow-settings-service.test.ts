@@ -5,7 +5,7 @@ import {
   normalizePiFactorySettingsPayload,
   parseWorkspaceWorkflowPatch,
 } from '../src/workflow-settings-service.js';
-import type { WorkspaceConfig } from '@pi-factory/shared';
+import type { WorkspaceConfig } from '@task-factory/shared';
 
 function createWorkspaceConfig(overrides: Partial<WorkspaceConfig> = {}): WorkspaceConfig {
   return {

@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
 import { ArrowLeft, ArrowRight, GripVertical, Plus, Trash2 } from 'lucide-react'
-import type { IdeaBacklog, IdeaBacklogItem } from '@pi-factory/shared'
+import type { IdeaBacklog, IdeaBacklogItem } from '@task-factory/shared'
 import { AppIcon } from './AppIcon'
 
 interface IdeaBacklogPaneProps {

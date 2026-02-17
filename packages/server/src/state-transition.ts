@@ -1,4 +1,4 @@
-import type { ServerEvent } from '@pi-factory/shared';
+import type { ServerEvent } from '@task-factory/shared';
 import { createSystemEvent } from './activity-service.js';
 import type { TaskStateSnapshot } from './state-contract.js';
 

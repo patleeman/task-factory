@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Settings } from 'lucide-react'
 import { useParams, useNavigate } from 'react-router-dom'
-import type { Workspace } from '@pi-factory/shared'
+import type { Workspace } from '@task-factory/shared'
 import { api } from '../api'
 import { AppIcon } from './AppIcon'
 import { ThemeToggle } from './ThemeToggle'
@@ -20,7 +20,7 @@ function nameToHue(name: string): number {
 
 /**
  * Extract 1-2 uppercase initials from a folder name.
- * e.g. "pi-factory" → "PF", "myapp" → "MY", "x" → "X"
+ * e.g. "task-factory" → "TF", "myapp" → "MY", "x" → "X"
  */
 function getInitials(name: string): string {
   // Split on common separators

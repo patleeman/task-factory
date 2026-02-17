@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import YAML from 'yaml';
-import type { SkillConfigField, SkillHook } from '@pi-factory/shared';
+import type { SkillConfigField, SkillHook } from '@task-factory/shared';
 import { resolveTaskFactoryHomePath } from './taskfactory-home.js';
 
 const RESERVED_METADATA_KEYS = new Set(['type', 'hooks', 'max-iterations', 'done-signal', 'workflow-id', 'pairs-with']);
@@ -92,7 +92,7 @@ function normalizeMetadata(raw: unknown): Record<string, string> {
   }
 
   if (!metadata.author) {
-    metadata.author = 'pi-factory';
+    metadata.author = 'task-factory';
   }
 
   if (!metadata.version) {

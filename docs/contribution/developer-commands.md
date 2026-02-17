@@ -9,11 +9,11 @@ All entries below map directly to the current npm scripts defined in the root an
 |---|---|---|
 | Start full local dev stack | `npm run dev` | Builds `shared` once, then runs `dev:shared`, `dev:server`, and `dev:client` concurrently |
 | Build production artifacts | `npm run build` | Builds all workspaces and bundles server output to `dist/server.js` |
-| Run production build locally | `npm start` | Starts `@pi-factory/server` from compiled output (run `npm run build` first) |
+| Run production build locally | `npm start` | Starts `@task-factory/server` from compiled output (run `npm run build` first) |
 | Lint all workspaces | `npm run lint` | Runs ESLint in `client`, `server`, and `shared` |
 | Typecheck all workspaces | `npm run typecheck` | Runs TypeScript `--noEmit` checks in all workspaces |
 | Run tests | `npm run test` | Runs workspace test suites (`server` currently defines tests) |
-| Run coverage | `npm run test:coverage` | Runs `vitest --coverage` in `@pi-factory/server` |
+| Run coverage | `npm run test:coverage` | Runs `vitest --coverage` in `@task-factory/server` |
 
 ## Workspace-scoped commands
 
@@ -22,14 +22,14 @@ All entries below map directly to the current npm scripts defined in the root an
 | Client only (Vite dev server) | `npm run dev:client` |
 | Server only (`tsx watch`) | `npm run dev:server` |
 | Shared types watch build | `npm run dev:shared` |
-| Run any script in one workspace | `npm run <script> -w @pi-factory/<client|server|shared>` |
+| Run any script in one workspace | `npm run <script> -w @task-factory/<client|server|shared>` |
 
 Examples:
 
 ```bash
-npm run lint -w @pi-factory/client
-npm run test -w @pi-factory/server
-npm run build -w @pi-factory/shared
+npm run lint -w @task-factory/client
+npm run test -w @task-factory/server
+npm run build -w @task-factory/shared
 ```
 
 ## Release and hygiene gates
@@ -49,9 +49,9 @@ npm run build -w @pi-factory/shared
 ## Lifecycle-focused test shortcuts
 
 ```bash
-npm run test -w @pi-factory/server -- state-contract.test.ts
-npm run test -w @pi-factory/server -- state-transition.test.ts
-npm run test -w @pi-factory/server -- queue-manager-automation.test.ts
+npm run test -w @task-factory/server -- state-contract.test.ts
+npm run test -w @task-factory/server -- state-transition.test.ts
+npm run test -w @task-factory/server -- queue-manager-automation.test.ts
 ```
 
 ## Related architecture docs

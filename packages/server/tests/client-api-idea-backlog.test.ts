@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { api } from '../../client/src/api';
-import type { IdeaBacklog } from '@pi-factory/shared';
+import type { IdeaBacklog } from '@task-factory/shared';
 
 const BACKLOG: IdeaBacklog = {
   items: [

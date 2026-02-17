@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { Task } from '@pi-factory/shared';
+import type { Task } from '@task-factory/shared';
 import { prepareTaskUpdateRequest } from '../src/task-update-service.js';
 
 function createTask(overrides: Partial<Task> = {}): Task {

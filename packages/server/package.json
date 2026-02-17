@@ -1,5 +1,5 @@
 {
-  "name": "@pi-factory/server",
+  "name": "@task-factory/server",
   "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -15,7 +15,7 @@
   "dependencies": {
     "@mariozechner/pi-ai": "^0.52.12",
     "@mariozechner/pi-coding-agent": "^0.52.10",
-    "@pi-factory/shared": "file:../shared",
+    "@task-factory/shared": "file:../shared",
     "cors": "^2.8.5",
     "express": "^4.21.2",
     "multer": "^2.0.2",

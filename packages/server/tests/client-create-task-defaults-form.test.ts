@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { TaskDefaults } from '@pi-factory/shared';
+import type { TaskDefaults } from '@task-factory/shared';
 import { buildCreateTaskFormDefaults } from '../../client/src/components/task-default-form';
 
 describe('create-task form defaults', () => {

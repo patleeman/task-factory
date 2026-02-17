@@ -1,5 +1,5 @@
 import { X } from 'lucide-react'
-import type { Artifact } from '@pi-factory/shared'
+import type { Artifact } from '@task-factory/shared'
 import { AppIcon } from './AppIcon'
 import { ArtifactViewer } from './ArtifactViewer'
 

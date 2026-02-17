@@ -1,9 +1,9 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 
-const THEME_STORAGE_KEY = 'pi-factory:theme-preference'
-const LEGACY_THEME_STORAGE_KEY = 'pi-factory:theme'
-const PI_FACTORY_SETTINGS_ENDPOINT = '/api/pi-factory/settings'
+const THEME_STORAGE_KEY = 'task-factory:theme-preference'
+const LEGACY_THEME_STORAGE_KEY = 'task-factory:theme'
+const SETTINGS_ENDPOINT = '/api/settings'
 
 export type ThemeMode = 'light' | 'dark'
 export type ThemePreference = ThemeMode | 'system'
@@ -124,7 +124,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
     const loadRemotePreference = async () => {
       try {
-        const response = await fetch(PI_FACTORY_SETTINGS_ENDPOINT)
+        const response = await fetch(SETTINGS_ENDPOINT)
         if (!response.ok) {
           return
         }
@@ -170,7 +170,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
     const saveRemotePreference = async () => {
       try {
-        const loadResponse = await fetch(PI_FACTORY_SETTINGS_ENDPOINT)
+        const loadResponse = await fetch(SETTINGS_ENDPOINT)
         const currentSettings = loadResponse.ok
           ? await loadResponse.json() as PiFactorySettings
           : {}
@@ -180,7 +180,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
           theme: preference,
         }
 
-        const saveResponse = await fetch(PI_FACTORY_SETTINGS_ENDPOINT, {
+        const saveResponse = await fetch(SETTINGS_ENDPOINT, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(nextSettings),

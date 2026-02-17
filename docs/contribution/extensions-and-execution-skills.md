@@ -161,9 +161,9 @@ Useful behavior note:
    - Run:
 
 ```bash
-npm run test -w @pi-factory/server -- repo-extension-scope.test.ts
-npm run lint -w @pi-factory/server
-npm run typecheck -w @pi-factory/server
+npm run test -w @task-factory/server -- repo-extension-scope.test.ts
+npm run lint -w @task-factory/server
+npm run typecheck -w @task-factory/server
 ```
 
 ---
@@ -197,9 +197,9 @@ npm run typecheck -w @pi-factory/server
    - Run:
 
 ```bash
-npm run test -w @pi-factory/server -- post-execution-skills.test.ts skill-hook-execution.test.ts post-execution-skills-config.test.ts task-defaults-service.test.ts
-npm run lint -w @pi-factory/server
-npm run typecheck -w @pi-factory/server
+npm run test -w @task-factory/server -- post-execution-skills.test.ts skill-hook-execution.test.ts post-execution-skills-config.test.ts task-defaults-service.test.ts
+npm run lint -w @task-factory/server
+npm run typecheck -w @task-factory/server
 ```
 
 ---

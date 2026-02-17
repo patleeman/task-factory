@@ -46,25 +46,20 @@ If you need help coming up with ideas or using Task Factory, ask the Foreman.
 ### Option A: npm global install
 
 ```bash
-npm install -g pi-factory
+npm install -g task-factory
 ```
-
-This installs both CLI names:
-
-- `pifactory` (primary)
-- `pi-factory` (compatibility alias)
 
 Run it:
 
 ```bash
-pifactory
+task-factory
 ```
 
 ### Option B: run from source
 
 ```bash
-git clone https://github.com/patleeman/pi-factory.git
-cd pi-factory
+git clone https://github.com/patleeman/task-factory.git
+cd task-factory
 npm install
 ```
 
@@ -90,11 +85,11 @@ This starts shared, server, and client in watch/dev mode.
 ## Useful CLI options
 
 ```bash
-pifactory --help
-pifactory --version
-pifactory --no-open
-PORT=8080 HOST=127.0.0.1 pifactory
-HOST=0.0.0.0 pifactory  # Expose on your network (explicit opt-in)
+task-factory --help
+task-factory --version
+task-factory --no-open
+PORT=8080 HOST=127.0.0.1 task-factory
+HOST=0.0.0.0 task-factory  # Expose on your network (explicit opt-in)
 ```
 
 ## Quality checks

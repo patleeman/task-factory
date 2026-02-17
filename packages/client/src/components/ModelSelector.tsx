@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import type { ModelConfig } from '@pi-factory/shared'
+import type { ModelConfig } from '@task-factory/shared'
 import { api, type AvailableModel } from '../api'
 
 interface ModelSelectorProps {

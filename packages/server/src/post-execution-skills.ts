@@ -9,7 +9,7 @@ import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import YAML from 'yaml';
-import type { PostExecutionSkill, SkillConfigField, SkillHook, SkillSource } from '@pi-factory/shared';
+import type { PostExecutionSkill, SkillConfigField, SkillHook, SkillSource } from '@task-factory/shared';
 import { createSystemEvent } from './activity-service.js';
 import { resolveTaskFactoryHomePath } from './taskfactory-home.js';
 

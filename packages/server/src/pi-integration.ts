@@ -12,7 +12,7 @@ import {
 } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
-import type { TaskDefaults, PlanningGuardrails, WorkflowDefaultsConfig, ForemanSettings } from '@pi-factory/shared';
+import type { TaskDefaults, PlanningGuardrails, WorkflowDefaultsConfig, ForemanSettings } from '@task-factory/shared';
 import { getTaskFactoryHomeDir } from './taskfactory-home.js';
 
 const PI_AGENT_DIR = join(homedir(), '.pi', 'agent');

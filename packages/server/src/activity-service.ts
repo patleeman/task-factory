@@ -13,7 +13,7 @@ import type {
   ChatMessageEntry,
   SystemEventEntry,
   Phase,
-} from '@pi-factory/shared';
+} from '@task-factory/shared';
 import { getWorkspaceById } from './workspace-service.js';
 import { getWorkspaceStoragePath, resolveWorkspaceStoragePathForRead } from './workspace-storage.js';
 

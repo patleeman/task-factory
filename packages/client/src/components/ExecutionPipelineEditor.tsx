@@ -34,7 +34,7 @@ interface DropTarget {
   displayIndex: number
 }
 
-const DRAG_MIME = 'application/pi-factory-execution-pipeline-skill'
+const DRAG_MIME = 'application/task-factory-execution-pipeline-skill'
 
 function supportsHook(skill: PostExecutionSkill, lane: Lane): boolean {
   if (!Array.isArray(skill.hooks) || skill.hooks.length === 0) {

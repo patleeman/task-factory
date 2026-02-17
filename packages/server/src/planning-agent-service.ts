@@ -31,7 +31,7 @@ import type {
   QAAnswer,
   QAResponse,
   ContextUsageSnapshot,
-} from '@pi-factory/shared';
+} from '@task-factory/shared';
 import {
   clearShelf,
 } from './shelf-service.js';

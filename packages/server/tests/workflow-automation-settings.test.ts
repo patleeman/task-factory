@@ -7,7 +7,7 @@ import {
   resolveWorkspaceWipLimit,
   resolveWorkspaceWorkflowSettings,
   type WorkspaceConfig,
-} from '@pi-factory/shared';
+} from '@task-factory/shared';
 
 describe('workflow settings resolution', () => {
   function createBaseConfig(overrides: Partial<WorkspaceConfig> = {}): WorkspaceConfig {

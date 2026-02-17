@@ -2,7 +2,7 @@
 name: security-review
 description: Scan code changes for security vulnerabilities including OWASP Top 10, hardcoded secrets, injection flaws, and authentication issues. Use after implementation to catch security problems before marking a task complete.
 metadata:
-  author: pi-factory
+  author: task-factory
   version: "1.0"
   type: follow-up
   hooks: post

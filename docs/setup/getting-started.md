@@ -16,8 +16,8 @@ It is aligned to the current npm workspace scripts in the root `package.json` an
 ## 1) Clone and install
 
 ```bash
-git clone https://github.com/patleeman/pi-factory.git
-cd pi-factory
+git clone https://github.com/patleeman/task-factory.git
+cd task-factory
 npm install
 ```
 
@@ -37,9 +37,9 @@ npm run dev
 
 What this starts:
 
-- `@pi-factory/shared` in watch mode
-- `@pi-factory/server` in watch mode (`tsx watch`)
-- `@pi-factory/client` via Vite dev server
+- `@task-factory/shared` in watch mode
+- `@task-factory/server` in watch mode (`tsx watch`)
+- `@task-factory/client` via Vite dev server
 
 Then open the URL printed by Vite (usually `http://localhost:3001`).
 

@@ -14,9 +14,9 @@
 // The queue manager respects WIP limits and uses FIFO ordering.
 // It recovers gracefully from server restarts by detecting orphaned executing tasks.
 
-import type { Task, ServerEvent, QueueStatus, Workspace } from '@pi-factory/shared';
+import type { Task, ServerEvent, QueueStatus, Workspace } from '@task-factory/shared';
 import { randomUUID } from 'crypto';
-import { resolveWorkspaceWorkflowSettings } from '@pi-factory/shared';
+import { resolveWorkspaceWorkflowSettings } from '@task-factory/shared';
 import { getWorkspaceById, getTasksDir, listWorkspaces, updateWorkspaceConfig } from './workspace-service.js';
 import { discoverTasks, moveTaskToPhase } from './task-service.js';
 import { loadGlobalWorkflowSettings } from './workflow-settings-service.js';

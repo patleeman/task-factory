@@ -1,4 +1,4 @@
-import type { Task, UpdateTaskRequest } from '@pi-factory/shared';
+import type { Task, UpdateTaskRequest } from '@task-factory/shared';
 import { logger } from './logger.js';
 import { withTimeout } from './with-timeout.js';
 

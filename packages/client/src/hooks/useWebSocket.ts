@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import type { ServerEvent, ClientEvent } from '@pi-factory/shared'
+import type { ServerEvent, ClientEvent } from '@task-factory/shared'
 
 export type MessageHandler = (event: ServerEvent) => void
 

@@ -2,7 +2,7 @@
 name: code-review
 description: Review all code changes for bugs, edge cases, naming, complexity, and missing error handling. Use after completing implementation work to catch issues before marking a task complete.
 metadata:
-  author: pi-factory
+  author: task-factory
   version: "1.0"
   type: follow-up
   hooks: post

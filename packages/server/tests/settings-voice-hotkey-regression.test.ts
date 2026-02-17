@@ -24,6 +24,6 @@ describe('settings voice hotkey regression checks', () => {
     expect(settingsPage).toContain('await api.savePiFactorySettings(nextSettings)');
 
     expect(apiClient).toContain('voiceInputHotkey?: string');
-    expect(apiClient).toContain("fetch('/api/pi-factory/settings'");
+    expect(apiClient).toContain("fetch('/api/settings'");
   });
 });

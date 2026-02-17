@@ -5,7 +5,7 @@
 // Persisted to JSON in the workspace's .taskfactory directory.
 
 import { mkdir, readFile, writeFile } from 'fs/promises';
-import type { DraftTask, Artifact, Shelf } from '@pi-factory/shared';
+import type { DraftTask, Artifact, Shelf } from '@task-factory/shared';
 import { getWorkspaceById } from './workspace-service.js';
 import {
   getWorkspaceStoragePath,

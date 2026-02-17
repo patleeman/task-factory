@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_PLANNING_GUARDRAILS } from '@pi-factory/shared';
+import { DEFAULT_PLANNING_GUARDRAILS } from '@task-factory/shared';
 import { buildPlanningPrompt, buildPlanningResumePrompt, resolvePlanningGuardrails } from '../src/agent-execution-service.js';
 
 describe('DEFAULT_PLANNING_GUARDRAILS', () => {

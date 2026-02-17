@@ -1,4 +1,4 @@
-import type { ModelConfig, TaskDefaults } from '@pi-factory/shared'
+import type { ModelConfig, TaskDefaults } from '@task-factory/shared'
 
 export interface CreateTaskFormDefaults {
   selectedPreSkillIds: string[]

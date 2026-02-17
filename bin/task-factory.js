@@ -4,12 +4,10 @@
 // =============================================================================
 
 import { spawn, exec } from 'child_process';
-import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync, createReadStream } from 'fs';
-import { readdir } from 'fs/promises';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync, openSync, closeSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join, resolve } from 'path';
-import { createInterface } from 'readline';
-import { homedir } from 'os';
+import { homedir, platform } from 'os';
 
 import { Command } from 'commander';
 import chalk from 'chalk';
@@ -382,8 +380,6 @@ async function daemonStart(options) {
   closeSync(err);
 }
 
-import { openSync, closeSync } from 'fs';
-
 async function daemonStop() {
   const spinner = clack.spinner();
   spinner.start('Stopping daemon...');
@@ -440,7 +436,7 @@ async function daemonStatus() {
 
   if (!pid) {
     console.log(chalk.yellow('Daemon status: Not running'));
-    console.log(chalk.gray('Run "pifactory daemon start" to start the daemon.'));
+    console.log(chalk.gray('Run "task-factory daemon start" to start the daemon.'));
     return;
   }
 
@@ -614,9 +610,15 @@ async function workspaceImport(file, options) {
     process.exit(1);
   }
 
-  const importData = JSON.parse(readFileSync(file, 'utf-8'));
+  let importData;
+  try {
+    importData = JSON.parse(readFileSync(file, 'utf-8'));
+  } catch (err) {
+    console.error(chalk.red(`Error: Invalid JSON file: ${err.message}`));
+    process.exit(1);
+  }
 
-  if (!importData.workspace || !importData.tasks) {
+  if (!importData.workspace || !Array.isArray(importData.tasks)) {
     console.error(chalk.red('Error: Invalid export file format'));
     process.exit(1);
   }
@@ -637,26 +639,42 @@ async function workspaceImport(file, options) {
   spinner.start('Creating workspace...');
 
   const client = new ApiClient();
-  const workspace = await client.createWorkspace(resolvedPath, importData.workspace.name, importData.workspace.config);
+  let workspace;
+  try {
+    workspace = await client.createWorkspace(resolvedPath, importData.workspace.name, importData.workspace.config);
+  } catch (err) {
+    spinner.stop('Failed to create workspace');
+    console.error(chalk.red(`Error: ${err.message}`));
+    process.exit(1);
+  }
 
   spinner.message('Importing tasks...');
 
+  let importedCount = 0;
+  let failedCount = 0;
+
   for (const task of importData.tasks) {
-    await client.createTask(workspace.id, {
-      title: task.frontmatter.title,
-      content: task.content,
-      acceptanceCriteria: task.frontmatter.acceptanceCriteria,
-      plan: task.frontmatter.plan,
-      preExecutionSkills: task.frontmatter.preExecutionSkills,
-      postExecutionSkills: task.frontmatter.postExecutionSkills,
-    });
+    try {
+      await client.createTask(workspace.id, {
+        title: task.frontmatter?.title || 'Untitled',
+        content: task.content || '',
+        acceptanceCriteria: task.frontmatter?.acceptanceCriteria,
+        plan: task.frontmatter?.plan,
+        preExecutionSkills: task.frontmatter?.preExecutionSkills,
+        postExecutionSkills: task.frontmatter?.postExecutionSkills,
+      });
+      importedCount++;
+    } catch (err) {
+      failedCount++;
+      console.warn(chalk.yellow(`Warning: Failed to import task ${task.id}: ${err.message}`));
+    }
   }
 
   spinner.stop('Workspace imported');
   console.log(chalk.green(`✓ Workspace imported`));
   console.log(`  New ID: ${chalk.cyan(workspace.id)}`);
   console.log(`  Path: ${workspace.path}`);
-  console.log(`  Tasks imported: ${importData.tasks.length}`);
+  console.log(`  Tasks imported: ${importedCount}${failedCount > 0 ? chalk.yellow(` (${failedCount} failed)`) : ''}`);
 }
 
 // =============================================================================
@@ -990,9 +1008,15 @@ async function taskImport(file, options) {
     process.exit(1);
   }
 
-  const importData = JSON.parse(readFileSync(file, 'utf-8'));
+  let importData;
+  try {
+    importData = JSON.parse(readFileSync(file, 'utf-8'));
+  } catch (err) {
+    console.error(chalk.red(`Error: Invalid JSON file: ${err.message}`));
+    process.exit(1);
+  }
 
-  if (!importData.task) {
+  if (!importData.task || !importData.task.frontmatter) {
     console.error(chalk.red('Error: Invalid task export file format'));
     process.exit(1);
   }
@@ -1007,19 +1031,25 @@ async function taskImport(file, options) {
 
   const client = new ApiClient();
 
-  const task = await client.createTask(options.workspace, {
-    title: importData.task.frontmatter.title,
-    content: importData.task.content,
-    acceptanceCriteria: importData.task.frontmatter.acceptanceCriteria,
-    plan: importData.task.frontmatter.plan,
-    preExecutionSkills: importData.task.frontmatter.preExecutionSkills,
-    postExecutionSkills: importData.task.frontmatter.postExecutionSkills,
-  });
+  try {
+    const task = await client.createTask(options.workspace, {
+      title: importData.task.frontmatter.title || 'Untitled',
+      content: importData.task.content || '',
+      acceptanceCriteria: importData.task.frontmatter.acceptanceCriteria,
+      plan: importData.task.frontmatter.plan,
+      preExecutionSkills: importData.task.frontmatter.preExecutionSkills,
+      postExecutionSkills: importData.task.frontmatter.postExecutionSkills,
+    });
 
-  spinner.stop('Task imported');
-  console.log(chalk.green(`✓ Task imported`));
-  console.log(`  New ID: ${chalk.cyan(task.id)}`);
-  console.log(`  Title: ${task.frontmatter.title}`);
+    spinner.stop('Task imported');
+    console.log(chalk.green(`✓ Task imported`));
+    console.log(`  New ID: ${chalk.cyan(task.id)}`);
+    console.log(`  Title: ${task.frontmatter.title}`);
+  } catch (err) {
+    spinner.stop('Failed to import task');
+    console.error(chalk.red(`Error: ${err.message}`));
+    process.exit(1);
+  }
 }
 
 // =============================================================================
@@ -1100,6 +1130,16 @@ async function queueStop(options) {
 // Logs Commands
 // =============================================================================
 
+function readLastLines(filePath, lineCount) {
+  try {
+    const content = readFileSync(filePath, 'utf-8');
+    const lines = content.split('\n');
+    return lines.slice(-lineCount).join('\n');
+  } catch (err) {
+    throw new Error(`Failed to read log file: ${err.message}`);
+  }
+}
+
 async function logs(options) {
   if (!existsSync(DAEMON_LOG_FILE)) {
     console.log(chalk.yellow('No log file found.'));
@@ -1112,26 +1152,57 @@ async function logs(options) {
     console.log(chalk.bold('Tailing logs (press Ctrl+C to exit)...\n'));
 
     // First show the last N lines
-    exec(`tail -n ${lines} "${DAEMON_LOG_FILE}"`, (err, stdout) => {
-      if (stdout) process.stdout.write(stdout);
-    });
+    const initialContent = readLastLines(DAEMON_LOG_FILE, lines);
+    process.stdout.write(initialContent);
+    if (!initialContent.endsWith('\n')) process.stdout.write('\n');
 
-    // Then follow
-    const tail = spawn('tail', ['-f', DAEMON_LOG_FILE], { stdio: 'inherit' });
+    // On Unix, use tail -f; on Windows, poll the file
+    const isWindows = platform() === 'win32';
 
-    process.on('SIGINT', () => {
-      tail.kill();
-      process.exit(0);
-    });
+    if (isWindows) {
+      // Windows: simple polling approach
+      let lastSize = 0;
+      try {
+        const stats = await import('fs/promises').then(m => m.stat(DAEMON_LOG_FILE));
+        lastSize = stats.size;
+      } catch { /* ignore */ }
+
+      const pollInterval = setInterval(async () => {
+        try {
+          const stats = await import('fs/promises').then(m => m.stat(DAEMON_LOG_FILE));
+          if (stats.size > lastSize) {
+            const newContent = readFileSync(DAEMON_LOG_FILE, 'utf-8');
+            const newLines = newContent.slice(lastSize);
+            process.stdout.write(newLines);
+            lastSize = stats.size;
+          }
+        } catch {
+          clearInterval(pollInterval);
+        }
+      }, 500);
+
+      process.on('SIGINT', () => {
+        clearInterval(pollInterval);
+        process.exit(0);
+      });
+    } else {
+      // Unix: use tail -f
+      const tail = spawn('tail', ['-f', DAEMON_LOG_FILE], { stdio: 'inherit' });
+
+      process.on('SIGINT', () => {
+        tail.kill();
+        process.exit(0);
+      });
+    }
   } else {
-    exec(`tail -n ${lines} "${DAEMON_LOG_FILE}"`, (err, stdout, stderr) => {
-      if (err) {
-        console.error(chalk.red(`Error reading logs: ${err.message}`));
-        return;
-      }
+    try {
+      const content = readLastLines(DAEMON_LOG_FILE, lines);
       console.log(chalk.bold(`Last ${lines} lines of logs:\n`));
-      process.stdout.write(stdout);
-    });
+      process.stdout.write(content);
+      if (!content.endsWith('\n')) process.stdout.write('\n');
+    } catch (err) {
+      console.error(chalk.red(`Error reading logs: ${err.message}`));
+    }
   }
 }
 
@@ -1177,7 +1248,7 @@ async function configList() {
 // =============================================================================
 
 const program = new Command()
-  .name('pifactory')
+  .name('task-factory')
   .description('Task Factory - TPS-inspired Agent Work Queue')
   .version(getPackageVersion())
   .configureOutput({
@@ -1192,7 +1263,7 @@ const daemonCmd = program
 daemonCmd
   .command('start')
   .description('Start the background daemon')
-  .option('-p, --port <port>', 'Server port', parseInt)
+  .option('-p, --port <port>', 'Server port', (val) => parseInt(val, 10))
   .option('-h, --host <host>', 'Server host')
   .action(daemonStart);
 
@@ -1204,7 +1275,7 @@ daemonCmd
 daemonCmd
   .command('restart')
   .description('Restart the background daemon')
-  .option('-p, --port <port>', 'Server port', parseInt)
+  .option('-p, --port <port>', 'Server port', (val) => parseInt(val, 10))
   .option('-h, --host <host>', 'Server host')
   .action(daemonRestart);
 

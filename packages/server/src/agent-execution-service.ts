@@ -32,7 +32,7 @@ import {
   type PlanningGuardrails,
   type WorkspaceConfig,
   type ContextUsageSnapshot,
-} from '@pi-factory/shared';
+} from '@task-factory/shared';
 import { createTaskSeparator, createChatMessage, createSystemEvent } from './activity-service.js';
 import {
   buildAgentContext,
@@ -74,7 +74,7 @@ import {
 // =============================================================================
 
 /**
- * Discover extensions from pi-factory's own extensions/ directory.
+ * Discover extensions from task-factory's own extensions/ directory.
  * These are loaded via additionalExtensionPaths, separate from
  * ~/.pi/agent/extensions/ (global Pi extensions).
  *

@@ -2,7 +2,7 @@
 name: checkpoint-pr
 description: Create a branch, commit all agent changes, push, and open a pull request. Use when work is ready for review and should be submitted as a PR rather than just checkpointed.
 metadata:
-  author: pi-factory
+  author: task-factory
   version: "1.0"
   type: follow-up
   hooks: post

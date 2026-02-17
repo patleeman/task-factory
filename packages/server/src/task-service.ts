@@ -26,7 +26,7 @@ import {
   type CreateTaskRequest,
   type UpdateTaskRequest,
   type Phase,
-} from '@pi-factory/shared';
+} from '@task-factory/shared';
 import { applyTaskDefaultsToRequest, loadTaskDefaultsForWorkspacePath } from './task-defaults-service.js';
 
 

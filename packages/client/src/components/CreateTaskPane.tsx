@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react'
 import { ArrowLeft, X } from 'lucide-react'
-import type { ModelConfig, NewTaskFormState, TaskDefaults } from '@pi-factory/shared'
-import { DEFAULT_PRE_EXECUTION_SKILLS, DEFAULT_POST_EXECUTION_SKILLS } from '@pi-factory/shared'
+import type { ModelConfig, NewTaskFormState, TaskDefaults } from '@task-factory/shared'
+import { DEFAULT_PRE_EXECUTION_SKILLS, DEFAULT_POST_EXECUTION_SKILLS } from '@task-factory/shared'
 import { AppIcon } from './AppIcon'
 import { MarkdownEditor } from './MarkdownEditor'
 import { ModelSelector } from './ModelSelector'
@@ -35,7 +35,7 @@ interface CreateTaskPaneProps {
   prefillRequest?: { id: string; formState: Partial<NewTaskFormState>; sourceDraftId?: string } | null
 }
 
-const CREATE_TASK_WHITEBOARD_STORAGE_KEY_PREFIX = 'pi-factory:create-task-whiteboard'
+const CREATE_TASK_WHITEBOARD_STORAGE_KEY_PREFIX = 'task-factory:create-task-whiteboard'
 
 function getCreateTaskWhiteboardStorageKey(workspaceId: string): string {
   return `${CREATE_TASK_WHITEBOARD_STORAGE_KEY_PREFIX}:${workspaceId}`

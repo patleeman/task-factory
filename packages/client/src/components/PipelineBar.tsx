@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { ArrowRight, ChevronLeft, ChevronRight } from 'lucide-react'
-import type { Task, Phase, WorkspaceWorkflowSettings } from '@pi-factory/shared'
-import { PHASE_DISPLAY_NAMES } from '@pi-factory/shared'
+import type { Task, Phase, WorkspaceWorkflowSettings } from '@task-factory/shared'
+import { PHASE_DISPLAY_NAMES } from '@task-factory/shared'
 import { AppIcon } from './AppIcon'
 
 interface PipelineBarProps {
@@ -54,7 +54,7 @@ const PHASE_LABEL_COLOR: Record<string, string> = {
   complete: 'text-emerald-600',
 }
 
-const DRAG_MIME = 'application/pi-factory-task'
+const DRAG_MIME = 'application/task-factory-task'
 
 export function PipelineBar({
   tasks,

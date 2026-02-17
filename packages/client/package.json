@@ -1,5 +1,5 @@
 {
-  "name": "@pi-factory/client",
+  "name": "@task-factory/client",
   "version": "0.1.0",
   "type": "module",
   "scripts": {
@@ -17,7 +17,7 @@
     "@codemirror/state": "^6.5.4",
     "@codemirror/view": "^6.39.13",
     "@excalidraw/excalidraw": "^0.18.0",
-    "@pi-factory/shared": "file:../shared",
+    "@task-factory/shared": "file:../shared",
     "lucide-react": "^0.536.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

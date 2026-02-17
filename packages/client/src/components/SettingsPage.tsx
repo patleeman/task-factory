@@ -11,7 +11,7 @@ import {
   type PlanningGuardrails,
   type WorkflowDefaultsConfig,
   type WorkspaceWorkflowSettings,
-} from '@pi-factory/shared'
+} from '@task-factory/shared'
 import {
   api,
   type AvailableModel,
@@ -1003,19 +1003,17 @@ export function SettingsPage() {
                 <div>
                   <h4 className="text-sm font-semibold text-slate-800">Planning Prompt Template</h4>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    {'Custom prompt template for planning tasks. Leave empty to use the default.'}
-                    {' Available variables: {{taskId}}, {{title}}, {{stateBlock}}, {{contractReference}},'}
+                    {'Custom prompt template for planning tasks. Available variables: {{taskId}}, {{title}}, {{stateBlock}}, {{contractReference}},'}
                     {' {{acceptanceCriteria}}, {{description}}, {{sharedContext}}, {{attachments}}, {{maxToolCalls}}'}
                   </p>
                 </div>
                 <textarea
-                  value={form.planningPromptTemplate || ''}
+                  value={form.planningPromptTemplate ?? DEFAULT_PLANNING_PROMPT_TEMPLATE}
                   onChange={(event) => {
-                    const value = event.target.value.trim() || undefined
-                    setForm({ ...form, planningPromptTemplate: value })
+                    const value = event.target.value
+                    setForm({ ...form, planningPromptTemplate: value === DEFAULT_PLANNING_PROMPT_TEMPLATE ? undefined : value })
                   }}
-                  placeholder={DEFAULT_PLANNING_PROMPT_TEMPLATE}
-                  rows={8}
+                  rows={16}
                   className="w-full text-xs font-mono border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent resize-y"
                 />
                 <div className="flex items-center gap-2">
@@ -1033,20 +1031,18 @@ export function SettingsPage() {
                 <div>
                   <h4 className="text-sm font-semibold text-slate-800">Execution Prompt Template</h4>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    {'Custom prompt template for task execution. Leave empty to use the default.'}
-                    {' Available variables: {{taskId}}, {{title}}, {{stateBlock}}, {{contractReference}},'}
+                    {'Custom prompt template for task execution. Available variables: {{taskId}}, {{title}}, {{stateBlock}}, {{contractReference}},'}
                     {' {{acceptanceCriteria}}, {{testingInstructions}}, {{description}}, {{sharedContext}},'}
                     {' {{attachments}}, {{skills}}'}
                   </p>
                 </div>
                 <textarea
-                  value={form.executionPromptTemplate || ''}
+                  value={form.executionPromptTemplate ?? DEFAULT_EXECUTION_PROMPT_TEMPLATE}
                   onChange={(event) => {
-                    const value = event.target.value.trim() || undefined
-                    setForm({ ...form, executionPromptTemplate: value })
+                    const value = event.target.value
+                    setForm({ ...form, executionPromptTemplate: value === DEFAULT_EXECUTION_PROMPT_TEMPLATE ? undefined : value })
                   }}
-                  placeholder={DEFAULT_EXECUTION_PROMPT_TEMPLATE}
-                  rows={8}
+                  rows={16}
                   className="w-full text-xs font-mono border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent resize-y"
                 />
                 <div className="flex items-center gap-2">

@@ -7,7 +7,7 @@
 import { existsSync } from 'fs';
 import { copyFile, mkdir, stat, unlink } from 'fs/promises';
 import { basename, extname, isAbsolute, join, resolve } from 'path';
-import type { Attachment, Task } from '@pi-factory/shared';
+import type { Attachment, Task } from '@task-factory/shared';
 import { parseTaskFile, saveTaskFile, getTaskFilePath, getTaskAttachmentsDir as getTaskAttachmentsDirFromService } from './task-service.js';
 import {
   loadWorkspaceConfigFromDiskSync,

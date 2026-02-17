@@ -4,7 +4,7 @@ import {
   type Task,
   type TaskModelUsage,
   type TaskUsageMetrics,
-} from '@pi-factory/shared';
+} from '@task-factory/shared';
 import { parseTaskFile, saveTaskFile } from './task-service.js';
 
 export interface TaskUsageSample {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_POST_EXECUTION_SKILLS, DEFAULT_PRE_EXECUTION_SKILLS, type TaskDefaults } from '@pi-factory/shared';
+import { DEFAULT_POST_EXECUTION_SKILLS, DEFAULT_PRE_EXECUTION_SKILLS, type TaskDefaults } from '@task-factory/shared';
 import {
   applyTaskDefaultsToRequest,
   getBuiltInTaskDefaults,

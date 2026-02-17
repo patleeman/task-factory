@@ -9,7 +9,7 @@ import {
   type ModelConfig,
   type TaskDefaults,
   type SkillHook,
-} from '@pi-factory/shared';
+} from '@task-factory/shared';
 import {
   loadPiFactorySettings,
   savePiFactorySettings,

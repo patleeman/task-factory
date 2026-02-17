@@ -7,7 +7,7 @@ import {
   type WorkspaceWorkflowSettings,
   type WorkspaceWorkflowSettingsResponse,
   type WorkflowDefaultsConfig,
-} from '@pi-factory/shared';
+} from '@task-factory/shared';
 import {
   loadPiFactorySettings,
   type PiFactorySettings,

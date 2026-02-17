@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, memo, useMemo, useCallback } from 'react'
 import { CornerUpLeft, Loader2, Paperclip, PencilLine, SendHorizontal, X, Zap } from 'lucide-react'
-import type { ActivityEntry, Attachment, DraftTask, Phase, AgentExecutionStatus } from '@pi-factory/shared'
+import type { ActivityEntry, Attachment, DraftTask, Phase, AgentExecutionStatus } from '@task-factory/shared'
 import type { AgentStreamState, ToolCallState } from '../hooks/useAgentStreaming'
 import { useVoiceDictation } from '../hooks/useVoiceDictation'
 import ReactMarkdown from 'react-markdown'
@@ -44,6 +44,8 @@ interface TaskChatProps {
   getAttachmentUrl?: (storedName: string) => string
   title?: string
   emptyState?: { title: string; subtitle: string }
+  /** Optional element rendered in the header bar, next to reset button */
+  headerSlot?: React.ReactNode
   /** Optional element rendered above the input area (e.g. QADialog) */
   bottomSlot?: React.ReactNode
   /** Planning-mode hook: open an inline artifact in the right pane. */
@@ -82,7 +84,7 @@ const STOPPABLE_STATUSES = new Set<AgentExecutionStatus>([
 const TOOL_PREVIEW_LINES = 2
 const MAX_LINES = 100
 const MAX_PREVIEW_CHARS = 500
-const TASK_CHAT_WHITEBOARD_STORAGE_KEY_PREFIX = 'pi-factory:task-chat-whiteboard'
+const TASK_CHAT_WHITEBOARD_STORAGE_KEY_PREFIX = 'task-factory:task-chat-whiteboard'
 const VOICE_HOTKEY_RELEASE_GRACE_MS = 1500
 
 function getTaskChatWhiteboardStorageKey(workspaceId?: string, taskId?: string): string | null {
@@ -648,6 +650,7 @@ export function TaskChat({
   getAttachmentUrl: getAttachmentUrlProp,
   title,
   emptyState,
+  headerSlot,
   bottomSlot,
   onOpenArtifact,
   onOpenDraftTask,
@@ -1072,12 +1075,13 @@ export function TaskChat({
       onDragLeave={canUploadFiles ? handleDragLeave : undefined}
       onDrop={canUploadFiles ? handleDrop : undefined}
     >
-      {/* Header — shown when title or reset is provided */}
-      {(title || onReset) && (
-        <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-200 bg-slate-50 shrink-0">
-          {title && <h2 className="font-semibold text-xs text-slate-500 uppercase tracking-wide">{title}</h2>}
+      {/* Header — shown when title, reset, or headerSlot is provided */}
+      {(title || onReset || headerSlot) && (
+        <div className="flex items-center gap-3 px-4 py-2.5 border-b border-slate-200 bg-slate-50 shrink-0">
+          {title && <h2 className="font-semibold text-xs text-slate-500 uppercase tracking-wide shrink-0">{title}</h2>}
+          {headerSlot && <div className="flex-1 min-w-0">{headerSlot}</div>}
           {onReset && (
-            <button onClick={onReset} className="text-[10px] text-slate-400 hover:text-slate-600 font-mono transition-colors" title="Reset conversation">
+            <button onClick={onReset} className="text-[10px] text-slate-400 hover:text-slate-600 font-mono transition-colors shrink-0" title="Reset conversation">
               reset
             </button>
           )}

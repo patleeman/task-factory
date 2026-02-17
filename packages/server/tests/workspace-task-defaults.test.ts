@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import type { TaskDefaults } from '@pi-factory/shared';
+import type { TaskDefaults } from '@task-factory/shared';
 
 const originalHome = process.env.HOME;
 const originalUserProfile = process.env.USERPROFILE;

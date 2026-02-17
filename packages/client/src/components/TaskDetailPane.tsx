@@ -6,8 +6,8 @@ import type {
   ModelConfig,
   PostExecutionSummary as PostExecutionSummaryType,
   TaskModelUsage,
-} from '@pi-factory/shared'
-import { PHASES, PHASE_DISPLAY_NAMES, getPromotePhase, getDemotePhase } from '@pi-factory/shared'
+} from '@task-factory/shared'
+import { PHASES, PHASE_DISPLAY_NAMES, getPromotePhase, getDemotePhase } from '@task-factory/shared'
 import { AppIcon } from './AppIcon'
 import { MarkdownEditor } from './MarkdownEditor'
 import { InlineWhiteboardPanel } from './InlineWhiteboardPanel'
@@ -980,7 +980,7 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-const TASK_DETAIL_WHITEBOARD_STORAGE_KEY_PREFIX = 'pi-factory:task-detail-whiteboard'
+const TASK_DETAIL_WHITEBOARD_STORAGE_KEY_PREFIX = 'task-factory:task-detail-whiteboard'
 
 function getTaskDetailWhiteboardStorageKey(workspaceId: string, taskId: string): string | null {
   if (!workspaceId || !taskId) return null

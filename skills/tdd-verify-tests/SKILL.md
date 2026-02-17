@@ -2,7 +2,7 @@
 name: tdd-verify-tests
 description: Verify TDD completion after implementation by running tests and fixing failures until they pass.
 metadata:
-  author: pi-factory
+  author: task-factory
   version: "1.0"
   type: follow-up
   hooks: post

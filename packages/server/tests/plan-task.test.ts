@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { DEFAULT_PLANNING_GUARDRAILS } from '@pi-factory/shared';
+import { DEFAULT_PLANNING_GUARDRAILS } from '@task-factory/shared';
 
 const createAgentSessionMock = vi.fn();
 const sessionManagerCreateMock = vi.fn(() => ({}));

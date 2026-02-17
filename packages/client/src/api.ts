@@ -22,7 +22,7 @@ import type {
   WorkspaceWorkflowSettingsResponse,
   WorkflowDefaultsConfig,
   ModelConfig,
-} from '@pi-factory/shared'
+} from '@task-factory/shared'
 
 export interface AvailableModel {
   provider: string
@@ -421,7 +421,7 @@ export const api = {
   },
 
   async getPiFactorySettings(): Promise<PiFactorySettings> {
-    const res = await fetch('/api/pi-factory/settings')
+    const res = await fetch('/api/settings')
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: 'Failed to load settings' }))
       throw new Error(err.error || `Failed to load settings (${res.status})`)
@@ -430,7 +430,7 @@ export const api = {
   },
 
   async savePiFactorySettings(settings: PiFactorySettings): Promise<void> {
-    const res = await fetch('/api/pi-factory/settings', {
+    const res = await fetch('/api/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(settings),

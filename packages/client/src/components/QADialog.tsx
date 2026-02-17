@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { Loader2, SendHorizontal } from 'lucide-react'
-import type { QARequest, QAAnswer } from '@pi-factory/shared'
+import type { QARequest, QAAnswer } from '@task-factory/shared'
 import { AppIcon } from './AppIcon'
 
 interface QADialogProps {

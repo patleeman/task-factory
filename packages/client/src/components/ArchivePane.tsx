@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, FolderOpen, RotateCcw, Trash2 } from 'lucide-react'
-import type { Task } from '@pi-factory/shared'
+import type { Task } from '@task-factory/shared'
 import { AppIcon } from './AppIcon'
 
 interface ArchivePaneProps {

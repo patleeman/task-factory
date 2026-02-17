@@ -60,7 +60,7 @@ describe('whiteboard draft storage helpers', () => {
   });
 
   it('round-trips persisted scenes with loadStoredWhiteboardScene', () => {
-    const storageKey = 'pi-factory:test:whiteboard';
+    const storageKey = 'task-factory:test:whiteboard';
 
     persistWhiteboardScene(storageKey, POPULATED_SCENE as any);
     const loaded = loadStoredWhiteboardScene(storageKey);
@@ -69,7 +69,7 @@ describe('whiteboard draft storage helpers', () => {
   });
 
   it('removes persisted scene data when content becomes empty or clear is called', () => {
-    const storageKey = 'pi-factory:test:whiteboard';
+    const storageKey = 'task-factory:test:whiteboard';
 
     persistWhiteboardScene(storageKey, POPULATED_SCENE as any);
     expect(loadStoredWhiteboardScene(storageKey)).toEqual(POPULATED_SCENE);
@@ -85,10 +85,10 @@ describe('whiteboard draft storage helpers', () => {
 
 describe('task whiteboard draft persistence regressions', () => {
   it('scopes task-chat and task-detail draft keys by workspace and task', () => {
-    expect(taskChatSource).toContain("const TASK_CHAT_WHITEBOARD_STORAGE_KEY_PREFIX = 'pi-factory:task-chat-whiteboard'");
+    expect(taskChatSource).toContain("const TASK_CHAT_WHITEBOARD_STORAGE_KEY_PREFIX = 'task-factory:task-chat-whiteboard'");
     expect(taskChatSource).toContain('return `${TASK_CHAT_WHITEBOARD_STORAGE_KEY_PREFIX}:${workspaceId}:${taskId}`');
 
-    expect(taskDetailSource).toContain("const TASK_DETAIL_WHITEBOARD_STORAGE_KEY_PREFIX = 'pi-factory:task-detail-whiteboard'");
+    expect(taskDetailSource).toContain("const TASK_DETAIL_WHITEBOARD_STORAGE_KEY_PREFIX = 'task-factory:task-detail-whiteboard'");
     expect(taskDetailSource).toContain('return `${TASK_DETAIL_WHITEBOARD_STORAGE_KEY_PREFIX}:${workspaceId}:${taskId}`');
   });
 

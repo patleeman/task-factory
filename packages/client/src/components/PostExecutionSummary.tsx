@@ -8,7 +8,7 @@ import {
   RotateCcw,
   XCircle,
 } from 'lucide-react'
-import type { PostExecutionSummary as PostExecutionSummaryType, FileDiff, DiffHunk, CriterionValidation, SummaryArtifact } from '@pi-factory/shared'
+import type { PostExecutionSummary as PostExecutionSummaryType, FileDiff, DiffHunk, CriterionValidation, SummaryArtifact } from '@task-factory/shared'
 import { api } from '../api'
 import { AppIcon } from './AppIcon'
 

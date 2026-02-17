@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import type { ServerEvent, AgentExecutionStatus, ContextUsageSnapshot } from '@pi-factory/shared'
+import type { ServerEvent, AgentExecutionStatus, ContextUsageSnapshot } from '@task-factory/shared'
 
 export interface ToolCallState {
   toolCallId: string

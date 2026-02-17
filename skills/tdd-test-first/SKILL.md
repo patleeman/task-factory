@@ -2,7 +2,7 @@
 name: tdd-test-first
 description: Enforce test-first behavior before implementation by writing or updating tests and running them in pre-execution.
 metadata:
-  author: pi-factory
+  author: task-factory
   version: "1.0"
   type: follow-up
   hooks: pre

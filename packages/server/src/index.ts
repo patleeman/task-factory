@@ -22,13 +22,13 @@ import type {
   ClientEvent,
   TaskDefaults,
   ModelConfig,
-} from '@pi-factory/shared';
+} from '@task-factory/shared';
 import {
   PHASES,
   getWorkspaceWorkflowOverrides,
   resolveWorkspaceWipLimit,
   resolveWorkspaceWorkflowSettings,
-} from '@pi-factory/shared';
+} from '@task-factory/shared';
 
 
 import {
@@ -87,8 +87,8 @@ const __dirname = dirname(__filename);
 // =============================================================================
 
 function buildAutomationResponse(
-  workspaceConfig: import('@pi-factory/shared').WorkspaceConfig,
-  queueStatus: import('@pi-factory/shared').QueueStatus,
+  workspaceConfig: import('@task-factory/shared').WorkspaceConfig,
+  queueStatus: import('@task-factory/shared').QueueStatus,
 ) {
   const globalDefaults = loadGlobalWorkflowSettings();
   return buildWorkspaceWorkflowSettingsResponse(workspaceConfig, queueStatus, globalDefaults);
@@ -1304,13 +1304,13 @@ import {
 } from './workflow-settings-service.js';
 
 // Get Task Factory settings
-app.get('/api/pi-factory/settings', (_req, res) => {
+app.get('/api/settings', (_req, res) => {
   const settings = loadPiFactorySettings();
   res.json(settings || {});
 });
 
 // Save Task Factory settings
-app.post('/api/pi-factory/settings', async (req, res) => {
+app.post('/api/settings', async (req, res) => {
   try {
     const previousGlobalDefaults = loadGlobalWorkflowSettings();
 
@@ -1832,7 +1832,7 @@ import {
   updateCriterionStatus,
 } from './summary-service.js';
 
-import type { CriterionStatus } from '@pi-factory/shared';
+import type { CriterionStatus } from '@task-factory/shared';
 
 // Get post-execution summary
 app.get('/api/workspaces/:workspaceId/tasks/:taskId/summary', async (req, res) => {
@@ -2160,7 +2160,7 @@ import multer from 'multer';
 import { mkdir, unlink, stat } from 'fs/promises';
 import { extname } from 'path';
 
-function getAttachmentsDir(workspace: import('@pi-factory/shared').Workspace, taskId: string): string {
+function getAttachmentsDir(workspace: import('@task-factory/shared').Workspace, taskId: string): string {
   const tasksDir = getTasksDir(workspace);
   return join(tasksDir, taskId.toLowerCase(), 'attachments');
 }
@@ -2209,7 +2209,7 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/attachments', upload.array(
   const files = req.files as Express.Multer.File[];
   if (!files || files.length === 0) { res.status(400).json({ error: 'No files provided' }); return; }
 
-  const newAttachments: import('@pi-factory/shared').Attachment[] = files.map(f => ({
+  const newAttachments: import('@task-factory/shared').Attachment[] = files.map(f => ({
     id: f.filename.replace(extname(f.filename), ''),
     filename: f.originalname,
     storedName: f.filename,
@@ -2324,7 +2324,7 @@ import {
 
 // ─── Planning Attachments ────────────────────────────────────────────────────
 
-function getPlanningAttachmentsDir(workspace: import('@pi-factory/shared').Workspace): string {
+function getPlanningAttachmentsDir(workspace: import('@task-factory/shared').Workspace): string {
   return join(workspace.path, '.taskfactory', 'planning-attachments');
 }
 
@@ -2353,9 +2353,9 @@ const planningUpload = multer({
 });
 
 // Track planning attachments per workspace (in-memory, non-persistent — they're on disk)
-const planningAttachments = new Map<string, import('@pi-factory/shared').Attachment[]>();
+const planningAttachments = new Map<string, import('@task-factory/shared').Attachment[]>();
 
-function getPlanningAttachmentList(workspaceId: string): import('@pi-factory/shared').Attachment[] {
+function getPlanningAttachmentList(workspaceId: string): import('@task-factory/shared').Attachment[] {
   return planningAttachments.get(workspaceId) || [];
 }
 
@@ -2366,7 +2366,7 @@ app.post('/api/workspaces/:workspaceId/planning/attachments', planningUpload.arr
   const files = req.files as Express.Multer.File[];
   if (!files || files.length === 0) { res.status(400).json({ error: 'No files provided' }); return; }
 
-  const newAttachments: import('@pi-factory/shared').Attachment[] = files.map(f => ({
+  const newAttachments: import('@task-factory/shared').Attachment[] = files.map(f => ({
     id: f.filename.replace(extname(f.filename), ''),
     filename: f.originalname,
     storedName: f.filename,
@@ -2582,7 +2582,7 @@ app.post('/api/workspaces/:workspaceId/qa/abort', async (req, res) => {
 // New Task Form State (bridge between planning agent and create-task UI)
 // =============================================================================
 
-import type { NewTaskFormState } from '@pi-factory/shared';
+import type { NewTaskFormState } from '@task-factory/shared';
 
 const taskFormStates = new Map<string, NewTaskFormState>();
 
@@ -2833,7 +2833,7 @@ app.post('/api/workspaces/:workspaceId/shelf/push-all', async (req, res) => {
   const shelf = await getShelf(workspace.id);
   const drafts = shelf.items
     .filter((si) => si.type === 'draft-task')
-    .map((si) => si.item as import('@pi-factory/shared').DraftTask);
+    .map((si) => si.item as import('@task-factory/shared').DraftTask);
 
   if (drafts.length === 0) {
     res.json({ tasks: [], count: 0 });

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import type { IdeaBacklog, PlanningMessage, Shelf } from '@pi-factory/shared';
+import type { IdeaBacklog, PlanningMessage, Shelf } from '@task-factory/shared';
 
 const originalHome = process.env.HOME;
 const originalUserProfile = process.env.USERPROFILE;

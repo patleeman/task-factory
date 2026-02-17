@@ -12,7 +12,7 @@ import type {
   DiffHunk,
   CriterionValidation,
   CriterionStatus,
-} from '@pi-factory/shared';
+} from '@task-factory/shared';
 import { saveTaskFile } from './task-service.js';
 
 // =============================================================================

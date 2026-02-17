@@ -2,7 +2,7 @@
 name: grind-loop
 description: Repeatedly check if there is more work to do until the task is truly complete. Use after implementation to ensure nothing was missed against the acceptance criteria.
 metadata:
-  author: pi-factory
+  author: task-factory
   version: "1.0"
   type: loop
   hooks: post

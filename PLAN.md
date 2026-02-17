@@ -379,11 +379,11 @@ interface PhaseTransition {
 ## File Structure
 
 ```
-pi-factory/
+task-factory/
 ├── PLAN.md                    # This document
 ├── package.json               # Root package, workspaces
 ├── bin/
-│   └── pi-factory.js         # CLI entry point
+│   └── task-factory.js         # CLI entry point
 ├── packages/
 │   ├── client/               # React frontend
 │   │   ├── src/
