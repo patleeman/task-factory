@@ -100,7 +100,12 @@ export function WorkspaceConfigPage() {
   const [sharedContext, setSharedContext] = useState('')
   const [sharedContextPath, setSharedContextPath] = useState('.taskfactory/workspace-context.md')
   const [workflowForm, setWorkflowForm] = useState<WorkflowOverridesForm | null>(null)
-  const [activeTab, setActiveTab] = useState<'skills' | 'extensions' | 'task-defaults' | 'workflow' | 'shared-context'>('skills')
+  const [activeTab, setActiveTab] = useState<'skills' | 'extensions' | 'task-defaults' | 'workflow' | 'shared-context' | 'storage'>('skills')
+  const [artifactRoot, setArtifactRoot] = useState<string>('')
+  const [artifactRootInput, setArtifactRootInput] = useState<string>('')
+  const [artifactRootSaving, setArtifactRootSaving] = useState(false)
+  const [artifactRootError, setArtifactRootError] = useState('')
+  const [artifactRootSaved, setArtifactRootSaved] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'error'>('idle')
@@ -174,6 +179,9 @@ export function WorkspaceConfigPage() {
         // Use folder name from path as the display name
         const folderName = workspace.path.split('/').filter(Boolean).pop() || workspace.name
         setWorkspaceName(folderName)
+        const currentArtifactRoot = workspace.config.artifactRoot ?? ''
+        setArtifactRoot(currentArtifactRoot)
+        setArtifactRootInput(currentArtifactRoot)
         setIsLoading(false)
       })
       .catch((err) => {
@@ -436,6 +444,16 @@ export function WorkspaceConfigPage() {
               }`}
             >
               Shared Context
+            </button>
+            <button
+              onClick={() => setActiveTab('storage')}
+              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === 'storage'
+                  ? 'border-safety-orange text-safety-orange'
+                  : 'border-transparent text-slate-600 hover:text-slate-800'
+              }`}
+            >
+              Storage
             </button>
           </div>
 
@@ -939,6 +957,103 @@ export function WorkspaceConfigPage() {
                 className="w-full min-h-[360px] p-3 text-sm border border-slate-300 bg-white text-slate-800 placeholder-slate-400 rounded-lg focus:outline-none focus:ring-2 focus:ring-safety-orange focus:border-safety-orange font-mono"
                 spellCheck={false}
               />
+            </div>
+          )}
+
+          {/* Storage Tab */}
+          {activeTab === 'storage' && workspaceId && (
+            <div className="space-y-6 max-w-2xl">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-800 mb-1">Artifact Storage Directory</h3>
+                <p className="text-sm text-slate-600 mb-4">
+                  Controls where workspace artifacts (tasks, planning history, shelf, activity logs, etc.)
+                  are stored. Defaults to{' '}
+                  <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-xs">
+                    ~/.taskfactory/workspaces/&lt;workspace&gt;/
+                  </code>{' '}
+                  for new workspaces.
+                </p>
+
+                <div className="space-y-3">
+                  <label className="block text-xs font-medium text-slate-600 uppercase tracking-wide">
+                    Artifact root path (absolute)
+                  </label>
+                  <input
+                    type="text"
+                    value={artifactRootInput}
+                    onChange={(e) => {
+                      setArtifactRootInput(e.target.value)
+                      setArtifactRootError('')
+                      setArtifactRootSaved(false)
+                    }}
+                    placeholder="/Users/you/.taskfactory/workspaces/my-project"
+                    spellCheck={false}
+                    className="w-full px-3 py-2 text-sm border border-slate-300 bg-white text-slate-800 placeholder-slate-400 rounded-lg focus:outline-none focus:ring-2 focus:ring-safety-orange focus:border-safety-orange font-mono"
+                  />
+                  <p className="text-xs text-slate-500">
+                    Leave blank to use the workspace default (set at workspace creation time).
+                    Changes take effect immediately — <strong>move any existing data manually</strong> if changing paths.
+                  </p>
+                </div>
+
+                {artifactRootError && (
+                  <div className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                    {artifactRootError}
+                  </div>
+                )}
+                {artifactRootSaved && (
+                  <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+                    Artifact root saved.
+                  </div>
+                )}
+
+                <div className="mt-4 flex items-center gap-3">
+                  <button
+                    type="button"
+                    disabled={artifactRootSaving || artifactRootInput === artifactRoot}
+                    onClick={async () => {
+                      if (!workspaceId) return
+                      setArtifactRootSaving(true)
+                      setArtifactRootError('')
+                      setArtifactRootSaved(false)
+                      try {
+                        const trimmed = artifactRootInput.trim()
+                        await api.updateWorkspaceArtifactDir(workspaceId, trimmed || null)
+                        setArtifactRoot(trimmed)
+                        setArtifactRootSaved(true)
+                      } catch (err) {
+                        setArtifactRootError(err instanceof Error ? err.message : String(err))
+                      } finally {
+                        setArtifactRootSaving(false)
+                      }
+                    }}
+                    className="px-4 py-2 text-sm rounded-lg bg-safety-orange text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
+                  >
+                    {artifactRootSaving ? 'Saving…' : 'Save'}
+                  </button>
+                  {artifactRootInput !== artifactRoot && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setArtifactRootInput(artifactRoot)
+                        setArtifactRootError('')
+                        setArtifactRootSaved(false)
+                      }}
+                      className="px-3 py-2 text-sm rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Current effective path */}
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                <p className="text-xs font-medium text-slate-600 uppercase tracking-wide mb-1">Current artifact root</p>
+                <code className="text-xs font-mono text-slate-700 break-all">
+                  {artifactRoot || '(global default)'}
+                </code>
+              </div>
             </div>
           )}
 

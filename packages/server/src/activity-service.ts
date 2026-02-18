@@ -15,7 +15,11 @@ import type {
   Phase,
 } from '@task-factory/shared';
 import { getWorkspaceById } from './workspace-service.js';
-import { getWorkspaceStoragePath, resolveWorkspaceStoragePathForRead } from './workspace-storage.js';
+import {
+  resolveWorkspaceArtifactRoot,
+  getWorkspaceArtifactPath,
+  resolveWorkspaceArtifactPathForRead,
+} from './workspace-storage.js';
 
 // =============================================================================
 // File Operations
@@ -24,13 +28,15 @@ import { getWorkspaceStoragePath, resolveWorkspaceStoragePathForRead } from './w
 async function activityFilePath(workspaceId: string): Promise<string> {
   const workspace = await getWorkspaceById(workspaceId);
   if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`);
-  return getWorkspaceStoragePath(workspace.path, 'factory', 'activity.jsonl');
+  const artifactRoot = resolveWorkspaceArtifactRoot(workspace.path, workspace.config);
+  return getWorkspaceArtifactPath(artifactRoot, 'factory', 'activity.jsonl');
 }
 
 async function activityReadFilePath(workspaceId: string): Promise<string> {
   const workspace = await getWorkspaceById(workspaceId);
   if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`);
-  return resolveWorkspaceStoragePathForRead(workspace.path, 'factory', 'activity.jsonl');
+  const artifactRoot = resolveWorkspaceArtifactRoot(workspace.path, workspace.config);
+  return resolveWorkspaceArtifactPathForRead(workspace.path, artifactRoot, 'factory', 'activity.jsonl');
 }
 
 async function ensureActivityDir(filePath: string): Promise<void> {

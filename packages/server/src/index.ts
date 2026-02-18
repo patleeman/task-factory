@@ -8,7 +8,7 @@ import express from 'express';
 import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import cors from 'cors';
-import { join, dirname, resolve } from 'path';
+import { join, dirname, resolve, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 import { readdir } from 'fs/promises';
 import { homedir } from 'os';
@@ -52,6 +52,12 @@ import {
   deleteWorkspace,
   updateWorkspaceConfig,
 } from './workspace-service.js';
+import { resolveWorkspaceArtifactRoot } from './workspace-storage.js';
+import {
+  getWorkspaceStorageMigrationStatus,
+  moveWorkspaceLocalStorage,
+  leaveWorkspaceLocalStorage,
+} from './workspace-local-storage-migration-service.js';
 import {
   createTaskSeparator,
   createChatMessage,
@@ -1699,8 +1705,9 @@ app.get('/api/workspaces/:workspaceId/shared-context', async (req, res) => {
     return;
   }
 
-  const content = loadWorkspaceSharedContext(workspace.path) || '';
-  const absolutePath = getWorkspaceSharedContextPath(workspace.path);
+  const artifactRoot = resolveWorkspaceArtifactRoot(workspace.path, workspace.config);
+  const content = loadWorkspaceSharedContext(workspace.path, artifactRoot) || '';
+  const absolutePath = getWorkspaceSharedContextPath(workspace.path, artifactRoot);
 
   res.json({
     relativePath: WORKSPACE_SHARED_CONTEXT_REL_PATH,
@@ -1725,12 +1732,13 @@ app.put('/api/workspaces/:workspaceId/shared-context', async (req, res) => {
   }
 
   try {
-    saveWorkspaceSharedContext(workspace.path, content);
+    const artifactRoot = resolveWorkspaceArtifactRoot(workspace.path, workspace.config);
+    saveWorkspaceSharedContext(workspace.path, content, artifactRoot);
 
     res.json({
       success: true,
       relativePath: WORKSPACE_SHARED_CONTEXT_REL_PATH,
-      absolutePath: getWorkspaceSharedContextPath(workspace.path),
+      absolutePath: getWorkspaceSharedContextPath(workspace.path, artifactRoot),
       content,
     });
   } catch (err) {
@@ -1748,6 +1756,81 @@ app.get('/api/workspaces/:workspaceId/skills', (req, res) => {
 app.get('/api/workspaces/:workspaceId/extensions', (req, res) => {
   const extensions = getEnabledExtensionsForWorkspace(req.params.workspaceId);
   res.json(extensions);
+});
+
+// =============================================================================
+// Workspace Local Storage Migration API
+// =============================================================================
+// Prompts the user to move <workspace>/.taskfactory into the global
+// ~/.taskfactory/workspaces/<name>/ directory the first time they open a
+// workspace that still has the legacy local storage layout.
+
+// Get migration status for a workspace
+app.get('/api/workspaces/:workspaceId/local-storage-migration/status', async (req, res) => {
+  try {
+    const status = await getWorkspaceStorageMigrationStatus(req.params.workspaceId);
+    res.json(status);
+  } catch (err) {
+    logger.error('Failed to get workspace local storage migration status', err);
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// Move local .taskfactory artifacts to the global artifact root
+app.post('/api/workspaces/:workspaceId/local-storage-migration/move', async (req, res) => {
+  try {
+    const status = await moveWorkspaceLocalStorage(req.params.workspaceId);
+    res.json(status);
+  } catch (err) {
+    logger.error('Failed to move workspace local storage', err);
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// Record "leave for now" decision — suppresses future migration prompts
+app.post('/api/workspaces/:workspaceId/local-storage-migration/leave', async (req, res) => {
+  try {
+    const status = await leaveWorkspaceLocalStorage(req.params.workspaceId);
+    res.json(status);
+  } catch (err) {
+    logger.error('Failed to record workspace storage leave decision', err);
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// Update workspace artifact directory (custom path setting from Workspace Config page)
+app.patch('/api/workspaces/:workspaceId/artifact-dir', async (req, res) => {
+  const workspace = await getWorkspaceById(req.params.workspaceId);
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return;
+  }
+
+  const { artifactRoot } = req.body as { artifactRoot?: unknown };
+
+  // Accept string (custom path) or null/undefined (reset to default).
+  if (artifactRoot !== undefined && artifactRoot !== null && typeof artifactRoot !== 'string') {
+    res.status(400).json({ error: 'artifactRoot must be a non-empty string or null' });
+    return;
+  }
+
+  // When a custom path is provided, it must be absolute.
+  if (typeof artifactRoot === 'string' && artifactRoot.trim() && !isAbsolute(artifactRoot.trim())) {
+    res.status(400).json({ error: 'artifactRoot must be an absolute path' });
+    return;
+  }
+
+  try {
+    const updated = await updateWorkspaceConfig(workspace, {
+      artifactRoot: typeof artifactRoot === 'string' && artifactRoot.trim()
+        ? artifactRoot.trim()
+        : undefined,
+    });
+    res.json({ artifactRoot: updated.config.artifactRoot ?? null });
+  } catch (err) {
+    logger.error('Failed to update workspace artifact directory', err);
+    res.status(500).json({ error: String(err) });
+  }
 });
 
 // =============================================================================
@@ -2552,7 +2635,8 @@ import {
 // ─── Planning Attachments ────────────────────────────────────────────────────
 
 function getPlanningAttachmentsDir(workspace: import('@task-factory/shared').Workspace): string {
-  return join(workspace.path, '.taskfactory', 'planning-attachments');
+  const artifactRoot = resolveWorkspaceArtifactRoot(workspace.path, workspace.config);
+  return join(artifactRoot, 'planning-attachments');
 }
 
 const planningUpload = multer({

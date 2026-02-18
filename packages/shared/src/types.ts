@@ -683,6 +683,16 @@ export interface WorkspaceConfig {
   taskLocations: string[]; // directory paths
   defaultTaskLocation: string;
 
+  // Artifact storage root (absolute path). When set, all workspace artifacts
+  // (tasks, planning data, shelf, activity, etc.) are stored here instead of
+  // <workspace>/.taskfactory. Defaults to ~/.taskfactory/workspaces/<name>/.
+  artifactRoot?: string;
+
+  // Records the user's decision about local .taskfactory storage migration.
+  // 'leave'  → keep using <workspace>/.taskfactory, suppress future prompts.
+  // 'moved'  → data was migrated to artifactRoot, use that going forward.
+  localStorageDecision?: 'leave' | 'moved';
+
   // WIP limits (override defaults)
   wipLimits?: Partial<Record<Phase, number | null>>;
 

@@ -67,6 +67,7 @@ import {
   DEFAULT_WORKSPACE_TASK_LOCATION,
   loadWorkspaceConfigFromDiskSync,
   resolveExistingTasksDirFromWorkspacePath,
+  resolveWorkspaceArtifactRoot,
 } from './workspace-storage.js';
 import {
   getTaskFactoryAuthPath,
@@ -79,6 +80,20 @@ import {
   heartbeatExecutionLease,
   isExecutionLeaseTrackingEnabled,
 } from './execution-lease-service.js';
+
+// =============================================================================
+// Artifact-root–aware helpers
+// =============================================================================
+
+/**
+ * Load workspace shared context from the correct artifact root.
+ * Derives the artifact root from the workspace config on disk.
+ */
+function loadSharedContextForWorkspacePath(workspacePath: string): string | null {
+  const config = loadWorkspaceConfigFromDiskSync(workspacePath);
+  const artifactRoot = resolveWorkspaceArtifactRoot(workspacePath, config);
+  return loadWorkspaceSharedContext(workspacePath, artifactRoot);
+}
 
 // =============================================================================
 // Repo-local Extension Discovery
@@ -1466,7 +1481,7 @@ export async function executeTask(options: ExecuteTaskOptions): Promise<TaskSess
   // Get enabled skills for this workspace
   const agentContext = buildAgentContext(workspaceId, undefined, workspacePath);
   const skills = agentContext.availableSkills;
-  const workspaceSharedContext = loadWorkspaceSharedContext(workspacePath);
+  const workspaceSharedContext = loadSharedContextForWorkspacePath(workspacePath);
 
   // Load task defaults for prompt templates
   const { loadTaskDefaultsForWorkspacePath } = await import('./task-defaults-service.js');
@@ -2661,7 +2676,7 @@ export async function resumeChat(
 
     // Send the user's message as a new prompt (not followUp — there's no
     // active agent turn to follow up on since we just reopened the session).
-    const workspaceSharedContext = loadWorkspaceSharedContext(workspacePath);
+    const workspaceSharedContext = loadSharedContextForWorkspacePath(workspacePath);
     const sharedContextSection = buildWorkspaceSharedContextSection(workspaceSharedContext);
     const promptContent = sharedContextSection
       ? `${sharedContextSection}## User Message\n${content}`
@@ -2769,7 +2784,7 @@ export async function startChat(
     broadcastTaskContextUsage(session, task.id);
 
     // Build context about the task for the initial prompt
-    const workspaceSharedContext = loadWorkspaceSharedContext(workspacePath);
+    const workspaceSharedContext = loadSharedContextForWorkspacePath(workspacePath);
     const sharedContextSection = buildWorkspaceSharedContextSection(workspaceSharedContext);
 
     const taskContext =
@@ -3431,7 +3446,7 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
     );
 
     // Send the planning prompt
-    const workspaceSharedContext = loadWorkspaceSharedContext(workspacePath);
+    const workspaceSharedContext = loadSharedContextForWorkspacePath(workspacePath);
     const prompt = isResumingPlanningSession
       ? buildPlanningResumePrompt(task, planAttachmentSection, workspaceSharedContext, planningGuardrails, taskDefaults.planningPromptTemplate)
       : buildPlanningPrompt(task, planAttachmentSection, workspaceSharedContext, planningGuardrails, taskDefaults.planningPromptTemplate);

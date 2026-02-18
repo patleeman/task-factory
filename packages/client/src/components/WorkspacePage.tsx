@@ -3,7 +3,8 @@ import { ArrowLeft, Lightbulb, Plus, Power } from 'lucide-react'
 import { useParams, useNavigate, useMatch, useOutletContext } from 'react-router-dom'
 import type { Task, Workspace, ActivityEntry, Phase, QueueStatus, PlanningMessage, QAAnswer, AgentExecutionStatus, WorkspaceWorkflowSettings, Artifact, DraftTask, IdeaBacklog, IdeaBacklogItem, NewTaskFormState } from '@task-factory/shared'
 import { DEFAULT_WORKFLOW_SETTINGS } from '@task-factory/shared'
-import { api, type WorkflowAutomationResponse, type WorkspaceSkill, type WorkspaceHookSkill } from '../api'
+import { api, type WorkflowAutomationResponse, type WorkspaceSkill, type WorkspaceHookSkill, type WorkspaceStorageMigrationStatus } from '../api'
+import { WorkspaceStorageMigrationPrompt } from './WorkspaceStorageMigrationPrompt'
 import { AppIcon } from './AppIcon'
 import { PipelineBar } from './PipelineBar'
 import { TaskDetailPane } from './TaskDetailPane'
@@ -176,6 +177,7 @@ export function WorkspacePage() {
 
   const [selectedArtifact, setSelectedArtifact] = useState<Artifact | null>(null)
   const [ideaBacklog, setIdeaBacklog] = useState<IdeaBacklog | null>(null)
+  const [storageMigrationStatus, setStorageMigrationStatus] = useState<WorkspaceStorageMigrationStatus | null>(null)
   const [activeForemanPane, setActiveForemanPane] = useState<'workspace' | 'ideas'>('workspace')
   const [planningMessages, setPlanningMessages] = useState<PlanningMessage[]>([])
   const [foremanSlashCommands, setForemanSlashCommands] = useState<SlashCommandOption[]>(BASE_FOREMAN_SLASH_COMMANDS)
@@ -391,6 +393,7 @@ export function WorkspacePage() {
     setActivity([])
     setSelectedArtifact(null)
     setIdeaBacklog(null)
+    setStorageMigrationStatus(null)
     setActiveForemanPane('workspace')
     setForemanSlashCommands(BASE_FOREMAN_SLASH_COMMANDS)
     setTaskSlashCommands(BASE_TASK_SLASH_COMMANDS)
@@ -436,8 +439,12 @@ export function WorkspacePage() {
         console.warn('Failed to load active execution snapshots:', err)
         return []
       }),
+      api.getWorkspaceStorageMigrationStatus(workspaceId).catch((err) => {
+        console.warn('Failed to load workspace storage migration status:', err)
+        return null
+      }),
     ])
-      .then(([ws, tasksData, archivedCount, activityData, automationData, planningMsgs, workspaceSkillCatalog, ideaBacklogData, activeExecutions]) => {
+      .then(([ws, tasksData, archivedCount, activityData, automationData, planningMsgs, workspaceSkillCatalog, ideaBacklogData, activeExecutions, migrationStatusData]) => {
         const nextWipLimits = {
           ...(ws.config.wipLimits || {}),
         }
@@ -494,6 +501,9 @@ export function WorkspacePage() {
         setTaskSlashCommands(buildTaskSlashCommands(workspaceSkillCatalog.slashSkills))
         setHookSkillOptions(buildHookSkillOptions(workspaceSkillCatalog.hookSkills))
         setIdeaBacklog(ideaBacklogData)
+        if (migrationStatusData) {
+          setStorageMigrationStatus(migrationStatusData)
+        }
 
         const tasksById = new Map(tasksData.map((task) => [task.id, task]))
 
@@ -1544,6 +1554,20 @@ export function WorkspacePage() {
 
   return (
     <div className="flex flex-col h-full bg-slate-50">
+      {/* Workspace local storage migration overlay */}
+      {storageMigrationStatus?.state === 'pending' && workspaceId && (
+        <WorkspaceStorageMigrationPrompt
+          status={storageMigrationStatus}
+          onMove={async () => {
+            const result = await api.moveWorkspaceLocalStorage(workspaceId)
+            setStorageMigrationStatus(result)
+          }}
+          onLeave={async () => {
+            const result = await api.leaveWorkspaceLocalStorage(workspaceId)
+            setStorageMigrationStatus(result)
+          }}
+        />
+      )}
       {/* Header */}
       <header className="flex items-center justify-between px-4 py-3 bg-slate-900 text-white shadow-lg shrink-0">
         <div className="flex items-center gap-4">

@@ -9,13 +9,14 @@ import { existsSync } from 'fs';
 import { mkdir, readFile, writeFile, rm, rename, copyFile, cp, stat } from 'fs/promises';
 import { basename, dirname, join } from 'path';
 import type { Workspace, WorkspaceConfig } from '@task-factory/shared';
-import { getTaskFactoryHomeDir } from './taskfactory-home.js';
+import { getTaskFactoryHomeDir, getGlobalWorkspaceArtifactDir } from './taskfactory-home.js';
 import {
   DEFAULT_WORKSPACE_TASK_LOCATION,
   LEGACY_WORKSPACE_TASK_LOCATION,
   getWorkspaceStoragePath,
   getLegacyWorkspaceStoragePath,
   resolveExistingTasksDirFromWorkspacePath,
+  resolveWorkspaceArtifactRoot,
 } from './workspace-storage.js';
 
 // =============================================================================
@@ -283,25 +284,58 @@ export async function createWorkspace(
 ): Promise<Workspace> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
+  const workspaceName = name || basename(path);
+
+  const hasExplicitArtifactRoot =
+    typeof config?.artifactRoot === 'string' && config.artifactRoot.trim().length > 0;
+  const hasExplicitTaskLocations =
+    Array.isArray(config?.taskLocations) && config.taskLocations.length > 0;
+  const hasExplicitDefaultTaskLocation =
+    typeof config?.defaultTaskLocation === 'string' && config.defaultTaskLocation.trim().length > 0;
+
+  // Apply a global artifact root only when this is a genuinely NEW workspace
+  // (no pre-existing task locations and no explicit artifact root in the passed config).
+  // When loadWorkspace re-registers an existing workspace by calling createWorkspace
+  // with its current config, hasExplicitTaskLocations will be true, so we preserve
+  // the existing storage layout and do NOT set a global path.
+  const isNewWorkspace = !hasExplicitArtifactRoot && !hasExplicitTaskLocations;
+
+  // Compute the global artifact root even for existing workspaces so we can use it
+  // as the default task location when isNewWorkspace is true.
+  const globalArtifactRoot = getGlobalWorkspaceArtifactDir(workspaceName);
+
+  const defaultArtifactTaskLocation = join(globalArtifactRoot, 'tasks');
+
+  const resolvedTaskLocations = hasExplicitTaskLocations
+    ? config!.taskLocations!
+    : [defaultArtifactTaskLocation];
+
+  const resolvedDefaultTaskLocation = hasExplicitDefaultTaskLocation
+    ? config!.defaultTaskLocation!
+    : defaultArtifactTaskLocation;
 
   const mergedConfig = normalizeWorkspaceConfig({
     ...DEFAULT_CONFIG,
     ...config,
+    // Only apply global artifact root for brand-new workspaces.
+    ...(isNewWorkspace ? { artifactRoot: globalArtifactRoot } : {}),
+    taskLocations: resolvedTaskLocations,
+    defaultTaskLocation: resolvedDefaultTaskLocation,
   });
 
   const workspace: Workspace = {
     id,
     path,
-    name: name || basename(path),
+    name: workspaceName,
     config: mergedConfig,
     createdAt: now,
     updatedAt: now,
   };
 
-  // Write config to workspace directory
+  // Write config to workspace directory (factory.json always stays local).
   await writeWorkspaceConfig(path, mergedConfig);
 
-  // Ensure tasks directory exists
+  // Ensure tasks directory exists in the artifact root.
   const tasksDir = getTasksDir(workspace);
   await mkdir(tasksDir, { recursive: true });
 
@@ -405,9 +439,14 @@ export async function deleteWorkspace(id: string): Promise<boolean> {
   const entry = entries.find((e) => e.id === id);
   if (!entry) return false;
 
+  // Read config to discover any custom artifact root before removing anything.
+  const config = await readWorkspaceConfig(entry.path);
+  const artifactRoot = resolveWorkspaceArtifactRoot(entry.path, config);
+  const localStorageDir = getWorkspaceStoragePath(entry.path);
+
   const cleanupTargets = [
-    // Preferred storage root.
-    getWorkspaceStoragePath(entry.path),
+    // Local workspace config storage root (.taskfactory in project dir).
+    localStorageDir,
 
     // Legacy storage paths retained for backward compatibility cleanup.
     getLegacyWorkspaceStoragePath(entry.path, 'factory.json'),
@@ -421,6 +460,11 @@ export async function deleteWorkspace(id: string): Promise<boolean> {
     getLegacyWorkspaceStoragePath(entry.path, 'planning-sessions'),
     getLegacyWorkspaceStoragePath(entry.path, 'workspace-context.md'),
   ];
+
+  // Also remove the global artifact root when it differs from the local dir.
+  if (artifactRoot !== localStorageDir) {
+    cleanupTargets.push(artifactRoot);
+  }
 
   for (const target of cleanupTargets) {
     try {

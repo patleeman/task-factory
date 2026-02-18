@@ -19,6 +19,10 @@ import {
   getTaskFactoryHomeDir,
   getTaskFactoryPiSkillsDir,
 } from './taskfactory-home.js';
+import {
+  loadWorkspaceConfigFromDiskSync,
+  resolveWorkspaceArtifactRoot,
+} from './workspace-storage.js';
 
 const LEGACY_PI_AGENT_DIR = join(homedir(), '.pi', 'agent');
 const TASK_FACTORY_AGENT_DIR = getTaskFactoryAgentDir();
@@ -369,7 +373,15 @@ export function loadGlobalAgentsMd(): string | null {
   }
 }
 
-export function getWorkspaceSharedContextPath(workspacePath: string): string {
+/**
+ * Return the canonical write path for the workspace shared context file.
+ * When `artifactRoot` is provided, the file lives in the artifact root instead
+ * of the workspace's local `.taskfactory` directory.
+ */
+export function getWorkspaceSharedContextPath(workspacePath: string, artifactRoot?: string): string {
+  if (artifactRoot) {
+    return join(artifactRoot, 'workspace-context.md');
+  }
   return join(workspacePath, WORKSPACE_SHARED_CONTEXT_REL_PATH);
 }
 
@@ -377,15 +389,28 @@ export function getLegacyWorkspaceSharedContextPath(workspacePath: string): stri
   return join(workspacePath, LEGACY_WORKSPACE_SHARED_CONTEXT_REL_PATH);
 }
 
-export function loadWorkspaceSharedContext(workspacePath: string): string | null {
-  const contextPath = getWorkspaceSharedContextPath(workspacePath);
+/**
+ * Load the workspace shared context file.
+ * Checks the artifact root first (when provided), then falls back to the local
+ * `.taskfactory` directory and legacy `.pi` paths.
+ */
+export function loadWorkspaceSharedContext(workspacePath: string, artifactRoot?: string): string | null {
+  const candidatePaths: string[] = [];
+
+  if (artifactRoot) {
+    candidatePaths.push(join(artifactRoot, 'workspace-context.md'));
+  }
+
+  // Always include local paths as fallback for backward compatibility.
+  const localPath = join(workspacePath, WORKSPACE_SHARED_CONTEXT_REL_PATH);
   const legacyContextPath = getLegacyWorkspaceSharedContextPath(workspacePath);
 
-  const readablePath = existsSync(contextPath)
-    ? contextPath
-    : existsSync(legacyContextPath)
-      ? legacyContextPath
-      : null;
+  if (!artifactRoot || !candidatePaths.includes(localPath)) {
+    candidatePaths.push(localPath);
+  }
+  candidatePaths.push(legacyContextPath);
+
+  const readablePath = candidatePaths.find(existsSync) ?? null;
 
   if (!readablePath) {
     return null;
@@ -401,8 +426,13 @@ export function loadWorkspaceSharedContext(workspacePath: string): string | null
   }
 }
 
-export function saveWorkspaceSharedContext(workspacePath: string, content: string): void {
-  const contextPath = getWorkspaceSharedContextPath(workspacePath);
+/**
+ * Write the workspace shared context file.
+ * When `artifactRoot` is provided, writes to `<artifactRoot>/workspace-context.md`;
+ * otherwise writes to the local `.taskfactory/workspace-context.md`.
+ */
+export function saveWorkspaceSharedContext(workspacePath: string, content: string, artifactRoot?: string): void {
+  const contextPath = getWorkspaceSharedContextPath(workspacePath, artifactRoot);
   const contextDir = dirname(contextPath);
 
   if (!existsSync(contextDir)) {
@@ -630,8 +660,14 @@ export function buildAgentContext(
     resolvedWorkspacePath = loadWorkspacePathFromRegistry(workspaceId);
   }
 
+  let resolvedArtifactRoot: string | undefined;
+  if (resolvedWorkspacePath) {
+    const wsConfig = loadWorkspaceConfigFromDiskSync(resolvedWorkspacePath);
+    resolvedArtifactRoot = resolveWorkspaceArtifactRoot(resolvedWorkspacePath, wsConfig);
+  }
+
   const workspaceContext = resolvedWorkspacePath
-    ? loadWorkspaceSharedContext(resolvedWorkspacePath)
+    ? loadWorkspaceSharedContext(resolvedWorkspacePath, resolvedArtifactRoot)
     : null;
 
   const globalRules = mergeGlobalRulesWithWorkspaceContext(globalAgentsMd, workspaceContext);

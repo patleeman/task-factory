@@ -117,6 +117,19 @@ export interface PiMigrationSelection {
   extensions?: boolean
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Workspace local-storage migration types
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type WorkspaceStorageMigrationState = 'not_needed' | 'pending' | 'moved' | 'leave'
+
+export interface WorkspaceStorageMigrationStatus {
+  state: WorkspaceStorageMigrationState
+  workspacePath?: string
+  targetArtifactRoot?: string
+  decidedAt?: string
+}
+
 export interface PiFactorySettings {
   theme?: string
   voiceInputHotkey?: string
@@ -1031,5 +1044,55 @@ export const api = {
       const err = await res.json().catch(() => ({ error: 'Abort failed' }))
       throw new Error(err.error || `Abort failed (${res.status})`)
     }
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Workspace Local Storage Migration
+  // ─────────────────────────────────────────────────────────────────────────
+
+  async getWorkspaceStorageMigrationStatus(workspaceId: string): Promise<WorkspaceStorageMigrationStatus> {
+    const res = await fetch(`/api/workspaces/${workspaceId}/local-storage-migration/status`)
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to load migration status' }))
+      throw new Error(err.error || `Failed to load migration status (${res.status})`)
+    }
+    return res.json()
+  },
+
+  async moveWorkspaceLocalStorage(workspaceId: string): Promise<WorkspaceStorageMigrationStatus> {
+    const res = await fetch(`/api/workspaces/${workspaceId}/local-storage-migration/move`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to move workspace storage' }))
+      throw new Error(err.error || `Failed to move workspace storage (${res.status})`)
+    }
+    return res.json()
+  },
+
+  async leaveWorkspaceLocalStorage(workspaceId: string): Promise<WorkspaceStorageMigrationStatus> {
+    const res = await fetch(`/api/workspaces/${workspaceId}/local-storage-migration/leave`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to record leave decision' }))
+      throw new Error(err.error || `Failed to record leave decision (${res.status})`)
+    }
+    return res.json()
+  },
+
+  async updateWorkspaceArtifactDir(workspaceId: string, artifactRoot: string | null): Promise<{ artifactRoot?: string }> {
+    const res = await fetch(`/api/workspaces/${workspaceId}/artifact-dir`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ artifactRoot }),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to update artifact directory' }))
+      throw new Error(err.error || `Failed to update artifact directory (${res.status})`)
+    }
+    return res.json()
   },
 }

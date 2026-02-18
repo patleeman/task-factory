@@ -8,22 +8,19 @@ import { mkdir, readFile, writeFile } from 'fs/promises';
 import type { IdeaBacklog, IdeaBacklogItem } from '@task-factory/shared';
 import { getWorkspaceById } from './workspace-service.js';
 import {
-  getWorkspaceStoragePath,
-  resolveWorkspaceStoragePathForRead,
+  resolveWorkspaceArtifactRoot,
+  getWorkspaceArtifactPath,
+  resolveWorkspaceArtifactPathForRead,
 } from './workspace-storage.js';
 
 const backlogCache = new Map<string, IdeaBacklog>();
 
-function getIdeaBacklogPath(workspacePath: string): string {
-  return getWorkspaceStoragePath(workspacePath, 'idea-backlog.json');
+function getIdeaBacklogPath(artifactRoot: string): string {
+  return getWorkspaceArtifactPath(artifactRoot, 'idea-backlog.json');
 }
 
-function resolveIdeaBacklogPathForRead(workspacePath: string): string {
-  return resolveWorkspaceStoragePathForRead(workspacePath, 'idea-backlog.json');
-}
-
-async function ensureWorkspaceStorageDir(workspacePath: string): Promise<void> {
-  await mkdir(getWorkspaceStoragePath(workspacePath), { recursive: true });
+async function ensureArtifactDir(artifactRoot: string): Promise<void> {
+  await mkdir(artifactRoot, { recursive: true });
 }
 
 function normalizeIdeaBacklog(raw: unknown): IdeaBacklog {
@@ -51,8 +48,8 @@ function normalizeIdeaBacklog(raw: unknown): IdeaBacklog {
   return { items };
 }
 
-async function loadIdeaBacklogFromDisk(workspacePath: string): Promise<IdeaBacklog> {
-  const path = resolveIdeaBacklogPathForRead(workspacePath);
+async function loadIdeaBacklogFromDisk(workspacePath: string, artifactRoot: string): Promise<IdeaBacklog> {
+  const path = resolveWorkspaceArtifactPathForRead(workspacePath, artifactRoot, 'idea-backlog.json');
   try {
     const raw = await readFile(path, 'utf-8');
     return normalizeIdeaBacklog(JSON.parse(raw));
@@ -61,9 +58,9 @@ async function loadIdeaBacklogFromDisk(workspacePath: string): Promise<IdeaBackl
   }
 }
 
-async function saveIdeaBacklogToDisk(workspacePath: string, backlog: IdeaBacklog): Promise<void> {
-  await ensureWorkspaceStorageDir(workspacePath);
-  const path = getIdeaBacklogPath(workspacePath);
+async function saveIdeaBacklogToDisk(artifactRoot: string, backlog: IdeaBacklog): Promise<void> {
+  await ensureArtifactDir(artifactRoot);
+  const path = getIdeaBacklogPath(artifactRoot);
   await writeFile(path, JSON.stringify(backlog, null, 2), 'utf-8');
 }
 
@@ -72,7 +69,8 @@ async function persistIdeaBacklog(workspaceId: string, backlog: IdeaBacklog): Pr
   const workspace = await getWorkspaceById(workspaceId);
   if (!workspace) return;
 
-  await saveIdeaBacklogToDisk(workspace.path, backlog);
+  const artifactRoot = resolveWorkspaceArtifactRoot(workspace.path, workspace.config);
+  await saveIdeaBacklogToDisk(artifactRoot, backlog);
 }
 
 export async function getIdeaBacklog(workspaceId: string): Promise<IdeaBacklog> {
@@ -82,7 +80,8 @@ export async function getIdeaBacklog(workspaceId: string): Promise<IdeaBacklog> 
   const workspace = await getWorkspaceById(workspaceId);
   if (!workspace) return { items: [] };
 
-  const backlog = await loadIdeaBacklogFromDisk(workspace.path);
+  const artifactRoot = resolveWorkspaceArtifactRoot(workspace.path, workspace.config);
+  const backlog = await loadIdeaBacklogFromDisk(workspace.path, artifactRoot);
   backlogCache.set(workspaceId, backlog);
   return backlog;
 }

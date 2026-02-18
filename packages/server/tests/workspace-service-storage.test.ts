@@ -35,30 +35,39 @@ afterEach(() => {
 });
 
 describe('workspace-service workspace storage roots', () => {
-  it('creates new workspace metadata under .taskfactory with .taskfactory/tasks defaults', async () => {
-    setTempHome();
+  it('creates new workspace with global artifact root under ~/.taskfactory/workspaces/', async () => {
+    const homePath = setTempHome();
     const workspacePath = createTempDir('pi-factory-workspace-');
 
     const { createWorkspace } = await import('../src/workspace-service.js');
 
-    const workspace = await createWorkspace(workspacePath);
+    const workspace = await createWorkspace(workspacePath, 'my-project');
 
+    // factory.json (the config file) must stay in the workspace-local .taskfactory dir.
     const configPath = join(workspacePath, '.taskfactory', 'factory.json');
-    const tasksDir = join(workspacePath, '.taskfactory', 'tasks');
-
-    expect(workspace.config.defaultTaskLocation).toBe('.taskfactory/tasks');
-    expect(workspace.config.taskLocations).toContain('.taskfactory/tasks');
-
     expect(existsSync(configPath)).toBe(true);
-    expect(existsSync(tasksDir)).toBe(true);
     expect(existsSync(join(workspacePath, '.pi', 'factory.json'))).toBe(false);
 
+    // The artifact root and task location must point into the global dir, not the workspace dir.
+    const expectedArtifactRoot = join(homePath, '.taskfactory', 'workspaces', 'my-project');
+    const expectedTasksDir = join(expectedArtifactRoot, 'tasks');
+
+    expect(workspace.config.artifactRoot).toBe(expectedArtifactRoot);
+    expect(workspace.config.defaultTaskLocation).toBe(expectedTasksDir);
+    expect(workspace.config.taskLocations).toContain(expectedTasksDir);
+
+    // Tasks directory must be created under the global artifact root.
+    expect(existsSync(expectedTasksDir)).toBe(true);
+
+    // factory.json on disk should reflect the new global paths.
     const configOnDisk = JSON.parse(readFileSync(configPath, 'utf-8')) as {
+      artifactRoot: string;
       defaultTaskLocation: string;
       taskLocations: string[];
     };
-    expect(configOnDisk.defaultTaskLocation).toBe('.taskfactory/tasks');
-    expect(configOnDisk.taskLocations).toContain('.taskfactory/tasks');
+    expect(configOnDisk.artifactRoot).toBe(expectedArtifactRoot);
+    expect(configOnDisk.defaultTaskLocation).toBe(expectedTasksDir);
+    expect(configOnDisk.taskLocations).toContain(expectedTasksDir);
   });
 
   it('loads legacy .pi workspace metadata and migrates task-factory artifacts into .taskfactory', async () => {
@@ -134,13 +143,13 @@ describe('workspace-service workspace storage roots', () => {
     expect(existsSync(join(preferredTasksDir, 'pifa-old', 'task.yaml'))).toBe(true);
   });
 
-  it('deletes task-factory metadata from both .taskfactory and legacy .pi roots', async () => {
-    setTempHome();
+  it('deletes task-factory metadata from .taskfactory, global artifact root, and legacy .pi roots', async () => {
+    const homePath = setTempHome();
     const workspacePath = createTempDir('pi-factory-workspace-delete-');
 
     const { createWorkspace, deleteWorkspace } = await import('../src/workspace-service.js');
 
-    const workspace = await createWorkspace(workspacePath);
+    const workspace = await createWorkspace(workspacePath, 'delete-test');
 
     mkdirSync(join(workspacePath, '.pi', 'tasks'), { recursive: true });
     writeFileSync(join(workspacePath, '.pi', 'factory.json'), JSON.stringify({}), 'utf-8');
@@ -149,7 +158,11 @@ describe('workspace-service workspace storage roots', () => {
     const deleted = await deleteWorkspace(workspace.id);
 
     expect(deleted).toBe(true);
+    // Local .taskfactory dir (contains factory.json) must be removed.
     expect(existsSync(join(workspacePath, '.taskfactory'))).toBe(false);
+    // Global artifact root must also be removed.
+    expect(existsSync(join(homePath, '.taskfactory', 'workspaces', 'delete-test'))).toBe(false);
+    // Legacy .pi remnants must also be removed.
     expect(existsSync(join(workspacePath, '.pi', 'tasks'))).toBe(false);
     expect(existsSync(join(workspacePath, '.pi', 'factory.json'))).toBe(false);
     expect(existsSync(join(workspacePath, '.pi', 'shelf.json'))).toBe(false);

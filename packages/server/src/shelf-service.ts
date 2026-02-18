@@ -8,27 +8,24 @@ import { mkdir, readFile, writeFile } from 'fs/promises';
 import type { DraftTask, Artifact, Shelf } from '@task-factory/shared';
 import { getWorkspaceById } from './workspace-service.js';
 import {
-  getWorkspaceStoragePath,
-  resolveWorkspaceStoragePathForRead,
+  resolveWorkspaceArtifactRoot,
+  getWorkspaceArtifactPath,
+  resolveWorkspaceArtifactPathForRead,
 } from './workspace-storage.js';
 
 // In-memory cache: workspaceId -> Shelf
 const shelfCache = new Map<string, Shelf>();
 
-function getShelfPath(workspacePath: string): string {
-  return getWorkspaceStoragePath(workspacePath, 'shelf.json');
+function getShelfPath(artifactRoot: string): string {
+  return getWorkspaceArtifactPath(artifactRoot, 'shelf.json');
 }
 
-function resolveShelfPathForRead(workspacePath: string): string {
-  return resolveWorkspaceStoragePathForRead(workspacePath, 'shelf.json');
+async function ensureArtifactDir(artifactRoot: string): Promise<void> {
+  await mkdir(artifactRoot, { recursive: true });
 }
 
-async function ensureWorkspaceStorageDir(workspacePath: string): Promise<void> {
-  await mkdir(getWorkspaceStoragePath(workspacePath), { recursive: true });
-}
-
-async function loadShelfFromDisk(workspacePath: string): Promise<Shelf> {
-  const path = resolveShelfPathForRead(workspacePath);
+async function loadShelfFromDisk(workspacePath: string, artifactRoot: string): Promise<Shelf> {
+  const path = resolveWorkspaceArtifactPathForRead(workspacePath, artifactRoot, 'shelf.json');
   try {
     const raw = await readFile(path, 'utf-8');
     return JSON.parse(raw) as Shelf;
@@ -37,9 +34,9 @@ async function loadShelfFromDisk(workspacePath: string): Promise<Shelf> {
   }
 }
 
-async function saveShelfToDisk(workspacePath: string, shelf: Shelf): Promise<void> {
-  await ensureWorkspaceStorageDir(workspacePath);
-  const path = getShelfPath(workspacePath);
+async function saveShelfToDisk(artifactRoot: string, shelf: Shelf): Promise<void> {
+  await ensureArtifactDir(artifactRoot);
+  const path = getShelfPath(artifactRoot);
   await writeFile(path, JSON.stringify(shelf, null, 2), 'utf-8');
 }
 
@@ -53,7 +50,8 @@ export async function getShelf(workspaceId: string): Promise<Shelf> {
     return { items: [] };
   }
 
-  const shelf = await loadShelfFromDisk(workspace.path);
+  const artifactRoot = resolveWorkspaceArtifactRoot(workspace.path, workspace.config);
+  const shelf = await loadShelfFromDisk(workspace.path, artifactRoot);
   shelfCache.set(workspaceId, shelf);
   return shelf;
 }
@@ -62,7 +60,8 @@ async function persistShelf(workspaceId: string, shelf: Shelf): Promise<void> {
   shelfCache.set(workspaceId, shelf);
   const workspace = await getWorkspaceById(workspaceId);
   if (workspace) {
-    await saveShelfToDisk(workspace.path, shelf);
+    const artifactRoot = resolveWorkspaceArtifactRoot(workspace.path, workspace.config);
+    await saveShelfToDisk(artifactRoot, shelf);
   }
 }
 

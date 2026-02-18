@@ -61,8 +61,10 @@ import {
   resolveTaskFactoryHomePath,
 } from './taskfactory-home.js';
 import {
-  getWorkspaceStoragePath,
-  resolveWorkspaceStoragePathForRead,
+  loadWorkspaceConfigFromDiskSync,
+  resolveWorkspaceArtifactRoot,
+  getWorkspaceArtifactPath,
+  resolveWorkspaceArtifactPathForRead,
 } from './workspace-storage.js';
 
 // =============================================================================
@@ -419,27 +421,45 @@ function getWorkspacePath(workspaceId: string): string | null {
   }
 }
 
-function sessionIdPath(workspaceId: string): string | null {
+/**
+ * Return the effective artifact root for a workspace session.
+ * Reads from the active session cache when available, otherwise derives from
+ * the workspace config on disk.
+ */
+function getArtifactRoot(workspaceId: string): string | null {
+  const activeSession = planningSessions.get(workspaceId);
+  if (activeSession?.artifactRoot) {
+    return activeSession.artifactRoot;
+  }
+
   const workspacePath = getWorkspacePath(workspaceId);
   if (!workspacePath) return null;
 
-  const dir = getWorkspaceStoragePath(workspacePath);
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  const config = loadWorkspaceConfigFromDiskSync(workspacePath);
+  return resolveWorkspaceArtifactRoot(workspacePath, config);
+}
 
-  return getWorkspaceStoragePath(workspacePath, 'planning-session-id.txt');
+function sessionIdPath(workspaceId: string): string | null {
+  const artifactRoot = getArtifactRoot(workspaceId);
+  if (!artifactRoot) return null;
+
+  if (!existsSync(artifactRoot)) mkdirSync(artifactRoot, { recursive: true });
+
+  return getWorkspaceArtifactPath(artifactRoot, 'planning-session-id.txt');
 }
 
 function sessionIdPathForRead(workspaceId: string): string | null {
   const workspacePath = getWorkspacePath(workspaceId);
-  if (!workspacePath) return null;
-  return resolveWorkspaceStoragePathForRead(workspacePath, 'planning-session-id.txt');
+  const artifactRoot = getArtifactRoot(workspaceId);
+  if (!workspacePath || !artifactRoot) return null;
+  return resolveWorkspaceArtifactPathForRead(workspacePath, artifactRoot, 'planning-session-id.txt');
 }
 
 function sessionsDir(workspaceId: string): string | null {
-  const workspacePath = getWorkspacePath(workspaceId);
-  if (!workspacePath) return null;
+  const artifactRoot = getArtifactRoot(workspaceId);
+  if (!artifactRoot) return null;
 
-  const dir = getWorkspaceStoragePath(workspacePath, 'planning-sessions');
+  const dir = getWorkspaceArtifactPath(artifactRoot, 'planning-sessions');
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
   return dir;
@@ -480,19 +500,19 @@ function archiveSession(workspaceId: string, sessionId: string, messages: Planni
 // =============================================================================
 
 function messagesPath(workspaceId: string): string | null {
-  const workspacePath = getWorkspacePath(workspaceId);
-  if (!workspacePath) return null;
+  const artifactRoot = getArtifactRoot(workspaceId);
+  if (!artifactRoot) return null;
 
-  const dir = getWorkspaceStoragePath(workspacePath);
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  if (!existsSync(artifactRoot)) mkdirSync(artifactRoot, { recursive: true });
 
-  return getWorkspaceStoragePath(workspacePath, 'planning-messages.json');
+  return getWorkspaceArtifactPath(artifactRoot, 'planning-messages.json');
 }
 
 function messagesPathForRead(workspaceId: string): string | null {
   const workspacePath = getWorkspacePath(workspaceId);
-  if (!workspacePath) return null;
-  return resolveWorkspaceStoragePathForRead(workspacePath, 'planning-messages.json');
+  const artifactRoot = getArtifactRoot(workspaceId);
+  if (!workspacePath || !artifactRoot) return null;
+  return resolveWorkspaceArtifactPathForRead(workspacePath, artifactRoot, 'planning-messages.json');
 }
 
 function loadPersistedMessages(workspaceId: string): PlanningMessage[] {
@@ -543,6 +563,8 @@ function persistMessagesSync(workspaceId: string, messages: PlanningMessage[]): 
 interface PlanningSession {
   workspaceId: string;
   workspacePath: string;
+  /** Effective artifact root for planning storage (planning-messages.json, sessions, etc.). */
+  artifactRoot: string;
   piSession: AgentSession | null;
   status: PlanningAgentStatus;
   messages: PlanningMessage[];
@@ -645,6 +667,7 @@ async function getOrCreateSession(
   const session: PlanningSession = {
     workspaceId,
     workspacePath: workspace.path,
+    artifactRoot: resolveWorkspaceArtifactRoot(workspace.path, workspace.config),
     piSession: null,
     status: 'idle',
     messages: restoredMessages,
@@ -791,7 +814,10 @@ export async function buildPlanningSystemPrompt(workspacePath: string, workspace
   }
 
   // Shared workspace context edited by user + agents
-  const workspaceSharedContext = loadWorkspaceSharedContext(workspacePath);
+  const workspaceArtifactRoot = workspace
+    ? resolveWorkspaceArtifactRoot(workspace.path, workspace.config)
+    : undefined;
+  const workspaceSharedContext = loadWorkspaceSharedContext(workspacePath, workspaceArtifactRoot);
   let sharedContextSummary = '';
   if (workspaceSharedContext && workspaceSharedContext.trim().length > 0) {
     sharedContextSummary =
