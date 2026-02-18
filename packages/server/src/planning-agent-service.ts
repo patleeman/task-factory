@@ -560,6 +560,8 @@ interface PlanningSession {
   sessionId: string;
   /** True when the user explicitly requested to stop the current turn. */
   abortRequested: boolean;
+  /** Watchdog timer used to recover turns that stall after tool output. */
+  postToolStallTimer?: ReturnType<typeof setTimeout>;
 }
 
 const planningSessions = new Map<string, PlanningSession>();
@@ -655,6 +657,7 @@ async function getOrCreateSession(
     firstMessageSent: false,
     sessionId: getOrCreateSessionId(workspaceId),
     abortRequested: false,
+    postToolStallTimer: undefined,
   };
 
   planningSessions.set(workspaceId, session);
@@ -1136,6 +1139,94 @@ function buildPlanningAutoRetryEndNotice(event: PlanningAutoRetryEndEvent): {
   };
 }
 
+const PLANNING_POST_TOOL_STALL_TIMEOUT_MS = 2 * 60 * 1000;
+
+function clearPlanningPostToolStallWatchdog(session: PlanningSession): void {
+  if (!session.postToolStallTimer) {
+    return;
+  }
+
+  clearTimeout(session.postToolStallTimer);
+  session.postToolStallTimer = undefined;
+}
+
+async function handlePlanningPostToolStallTimeout(
+  session: PlanningSession,
+  toolName: string,
+  toolCallId: string,
+): Promise<void> {
+  clearPlanningPostToolStallWatchdog(session);
+
+  const activeSession = planningSessions.get(session.workspaceId);
+  if (activeSession !== session) {
+    return;
+  }
+
+  if (!session.piSession) {
+    return;
+  }
+
+  const isRecoverableStatus = session.status === 'streaming'
+    || session.status === 'tool_use'
+    || session.status === 'thinking';
+  if (!isRecoverableStatus) {
+    return;
+  }
+
+  const timeoutSeconds = Math.max(1, Math.round(PLANNING_POST_TOOL_STALL_TIMEOUT_MS / 1000));
+
+  appendPlanningSystemNotice(
+    session,
+    `Foreman appears stuck after tool "${toolName}" (${timeoutSeconds}s without follow-up). Marking session idle so you can continue.`,
+    {
+      kind: 'foreman-turn-stall',
+      phase: 'post-tool',
+      timeoutMs: PLANNING_POST_TOOL_STALL_TIMEOUT_MS,
+      toolName,
+      toolCallId,
+    },
+  );
+
+  session.abortRequested = true;
+  session.currentStreamText = '';
+  session.currentThinkingText = '';
+  session.toolCallArgs.clear();
+  session.status = 'idle';
+
+  session.broadcast({
+    type: 'planning:status',
+    workspaceId: session.workspaceId,
+    status: 'idle',
+  });
+  broadcastPlanningContextUsage(session);
+  session.broadcast({ type: 'planning:turn_end', workspaceId: session.workspaceId });
+
+  session.unsubscribe?.();
+  session.unsubscribe = undefined;
+
+  const stalePiSession = session.piSession;
+  session.piSession = null;
+  session.firstMessageSent = false;
+
+  try {
+    await stalePiSession.abort();
+  } catch (err) {
+    console.warn(`[PlanningAgent] Failed to abort stalled session for workspace ${session.workspaceId}:`, err);
+  }
+}
+
+function armPlanningPostToolStallWatchdog(
+  session: PlanningSession,
+  toolName: string,
+  toolCallId: string,
+): void {
+  clearPlanningPostToolStallWatchdog(session);
+
+  session.postToolStallTimer = setTimeout(() => {
+    void handlePlanningPostToolStallTimeout(session, toolName, toolCallId);
+  }, PLANNING_POST_TOOL_STALL_TIMEOUT_MS);
+}
+
 function appendPlanningSystemNotice(
   session: PlanningSession,
   message: string,
@@ -1164,6 +1255,10 @@ function handlePlanningEvent(
   session: PlanningSession,
 ): void {
   const { workspaceId, broadcast } = session;
+
+  if (event.type !== 'tool_execution_end') {
+    clearPlanningPostToolStallWatchdog(session);
+  }
 
   switch (event.type) {
     case 'agent_start':
@@ -1328,6 +1423,7 @@ function handlePlanningEvent(
       session.status = 'streaming';
       broadcast({ type: 'planning:status', workspaceId, status: 'streaming' });
       broadcastPlanningContextUsage(session);
+      armPlanningPostToolStallWatchdog(session, event.toolName, event.toolCallId);
       break;
     }
 
@@ -1625,6 +1721,7 @@ async function sendToAgent(
     throw new Error('Planning session not initialized');
   }
 
+  clearPlanningPostToolStallWatchdog(session);
   session.status = 'streaming';
   broadcast({ type: 'planning:status', workspaceId, status: 'streaming' });
   broadcastPlanningContextUsage(session);
@@ -1666,6 +1763,7 @@ async function sendToAgent(
       }
 
       // Turn complete
+      clearPlanningPostToolStallWatchdog(session);
       session.status = 'idle';
       broadcast({ type: 'planning:status', workspaceId, status: 'idle' });
       broadcastPlanningContextUsage(session);
@@ -1673,20 +1771,26 @@ async function sendToAgent(
       return;
     } catch (err) {
       if (session.abortRequested) {
+        clearPlanningPostToolStallWatchdog(session);
         session.abortRequested = false;
         session.currentStreamText = '';
         session.currentThinkingText = '';
         session.toolCallArgs.clear();
+
+        const wasIdle = session.status === 'idle';
         session.status = 'idle';
-        broadcast({ type: 'planning:status', workspaceId, status: 'idle' });
-        broadcastPlanningContextUsage(session);
-        broadcast({ type: 'planning:turn_end', workspaceId });
+        if (!wasIdle) {
+          broadcast({ type: 'planning:status', workspaceId, status: 'idle' });
+          broadcastPlanningContextUsage(session);
+          broadcast({ type: 'planning:turn_end', workspaceId });
+        }
         return;
       }
 
       console.error(`[PlanningAgent] Attempt ${attempt + 1} failed:`, err);
 
       if (attempt < MAX_RETRIES) {
+        clearPlanningPostToolStallWatchdog(session);
         // Destroy the broken session and recreate
         console.log('[PlanningAgent] Retrying with fresh Pi session...');
         session.unsubscribe?.();
@@ -1771,6 +1875,7 @@ async function sendToAgent(
         }
       } else {
         // All retries exhausted
+        clearPlanningPostToolStallWatchdog(session);
         session.status = 'error';
         broadcast({ type: 'planning:status', workspaceId, status: 'error' });
         const normalizedError = normalizePlanningErrorMessage(err);
@@ -1911,6 +2016,7 @@ export async function stopPlanningExecution(
   }
 
   session.abortRequested = true;
+  clearPlanningPostToolStallWatchdog(session);
 
   try {
     await session.piSession.abort();
@@ -1949,6 +2055,7 @@ export async function resetPlanningSession(
 
   // Tear down the old Pi SDK session
   if (session) {
+    clearPlanningPostToolStallWatchdog(session);
     session.unsubscribe?.();
     try {
       await session.piSession?.abort();

@@ -345,6 +345,129 @@ describe('planning slash command handling', () => {
     expect(retryEndMessage).toBeTruthy();
   });
 
+  it('recovers a foreman turn that stalls after tool output without follow-up', async () => {
+    vi.useFakeTimers();
+
+    try {
+      const homePath = setTempHome();
+      const workspacePath = createTempDir('pi-factory-workspace-');
+      const workspaceId = 'ws-post-tool-stall';
+
+      writeWorkspaceConfig(workspacePath);
+      registerWorkspace(homePath, workspaceId, workspacePath);
+
+      let firstSubscriber: ((event: any) => void) | undefined;
+      let rejectFirstPrompt: ((reason?: unknown) => void) | undefined;
+      let firstPromptReadyResolve: (() => void) | undefined;
+      const firstPromptReady = new Promise<void>((resolve) => {
+        firstPromptReadyResolve = resolve;
+      });
+      let secondSubscriber: ((event: any) => void) | undefined;
+
+      createAgentSessionMock
+        .mockResolvedValueOnce({
+          session: {
+            subscribe: (listener: (event: any) => void) => {
+              firstSubscriber = listener;
+              return () => {};
+            },
+            prompt: async () => {
+              firstSubscriber?.({
+                type: 'tool_execution_start',
+                toolName: 'create_draft_task',
+                toolCallId: 'tool-stall-1',
+                args: { title: 'Draft task title' },
+              });
+
+              firstSubscriber?.({
+                type: 'tool_execution_end',
+                toolName: 'create_draft_task',
+                toolCallId: 'tool-stall-1',
+                isError: false,
+                result: {
+                  content: [{ type: 'text', text: 'Draft task created.' }],
+                },
+              });
+
+              await new Promise<void>((_, reject) => {
+                rejectFirstPrompt = reject;
+                firstPromptReadyResolve?.();
+              });
+            },
+            abort: async () => {
+              rejectFirstPrompt?.(new Error('aborted'));
+            },
+          },
+        })
+        .mockResolvedValueOnce({
+          session: {
+            subscribe: (listener: (event: any) => void) => {
+              secondSubscriber = listener;
+              return () => {};
+            },
+            prompt: async () => {
+              secondSubscriber?.({
+                type: 'message_update',
+                assistantMessageEvent: {
+                  type: 'text_delta',
+                  delta: 'Recovered after stall.',
+                },
+              });
+
+              secondSubscriber?.({
+                type: 'message_end',
+                message: {
+                  role: 'assistant',
+                  stopReason: 'stop',
+                  content: [{ type: 'text', text: 'Recovered after stall.' }],
+                },
+              });
+            },
+            abort: async () => {},
+          },
+        });
+
+      const { sendPlanningMessage, getPlanningMessages, getPlanningStatus } = await import('../src/planning-agent-service.js');
+
+      const events: any[] = [];
+      const firstTurn = sendPlanningMessage(workspaceId, 'continue', (event) => events.push(event));
+
+      await firstPromptReady;
+      await vi.advanceTimersByTimeAsync(2 * 60 * 1000);
+      await firstTurn;
+
+      const stallMessage = events
+        .filter((event) => event.type === 'planning:message')
+        .map((event) => event.message as PlanningMessage)
+        .find((message) => (
+          message.role === 'system'
+          && message.content.includes('Foreman appears stuck after tool "create_draft_task"')
+          && message.metadata?.kind === 'foreman-turn-stall'
+          && message.metadata?.phase === 'post-tool'
+        ));
+
+      expect(stallMessage).toBeTruthy();
+      expect(events.some((event) => event.type === 'planning:status' && event.status === 'idle')).toBe(true);
+      expect(events.some((event) => event.type === 'planning:turn_end')).toBe(true);
+      expect(getPlanningStatus(workspaceId)).toBe('idle');
+
+      const history = getPlanningMessages(workspaceId);
+      expect(history.some((message) => message.id === stallMessage?.id)).toBe(true);
+
+      await sendPlanningMessage(workspaceId, 'continue after stall', (event) => events.push(event));
+      expect(createAgentSessionMock).toHaveBeenCalledTimes(2);
+
+      const recoveredMessage = events
+        .filter((event) => event.type === 'planning:message')
+        .map((event) => event.message as PlanningMessage)
+        .find((message) => message.role === 'assistant' && message.content.includes('Recovered after stall.'));
+
+      expect(recoveredMessage).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('surfaces thrown provider errors in foreman chat log after retries', async () => {
     const homePath = setTempHome();
     const workspacePath = createTempDir('pi-factory-workspace-');
