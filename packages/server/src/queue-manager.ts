@@ -14,13 +14,25 @@
 // The queue manager respects WIP limits and uses FIFO ordering.
 // It recovers gracefully from server restarts by detecting orphaned executing tasks.
 
-import type { Task, ServerEvent, QueueStatus, Workspace } from '@task-factory/shared';
+import type {
+  ExecutionBreakerCategory,
+  QueueExecutionBreakerStatus,
+  QueueStatus,
+  ServerEvent,
+  Task,
+  Workspace,
+} from '@task-factory/shared';
 import { randomUUID } from 'crypto';
 import { resolveWorkspaceWorkflowSettings } from '@task-factory/shared';
 import { getWorkspaceById, getTasksDir, listWorkspaces, updateWorkspaceConfig } from './workspace-service.js';
 import { discoverTasks, moveTaskToPhase } from './task-service.js';
 import { loadGlobalWorkflowSettings } from './workflow-settings-service.js';
-import { executeTask, hasLiveExecutionSession, stopTaskExecution } from './agent-execution-service.js';
+import {
+  executeTask,
+  hasLiveExecutionSession,
+  stopTaskExecution,
+  type ExecutionCompletionDetails,
+} from './agent-execution-service.js';
 import { createSystemEvent } from './activity-service.js';
 import { logger } from './logger.js';
 import { buildTaskStateSnapshot } from './state-contract.js';
@@ -32,8 +44,55 @@ import { registerQueueKickHandler } from './queue-kick-coordinator.js';
 // =============================================================================
 
 const POLL_INTERVAL_MS = 30_000; // Safety poll every 30 seconds
+const START_RETRY_DELAY_MS = 5_000;
 
+function readPositiveIntEnv(name: string, fallback: number): number {
+  const rawValue = process.env[name];
+  if (!rawValue) {
+    return fallback;
+  }
 
+  const parsed = Number(rawValue);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+
+  return Math.floor(parsed);
+}
+
+const EXECUTION_BREAKER_THRESHOLD = readPositiveIntEnv(
+  'PI_FACTORY_EXECUTION_BREAKER_THRESHOLD',
+  3,
+);
+const EXECUTION_BREAKER_BURST_WINDOW_MS = readPositiveIntEnv(
+  'PI_FACTORY_EXECUTION_BREAKER_BURST_WINDOW_MS',
+  2 * 60 * 1000,
+);
+const EXECUTION_BREAKER_COOLDOWN_MS = readPositiveIntEnv(
+  'PI_FACTORY_EXECUTION_BREAKER_COOLDOWN_MS',
+  5 * 60 * 1000,
+);
+
+type BreakerKey = string;
+
+interface ProviderModelKey {
+  provider: string;
+  modelId: string;
+}
+
+interface OpenExecutionBreaker {
+  category: ExecutionBreakerCategory;
+  openedAtMs: number;
+  retryAtMs: number;
+  failureCount: number;
+  errorMessage: string;
+}
+
+interface ExecutionBreakerTracker {
+  key: ProviderModelKey;
+  failureTimestampsMs: number[];
+  open: OpenExecutionBreaker | null;
+}
 
 // =============================================================================
 // Queue Manager Class
@@ -48,6 +107,8 @@ class QueueManager {
   private broadcastFn: (event: ServerEvent) => void;
   private executionAttempts = new Map<string, string>();
   private lifecycleGeneration = 0;
+  private executionBreakers = new Map<BreakerKey, ExecutionBreakerTracker>();
+  private lastBlockedNoticeRetryAtByKey = new Map<BreakerKey, number>();
 
   constructor(workspaceId: string, broadcastFn: (event: ServerEvent) => void) {
     this.workspaceId = workspaceId;
@@ -91,6 +152,8 @@ class QueueManager {
   }
 
   async getStatus(): Promise<QueueStatus> {
+    this.clearExpiredExecutionBreakers({ emitEvents: false });
+
     const workspace = await getWorkspaceById(this.workspaceId);
     let tasksInReady = 0;
     let tasksInExecuting = 0;
@@ -102,12 +165,15 @@ class QueueManager {
       tasksInExecuting = tasks.filter(t => t.frontmatter.phase === 'executing').length;
     }
 
+    const executionBreakers = this.getOpenExecutionBreakers();
+
     return {
       workspaceId: this.workspaceId,
       enabled: this.enabled,
       currentTaskId: this.currentTaskId,
       tasksInReady,
       tasksInExecuting,
+      ...(executionBreakers.length > 0 ? { executionBreakers } : {}),
     };
   }
 
@@ -148,6 +214,304 @@ class QueueManager {
     return Date.now() - startedAt < 2 * 60 * 1000;
   }
 
+  private async emitSystemEvent(
+    taskId: string,
+    message: string,
+    metadata?: Record<string, unknown>,
+  ): Promise<void> {
+    try {
+      const entry = await createSystemEvent(
+        this.workspaceId,
+        taskId,
+        'phase-change',
+        message,
+        metadata,
+      );
+
+      if (entry) {
+        this.broadcastFn({ type: 'activity:entry', entry });
+      }
+    } catch (err) {
+      logger.warn('[QueueManager] Failed to emit system event', err);
+    }
+  }
+
+  private getTaskExecutionModelKey(task: Task): ProviderModelKey | null {
+    const modelConfig = task.frontmatter.executionModelConfig ?? task.frontmatter.modelConfig;
+    if (!modelConfig?.provider || !modelConfig?.modelId) {
+      return null;
+    }
+
+    return {
+      provider: modelConfig.provider,
+      modelId: modelConfig.modelId,
+    };
+  }
+
+  private toBreakerKey(key: ProviderModelKey): BreakerKey {
+    return `${key.provider}::${key.modelId}`;
+  }
+
+  private classifyFailureCategory(errorMessage: string): ExecutionBreakerCategory | null {
+    const message = errorMessage.toLowerCase();
+
+    if (/auth|unauthoriz|forbidden|invalid api key|no api key|credential|login/i.test(message)) {
+      return 'auth';
+    }
+
+    if (/quota|insufficient quota|billing|credits|payment required/i.test(message)) {
+      return 'quota';
+    }
+
+    if (/429|rate.?limit|too many requests|overloaded|retry delay/i.test(message)) {
+      return 'rate_limit';
+    }
+
+    return null;
+  }
+
+  private getOrCreateExecutionBreakerTracker(key: ProviderModelKey): ExecutionBreakerTracker {
+    const breakerKey = this.toBreakerKey(key);
+    const existing = this.executionBreakers.get(breakerKey);
+    if (existing) {
+      return existing;
+    }
+
+    const tracker: ExecutionBreakerTracker = {
+      key,
+      failureTimestampsMs: [],
+      open: null,
+    };
+    this.executionBreakers.set(breakerKey, tracker);
+    return tracker;
+  }
+
+  private formatRetryTime(retryAtMs: number): string {
+    return new Date(retryAtMs).toISOString();
+  }
+
+  private clearExpiredExecutionBreakers(options?: { emitEvents?: boolean }): boolean {
+    const now = Date.now();
+    const emitEvents = options?.emitEvents ?? false;
+    let changed = false;
+
+    for (const [breakerKey, tracker] of this.executionBreakers.entries()) {
+      const open = tracker.open;
+      if (!open || open.retryAtMs > now) {
+        continue;
+      }
+
+      tracker.open = null;
+      tracker.failureTimestampsMs = [];
+      this.lastBlockedNoticeRetryAtByKey.delete(breakerKey);
+      changed = true;
+
+      if (emitEvents) {
+        void this.emitSystemEvent(
+          '',
+          `Execution breaker auto-closed for ${tracker.key.provider}/${tracker.key.modelId}. Queue dispatch resumed.`,
+          {
+            provider: tracker.key.provider,
+            modelId: tracker.key.modelId,
+            action: 'auto_close',
+          },
+        );
+      }
+    }
+
+    return changed;
+  }
+
+  private getOpenExecutionBreakers(nowMs = Date.now()): QueueExecutionBreakerStatus[] {
+    const statuses: QueueExecutionBreakerStatus[] = [];
+
+    for (const tracker of this.executionBreakers.values()) {
+      const open = tracker.open;
+      if (!open || open.retryAtMs <= nowMs) {
+        continue;
+      }
+
+      statuses.push({
+        provider: tracker.key.provider,
+        modelId: tracker.key.modelId,
+        category: open.category,
+        openedAt: new Date(open.openedAtMs).toISOString(),
+        retryAt: new Date(open.retryAtMs).toISOString(),
+        remainingMs: Math.max(0, open.retryAtMs - nowMs),
+        failureCount: open.failureCount,
+        threshold: EXECUTION_BREAKER_THRESHOLD,
+        cooldownMs: EXECUTION_BREAKER_COOLDOWN_MS,
+      });
+    }
+
+    statuses.sort((a, b) => a.retryAt.localeCompare(b.retryAt));
+    return statuses;
+  }
+
+  private openExecutionBreaker(
+    key: ProviderModelKey,
+    category: ExecutionBreakerCategory,
+    failureCount: number,
+    errorMessage: string,
+  ): void {
+    const now = Date.now();
+    const tracker = this.getOrCreateExecutionBreakerTracker(key);
+    const retryAtMs = now + EXECUTION_BREAKER_COOLDOWN_MS;
+
+    tracker.open = {
+      category,
+      openedAtMs: now,
+      retryAtMs,
+      failureCount,
+      errorMessage,
+    };
+
+    void this.emitSystemEvent(
+      '',
+      `Execution breaker opened for ${key.provider}/${key.modelId} (${category}). Retry after ${this.formatRetryTime(retryAtMs)}.`,
+      {
+        provider: key.provider,
+        modelId: key.modelId,
+        category,
+        retryAt: new Date(retryAtMs).toISOString(),
+        failureCount,
+        threshold: EXECUTION_BREAKER_THRESHOLD,
+        burstWindowMs: EXECUTION_BREAKER_BURST_WINDOW_MS,
+        cooldownMs: EXECUTION_BREAKER_COOLDOWN_MS,
+        errorMessage,
+        action: 'open',
+      },
+    );
+
+    void this.broadcastStatus();
+
+    setTimeout(() => this.kick(), EXECUTION_BREAKER_COOLDOWN_MS + 25);
+  }
+
+  private recordExecutionFailure(
+    key: ProviderModelKey,
+    errorMessage: string,
+  ): void {
+    const category = this.classifyFailureCategory(errorMessage);
+    if (!category) {
+      return;
+    }
+
+    const tracker = this.getOrCreateExecutionBreakerTracker(key);
+    if (tracker.open && tracker.open.retryAtMs > Date.now()) {
+      return;
+    }
+
+    const now = Date.now();
+    tracker.failureTimestampsMs = tracker.failureTimestampsMs
+      .filter((timestampMs) => now - timestampMs <= EXECUTION_BREAKER_BURST_WINDOW_MS);
+    tracker.failureTimestampsMs.push(now);
+
+    if (tracker.failureTimestampsMs.length >= EXECUTION_BREAKER_THRESHOLD) {
+      this.openExecutionBreaker(key, category, tracker.failureTimestampsMs.length, errorMessage);
+    }
+  }
+
+  private resetExecutionFailureBurst(task: Task): void {
+    const key = this.getTaskExecutionModelKey(task);
+    if (!key) {
+      return;
+    }
+
+    const tracker = this.executionBreakers.get(this.toBreakerKey(key));
+    if (!tracker) {
+      return;
+    }
+
+    tracker.failureTimestampsMs = [];
+  }
+
+  private isExecutionBlocked(task: Task): QueueExecutionBreakerStatus | null {
+    const key = this.getTaskExecutionModelKey(task);
+    if (!key) {
+      return null;
+    }
+
+    const tracker = this.executionBreakers.get(this.toBreakerKey(key));
+    if (!tracker?.open) {
+      return null;
+    }
+
+    const now = Date.now();
+    if (tracker.open.retryAtMs <= now) {
+      tracker.open = null;
+      tracker.failureTimestampsMs = [];
+      return null;
+    }
+
+    return {
+      provider: key.provider,
+      modelId: key.modelId,
+      category: tracker.open.category,
+      openedAt: new Date(tracker.open.openedAtMs).toISOString(),
+      retryAt: new Date(tracker.open.retryAtMs).toISOString(),
+      remainingMs: Math.max(0, tracker.open.retryAtMs - now),
+      failureCount: tracker.open.failureCount,
+      threshold: EXECUTION_BREAKER_THRESHOLD,
+      cooldownMs: EXECUTION_BREAKER_COOLDOWN_MS,
+    };
+  }
+
+  private maybeEmitBlockedExecutionNotice(task: Task, blocked: QueueExecutionBreakerStatus): void {
+    const breakerKey = `${blocked.provider}::${blocked.modelId}`;
+    const retryAtMs = Date.parse(blocked.retryAt);
+    const lastNoticeRetryAtMs = this.lastBlockedNoticeRetryAtByKey.get(breakerKey);
+    if (lastNoticeRetryAtMs === retryAtMs) {
+      return;
+    }
+
+    this.lastBlockedNoticeRetryAtByKey.set(breakerKey, retryAtMs);
+    void this.emitSystemEvent(
+      task.id,
+      `Execution blocked by breaker for ${blocked.provider}/${blocked.modelId} (${blocked.category}). Retry after ${blocked.retryAt}.`,
+      {
+        provider: blocked.provider,
+        modelId: blocked.modelId,
+        category: blocked.category,
+        retryAt: blocked.retryAt,
+        taskId: task.id,
+        action: 'blocked',
+      },
+    );
+  }
+
+  clearExecutionBreakersForManualResume(): number {
+    this.clearExpiredExecutionBreakers({ emitEvents: false });
+
+    let cleared = 0;
+    for (const [breakerKey, tracker] of this.executionBreakers.entries()) {
+      if (!tracker.open) {
+        continue;
+      }
+
+      tracker.open = null;
+      tracker.failureTimestampsMs = [];
+      this.lastBlockedNoticeRetryAtByKey.delete(breakerKey);
+      cleared += 1;
+
+      void this.emitSystemEvent(
+        '',
+        `Execution breaker manually cleared for ${tracker.key.provider}/${tracker.key.modelId}. Queue resume requested.`,
+        {
+          provider: tracker.key.provider,
+          modelId: tracker.key.modelId,
+          action: 'manual_resume',
+        },
+      );
+    }
+
+    if (cleared > 0) {
+      void this.broadcastStatus();
+    }
+
+    return cleared;
+  }
+
   private async processNext(generation: number): Promise<void> {
     if (!this.isGenerationActive(generation) || this.processing) return;
     this.processing = true;
@@ -159,6 +523,11 @@ class QueueManager {
       const tasksDir = getTasksDir(workspace);
       const tasks = discoverTasks(tasksDir);
       if (!this.isGenerationActive(generation)) return;
+
+      const breakersChanged = this.clearExpiredExecutionBreakers({ emitEvents: true });
+      if (breakersChanged) {
+        await this.broadcastStatus();
+      }
 
       const executingTasks = tasks.filter(t => t.frontmatter.phase === 'executing');
       const globalWorkflowDefaults = loadGlobalWorkflowSettings();
@@ -289,7 +658,24 @@ class QueueManager {
         return;
       }
 
-      const nextTask = readyTasks[readyTasks.length - 1];
+      let nextTask: Task | null = null;
+      for (let index = readyTasks.length - 1; index >= 0; index -= 1) {
+        const candidate = readyTasks[index];
+        const blocked = this.isExecutionBlocked(candidate);
+        if (blocked) {
+          this.maybeEmitBlockedExecutionNotice(candidate, blocked);
+          continue;
+        }
+
+        nextTask = candidate;
+        break;
+      }
+
+      if (!nextTask) {
+        await this.broadcastStatus();
+        return;
+      }
+
       logger.info(`[QueueManager] Picking up task: ${nextTask.id} (${nextTask.frontmatter.title})`);
 
       // Move to executing
@@ -346,8 +732,8 @@ class QueueManager {
         workspaceId: this.workspaceId,
         workspacePath: workspace.path,
         broadcastToWorkspace: (event) => this.broadcastFn(event),
-        onComplete: (success) => {
-          void this.handleTaskComplete(task.id, success, attemptId);
+        onComplete: (success, details) => {
+          void this.handleTaskComplete(task.id, success, attemptId, details);
         },
       });
     } catch (err) {
@@ -363,11 +749,16 @@ class QueueManager {
 
       await this.broadcastStatus();
       // Retry after delay
-      setTimeout(() => this.kick(), 5000);
+      setTimeout(() => this.kick(), START_RETRY_DELAY_MS);
     }
   }
 
-  private async handleTaskComplete(taskId: string, success: boolean, attemptId: string): Promise<void> {
+  private async handleTaskComplete(
+    taskId: string,
+    success: boolean,
+    attemptId: string,
+    details?: ExecutionCompletionDetails,
+  ): Promise<void> {
     if (!this.isCurrentExecutionAttempt(taskId, attemptId)) {
       logger.info(`[QueueManager] Ignoring stale completion callback for task ${taskId}`);
       return;
@@ -388,6 +779,8 @@ class QueueManager {
 
       if (currentTask && currentTask.frontmatter.phase === 'executing') {
         if (success) {
+          this.resetExecutionFailureBurst(currentTask);
+
           const fromState = buildTaskStateSnapshot(currentTask.frontmatter);
           moveTaskToPhase(currentTask, 'complete', 'system', 'Execution completed successfully', tasks);
 
@@ -407,6 +800,11 @@ class QueueManager {
             from: 'executing',
             to: 'complete',
           });
+        } else {
+          const modelKey = this.getTaskExecutionModelKey(currentTask);
+          if (modelKey && details?.errorMessage) {
+            this.recordExecutionFailure(modelKey, details.errorMessage);
+          }
         }
         // On failure, leave in executing for manual intervention
       }
@@ -447,6 +845,7 @@ export async function startQueueProcessing(
   options?: { persist?: boolean },
 ): Promise<QueueStatus> {
   const manager = getOrCreateManager(workspaceId, broadcastFn);
+  manager.clearExecutionBreakersForManualResume();
   await manager.start();
   if (options?.persist !== false) {
     await persistQueueEnabled(workspaceId, true);

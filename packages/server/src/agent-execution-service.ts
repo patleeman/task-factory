@@ -348,6 +348,10 @@ export function loadAttachmentsByIds(
 // Agent Session Management
 // =============================================================================
 
+export interface ExecutionCompletionDetails {
+  errorMessage?: string;
+}
+
 interface TaskSession {
   id: string;
   taskId: string;
@@ -377,7 +381,7 @@ interface TaskSession {
   /** Summary from task_complete call */
   completionSummary: string;
   /** Callback to invoke when the task should advance to complete */
-  onComplete?: (success: boolean) => void;
+  onComplete?: (success: boolean, details?: ExecutionCompletionDetails) => void;
   /** Reference to the task being executed */
   task?: Task;
   /** True when an executing turn has ended and the agent is waiting for user input */
@@ -1375,7 +1379,7 @@ export interface ExecuteTaskOptions {
   workspaceId: string;
   workspacePath: string;
   onOutput?: (output: string) => void;
-  onComplete?: (success: boolean) => void;
+  onComplete?: (success: boolean, details?: ExecutionCompletionDetails) => void;
   broadcastToWorkspace?: (event: any) => void;
 }
 
@@ -1817,7 +1821,10 @@ async function handleAgentTurnEnd(
   session.unsubscribe?.();
   clearActiveSessionIfOwned(task.id, session);
 
-  session.onComplete?.(wasSuccess);
+  session.onComplete?.(
+    wasSuccess,
+    wasSuccess ? undefined : { errorMessage: session.activeTurnErrorMessage },
+  );
 }
 
 /**
@@ -1874,7 +1881,7 @@ function handleAgentError(
   session.unsubscribe?.();
   clearActiveSessionIfOwned(task.id, session);
 
-  session.onComplete?.(false);
+  session.onComplete?.(false, { errorMessage: normalizedError });
 }
 
 /** Remove the completion callback for a task (cleanup). */
@@ -3881,7 +3888,7 @@ function simulateAgentExecution(
   task: Task,
   workspaceId: string,
   onOutput?: (output: string) => void,
-  onComplete?: (success: boolean) => void
+  onComplete?: (success: boolean, details?: ExecutionCompletionDetails) => void
 ): void {
   const broadcast = session.broadcastToWorkspace;
   const steps = [

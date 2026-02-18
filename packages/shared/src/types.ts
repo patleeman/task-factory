@@ -981,12 +981,27 @@ export interface Attachment {
 // Queue Manager
 // =============================================================================
 
+export type ExecutionBreakerCategory = 'rate_limit' | 'quota' | 'auth';
+
+export interface QueueExecutionBreakerStatus {
+  provider: string;
+  modelId: string;
+  category: ExecutionBreakerCategory;
+  openedAt: string;
+  retryAt: string;
+  remainingMs: number;
+  failureCount: number;
+  threshold: number;
+  cooldownMs: number;
+}
+
 export interface QueueStatus {
   workspaceId: string;
   enabled: boolean;
   currentTaskId: string | null;
   tasksInReady: number;
   tasksInExecuting: number;
+  executionBreakers?: QueueExecutionBreakerStatus[];
 }
 
 export interface WorkspaceWorkflowSettingsResponse {

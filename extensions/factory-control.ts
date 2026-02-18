@@ -56,6 +56,15 @@ export default function (pi: ExtensionAPI) {
         if (status.currentTaskId) {
           lines.push(`**Currently executing:** ${status.currentTaskId}`);
         }
+
+        if (Array.isArray(status.executionBreakers) && status.executionBreakers.length > 0) {
+          lines.push('**Execution breakers:**');
+          for (const breaker of status.executionBreakers) {
+            lines.push(
+              `- ${breaker.provider}/${breaker.modelId} (${breaker.category}) → retry at ${breaker.retryAt}`,
+            );
+          }
+        }
         return {
           content: [{ type: 'text' as const, text: lines.join('\n') }],
           details: {} as Record<string, unknown>,

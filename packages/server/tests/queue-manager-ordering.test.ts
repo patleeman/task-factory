@@ -9,6 +9,7 @@ const executeTaskMock = vi.fn();
 const hasRunningSessionMock = vi.fn(() => false);
 const hasLiveExecutionSessionMock = vi.fn(() => false);
 const stopTaskExecutionMock = vi.fn(async () => false);
+const createSystemEventMock = vi.fn();
 const loadGlobalWorkflowSettingsMock = vi.fn(() => ({
   readyLimit: 25,
   executingLimit: 1,
@@ -36,7 +37,7 @@ vi.mock('../src/agent-execution-service.js', () => ({
 }));
 
 vi.mock('../src/activity-service.js', () => ({
-  createSystemEvent: vi.fn(async () => undefined),
+  createSystemEvent: (...args: any[]) => createSystemEventMock(...args),
 }));
 
 vi.mock('../src/logger.js', () => ({
@@ -111,18 +112,32 @@ describe('queue manager ordering', () => {
     hasRunningSessionMock.mockReset();
     hasLiveExecutionSessionMock.mockReset();
     stopTaskExecutionMock.mockReset();
+    createSystemEventMock.mockReset();
     loadGlobalWorkflowSettingsMock.mockReset();
 
     hasRunningSessionMock.mockImplementation(() => false);
     hasLiveExecutionSessionMock.mockImplementation(() => false);
     listWorkspacesMock.mockImplementation(async () => []);
     stopTaskExecutionMock.mockImplementation(async () => false);
+    createSystemEventMock.mockImplementation(async (_workspaceId: string, taskId: string, event: string, message: string, metadata?: Record<string, unknown>) => ({
+      type: 'system-event',
+      id: `evt-${Date.now()}`,
+      taskId,
+      event,
+      message,
+      timestamp: new Date().toISOString(),
+      metadata,
+    }));
     loadGlobalWorkflowSettingsMock.mockImplementation(() => ({
       readyLimit: 25,
       executingLimit: 1,
       backlogToReady: false,
       readyToExecuting: true,
     }));
+
+    process.env.PI_FACTORY_EXECUTION_BREAKER_THRESHOLD = '3';
+    process.env.PI_FACTORY_EXECUTION_BREAKER_BURST_WINDOW_MS = String(2 * 60 * 1000);
+    process.env.PI_FACTORY_EXECUTION_BREAKER_COOLDOWN_MS = String(5 * 60 * 1000);
 
     moveTaskToPhaseMock.mockImplementation((task: any, newPhase: string, _actor: string, _reason?: string, allTasks?: any[]) => {
       if (allTasks) {
@@ -751,5 +766,190 @@ describe('queue manager ordering', () => {
     });
 
     await stopQueueProcessing(workspace.id, { persist: false });
+  });
+
+  it('opens an execution breaker after repeated provider/model failures and blocks further starts', async () => {
+    const workspace = createWorkspace(1);
+    const events: any[] = [];
+    const tasks = [
+      createTask('TASK-READY', 'ready', 0, '2025-01-01T00:00:00.000Z', {
+        executionModelConfig: { provider: 'openai', modelId: 'gpt-4.1' },
+        modelConfig: { provider: 'openai', modelId: 'gpt-4.1' },
+      }),
+    ];
+
+    getWorkspaceByIdMock.mockImplementation(async () => workspace);
+    discoverTasksMock.mockImplementation(() => tasks);
+    updateWorkspaceConfigMock.mockImplementation(async (_workspace: any, config: any) => {
+      workspace.config = {
+        ...workspace.config,
+        ...config,
+      };
+      return workspace;
+    });
+    executeTaskMock.mockImplementation(async ({ onComplete }: any) => {
+      onComplete(false, { errorMessage: 'HTTP 429: too many requests' });
+    });
+
+    const { startQueueProcessing, stopQueueProcessing, getQueueStatus, kickQueue } = await import('../src/queue-manager.js');
+
+    await startQueueProcessing(workspace.id, (event) => events.push(event), { persist: false });
+
+    await vi.waitFor(() => {
+      expect(executeTaskMock).toHaveBeenCalledTimes(1);
+    });
+
+    kickQueue(workspace.id);
+    await vi.waitFor(() => {
+      expect(executeTaskMock).toHaveBeenCalledTimes(2);
+    });
+
+    kickQueue(workspace.id);
+    await vi.waitFor(() => {
+      expect(executeTaskMock).toHaveBeenCalledTimes(3);
+    });
+
+    const status = await getQueueStatus(workspace.id);
+    expect(status.executionBreakers?.length).toBe(1);
+    expect(status.executionBreakers?.[0]).toMatchObject({
+      provider: 'openai',
+      modelId: 'gpt-4.1',
+      category: 'rate_limit',
+    });
+
+    const callsAfterOpen = executeTaskMock.mock.calls.length;
+    tasks[0].frontmatter.phase = 'ready';
+    kickQueue(workspace.id);
+    await vi.waitFor(() => {
+      const blockedMessages = createSystemEventMock.mock.calls
+        .map((call) => String(call[3]))
+        .filter((message) => message.includes('Execution blocked by breaker'));
+      expect(blockedMessages.length).toBeGreaterThan(0);
+    });
+    expect(executeTaskMock).toHaveBeenCalledTimes(callsAfterOpen);
+
+    expect(
+      createSystemEventMock.mock.calls.some((call) => String(call[3]).includes('Execution breaker opened')),
+    ).toBe(true);
+    expect(events.some((event) => event?.type === 'activity:entry')).toBe(true);
+
+    await stopQueueProcessing(workspace.id, { persist: false });
+  });
+
+  it('manual start clears an open breaker immediately and allows dispatch to resume', async () => {
+    process.env.PI_FACTORY_EXECUTION_BREAKER_THRESHOLD = '1';
+    process.env.PI_FACTORY_EXECUTION_BREAKER_COOLDOWN_MS = '120000';
+    process.env.PI_FACTORY_EXECUTION_BREAKER_BURST_WINDOW_MS = '120000';
+
+    const workspace = createWorkspace(1);
+    const tasks = [
+      createTask('TASK-READY', 'ready', 0, '2025-01-01T00:00:00.000Z', {
+        executionModelConfig: { provider: 'openai', modelId: 'gpt-4o' },
+        modelConfig: { provider: 'openai', modelId: 'gpt-4o' },
+      }),
+    ];
+
+    getWorkspaceByIdMock.mockImplementation(async () => workspace);
+    discoverTasksMock.mockImplementation(() => tasks);
+
+    let shouldFail = true;
+    executeTaskMock.mockImplementation(async ({ onComplete }: any) => {
+      if (shouldFail) {
+        onComplete(false, { errorMessage: 'authentication failed: invalid api key' });
+      } else {
+        onComplete(true);
+      }
+    });
+
+    const { startQueueProcessing, stopQueueProcessing, getQueueStatus, kickQueue } = await import('../src/queue-manager.js');
+
+    await startQueueProcessing(workspace.id, () => {}, { persist: false });
+
+    await vi.waitFor(async () => {
+      const status = await getQueueStatus(workspace.id);
+      expect(status.executionBreakers?.length).toBe(1);
+    });
+
+    shouldFail = false;
+    await startQueueProcessing(workspace.id, () => {}, { persist: false });
+
+    const statusAfterManualResume = await getQueueStatus(workspace.id);
+    expect(statusAfterManualResume.executionBreakers).toBeUndefined();
+
+    kickQueue(workspace.id);
+    await vi.waitFor(() => {
+      expect(executeTaskMock.mock.calls.length).toBeGreaterThan(1);
+    });
+
+    expect(
+      createSystemEventMock.mock.calls.some((call) => String(call[3]).includes('manually cleared')),
+    ).toBe(true);
+
+    await stopQueueProcessing(workspace.id, { persist: false });
+  });
+
+  it('auto-closes breaker after cooldown and resets burst tracking for the next attempt', async () => {
+    process.env.PI_FACTORY_EXECUTION_BREAKER_THRESHOLD = '2';
+    process.env.PI_FACTORY_EXECUTION_BREAKER_COOLDOWN_MS = '80';
+    process.env.PI_FACTORY_EXECUTION_BREAKER_BURST_WINDOW_MS = '500';
+
+    vi.useFakeTimers();
+
+    try {
+      const workspace = createWorkspace(1);
+      const tasks = [
+        createTask('TASK-READY', 'ready', 0, '2025-01-01T00:00:00.000Z', {
+          executionModelConfig: { provider: 'openai', modelId: 'gpt-4.1-mini' },
+          modelConfig: { provider: 'openai', modelId: 'gpt-4.1-mini' },
+        }),
+      ];
+
+      getWorkspaceByIdMock.mockImplementation(async () => workspace);
+      discoverTasksMock.mockImplementation(() => tasks);
+
+      let failureCount = 0;
+      executeTaskMock.mockImplementation(async ({ onComplete }: any) => {
+        failureCount += 1;
+        if (failureCount <= 3) {
+          onComplete(false, { errorMessage: '429 too many requests' });
+          return;
+        }
+
+        onComplete(true);
+      });
+
+      const { startQueueProcessing, stopQueueProcessing, getQueueStatus, kickQueue } = await import('../src/queue-manager.js');
+
+      await startQueueProcessing(workspace.id, () => {}, { persist: false });
+      await vi.advanceTimersByTimeAsync(5);
+
+      kickQueue(workspace.id);
+      await vi.advanceTimersByTimeAsync(5);
+
+      let status = await getQueueStatus(workspace.id);
+      expect(status.executionBreakers?.length).toBe(1);
+
+      await vi.advanceTimersByTimeAsync(200);
+      status = await getQueueStatus(workspace.id);
+      expect(status.executionBreakers).toBeUndefined();
+
+      // First post-cooldown failure should not immediately reopen (burst reset).
+      kickQueue(workspace.id);
+      await vi.advanceTimersByTimeAsync(5);
+      status = await getQueueStatus(workspace.id);
+      expect(status.executionBreakers).toBeUndefined();
+      expect(failureCount).toBeGreaterThanOrEqual(3);
+
+      expect(
+        createSystemEventMock.mock.calls.some((call) => String(call[3]).includes('auto-closed')),
+      ).toBe(true);
+
+      await stopQueueProcessing(workspace.id, { persist: false });
+    } finally {
+      vi.useRealTimers();
+      process.env.PI_FACTORY_EXECUTION_BREAKER_THRESHOLD = '3';
+      process.env.PI_FACTORY_EXECUTION_BREAKER_COOLDOWN_MS = String(5 * 60 * 1000);
+      process.env.PI_FACTORY_EXECUTION_BREAKER_BURST_WINDOW_MS = String(2 * 60 * 1000);
+    }
   });
 });
