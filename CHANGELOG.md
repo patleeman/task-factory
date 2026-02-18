@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Skill lane assignment is now universal: any discovered skill can be used in pre-planning, pre-execution, or post-execution lanes without hook-compatibility filtering.
 - Default post-execution skill order now includes `update-docs` for new tasks.
 - Runtime/API docs now define reliability query patterns and alert thresholds for stall ratio and repeated provider failures.
-- Foreman Q&A submit flow now dismisses the Q&A panel immediately after a successful `/qa/respond` call, while preserving existing WS-driven lifecycle reconciliation.
+- Foreman Q&A lifecycle is now more resilient across workspace switches: pending prompts recover on workspace resume via persisted-history + `/qa/pending` fallback, and the Q&A panel dismisses immediately after successful `/qa/respond` and `/qa/abort` calls while WS events continue idempotent reconciliation.
 
 ### Fixed
 - Deleting a running task now stops active planning/execution sessions before file removal, and late callbacks no longer recreate deleted task files.

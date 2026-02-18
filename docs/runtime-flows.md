@@ -30,7 +30,7 @@ Follow one task through this order:
 | 3 | Session runs in `foreman` mode contract |
 | 4 | Foreman tools run via callbacks (`create_draft_task`, `factory_control`, etc.) |
 | 5 | Server emits `planning:*`, `qa:request`, `shelf:updated` WS events |
-| 6 | On successful `POST /qa/respond`, client clears active Q&A locally immediately; later WS status/message events still reconcile state idempotently |
+| 6 | Client hydrates pending Q&A from persisted messages plus `GET /qa/pending` fallback (for workspace resume/off-screen gaps); on successful `POST /qa/respond` or `POST /qa/abort`, it clears active Q&A locally immediately while later WS events reconcile idempotently |
 
 ### 2) Task planning flow
 

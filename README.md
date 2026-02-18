@@ -121,7 +121,7 @@ Provider setup supports all providers [pi supports](https://github.com/badlogic/
 ![Provider setup and login](docs/screenshots/provider_login.png)
 
 The agent can ask you questions using a multiple choice Q&A widget.
-After you submit all answers, the Q&A panel now closes immediately on successful submit (without waiting for follow-up realtime events).
+The Q&A panel now recovers reliably after returning to a workspace, and closes immediately on successful submit/abort (without waiting for follow-up realtime events).
 
 ![Question/answer flow in planning](docs/screenshots/qa.png)
 

@@ -25,6 +25,11 @@ describe('qa submit fallback regression checks', () => {
     expect(planningHookSource).toContain('stopQAPoll()');
   });
 
+  it('also clears active QA locally after successful abort so recovered dialogs close immediately', () => {
+    expect(workspacePageSource).toContain('await api.abortQA(workspaceId, activeRequest.requestId)');
+    expect(workspacePageSource).toContain('planningStream.resolveQARequestLocally(activeRequest.requestId)');
+  });
+
   it('keeps retry flow intact when submit fails', () => {
     expect(workspacePageSource).toContain("showToast('Failed to submit answers')");
     expect(workspacePageSource).toContain('return false');

@@ -398,6 +398,7 @@ export function WorkspacePage() {
     setForemanSlashCommands(BASE_FOREMAN_SLASH_COMMANDS)
     setTaskSlashCommands(BASE_TASK_SLASH_COMMANDS)
     setHookSkillOptions([])
+    setPlanningMessages([])
     setAgentTaskFormUpdates(null)
     setNewTaskPrefill(null)
     setDraftTaskStates({})
@@ -1251,9 +1252,12 @@ export function WorkspacePage() {
   }
 
   const handleQAAbort = async () => {
-    if (!workspaceId || !planningStream.activeQARequest) return
+    const activeRequest = planningStream.activeQARequest
+    if (!workspaceId || !activeRequest) return
+
     try {
-      await api.abortQA(workspaceId, planningStream.activeQARequest.requestId)
+      await api.abortQA(workspaceId, activeRequest.requestId)
+      planningStream.resolveQARequestLocally(activeRequest.requestId)
     } catch (err) {
       console.error('Failed to abort Q&A:', err)
     }

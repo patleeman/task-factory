@@ -210,17 +210,42 @@ export function usePlanningStreaming(
     }, 500)
   }, [applyQALifecycleEvent, stopQAPoll])
 
+  const recoverPendingQARequest = useCallback(async (wsId: string) => {
+    try {
+      const request = await api.getPendingQA(wsId)
+      if (!request) return
+      if (workspaceIdRef.current !== wsId) return
+
+      const nextState = applyQALifecycleEvent(
+        { type: 'request', request },
+        { markAwaitingOnOpen: true },
+      )
+
+      if (
+        nextState.activeRequest?.requestId === request.requestId
+        || nextState.resolvedRequestIds.has(request.requestId)
+      ) {
+        stopQAPoll()
+      }
+    } catch {
+      // ignore
+    }
+  }, [applyQALifecycleEvent, stopQAPoll])
+
   useEffect(() => {
     setMessages([])
     setAgentStream(INITIAL_AGENT_STREAM)
     setActiveQARequest(null)
     qaLifecycleRef.current = createPlanningQALifecycleState()
     stopQAPoll()
-  }, [workspaceId, stopQAPoll])
+
+    if (!workspaceId) return
+    void recoverPendingQARequest(workspaceId)
+  }, [workspaceId, recoverPendingQARequest, stopQAPoll])
 
   useEffect(() => stopQAPoll, [stopQAPoll])
 
-  // Seed with initial messages loaded from server, or clear on reset
+  // Seed with initial messages loaded from server, then recover pending QA via HTTP fallback.
   useEffect(() => {
     if (!initialMessages) return
 
@@ -230,6 +255,10 @@ export function usePlanningStreaming(
       setActiveQARequest(null)
       qaLifecycleRef.current = createPlanningQALifecycleState()
       stopQAPoll()
+
+      if (workspaceId) {
+        void recoverPendingQARequest(workspaceId)
+      }
       return
     }
 
@@ -258,10 +287,13 @@ export function usePlanningStreaming(
         status: 'awaiting_qa' as any,
         isActive: false,
       }))
-    } else {
-      stopQAPoll()
+      return
     }
-  }, [initialMessages, stopQAPoll])
+
+    if (workspaceId) {
+      void recoverPendingQARequest(workspaceId)
+    }
+  }, [initialMessages, recoverPendingQARequest, stopQAPoll, workspaceId])
 
   useEffect(() => {
     return subscribe((msg) => {
