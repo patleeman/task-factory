@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { createTask as createTaskFile, discoverTasks } from '../src/task-service.js';
+import { createTask as createTaskFile, deleteTask, discoverTasks } from '../src/task-service.js';
 import {
   extractTaskUsageSampleFromAssistantMessage,
   mergeTaskUsageMetrics,
@@ -260,5 +260,27 @@ describe('persistTaskUsageFromAssistantMessage', () => {
 
     expect(result).toBeNull();
     expect(after.frontmatter.usageMetrics).toEqual(before.frontmatter.usageMetrics);
+  });
+
+  it('does not recreate a task that was deleted before usage persistence', () => {
+    const { workspacePath, tasksDir } = createTempWorkspace();
+
+    const task = createTaskFile(workspacePath, tasksDir, {
+      title: 'Deleted task',
+      content: 'should stay deleted',
+      acceptanceCriteria: [],
+    });
+
+    deleteTask(task);
+
+    const result = persistTaskUsageFromAssistantMessage(task, {
+      role: 'assistant',
+      provider: 'anthropic',
+      model: 'claude-sonnet-4-20250514',
+      usage: { input: 10, output: 5, totalTokens: 15, cost: { total: 0.002 } },
+    });
+
+    expect(result).toBeNull();
+    expect(discoverTasks(tasksDir).find((candidate) => candidate.id === task.id)).toBeUndefined();
   });
 });

@@ -684,8 +684,11 @@ app.delete('/api/workspaces/:workspaceId/tasks/:taskId', async (req, res) => {
   }
 
   try {
-    const { deleteTask } = await import('./task-service.js');
-    deleteTask(task);
+    const { deleteTaskWithLifecycle } = await import('./task-deletion-service.js');
+    await deleteTaskWithLifecycle(task);
+
+    // Deleting an executing task frees capacity immediately.
+    kickQueue(workspace.id);
 
     res.json({ success: true });
   } catch (err) {
@@ -1921,16 +1924,22 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/execute', async (req, res) 
         // Output callback is for legacy/simulation only
       },
       onComplete: (success) => {
-        let taskForBroadcast = task;
+        const latestTasks = discoverTasks(tasksDir);
+        const latestTask = latestTasks.find((candidate) => candidate.id === task.id);
+
+        // Task may have been deleted while running.
+        if (!latestTask) {
+          kickQueue(workspace.id);
+          return;
+        }
+
+        let taskForBroadcast = latestTask;
 
         if (success) {
-          const latestTasks = discoverTasks(tasksDir);
-          const latestTask = latestTasks.find((candidate) => candidate.id === task.id) || task;
           const fromState = buildTaskStateSnapshot(latestTask.frontmatter);
 
           // Auto-move to complete
           moveTaskToPhase(latestTask, 'complete', 'system', 'Execution completed', latestTasks);
-          taskForBroadcast = latestTask;
 
           void logTaskStateTransition({
             workspaceId: workspace.id,

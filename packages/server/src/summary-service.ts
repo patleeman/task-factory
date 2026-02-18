@@ -5,6 +5,7 @@
 // summary text + criteria validation.
 
 import { execSync } from 'child_process';
+import { existsSync } from 'fs';
 import type {
   Task,
   PostExecutionSummary,
@@ -298,6 +299,10 @@ export async function generateAndPersistSummary(
     artifacts: [],
   };
 
+  if (!existsSync(task.filePath)) {
+    return summary;
+  }
+
   task.frontmatter.postExecutionSummary = summary;
   task.frontmatter.updated = new Date().toISOString();
   saveTaskFile(task);
@@ -321,6 +326,10 @@ export function updateCriterionStatus(
 
   summary.criteriaValidation[index].status = status;
   summary.criteriaValidation[index].evidence = evidence;
+
+  if (!existsSync(task.filePath)) {
+    return summary;
+  }
 
   task.frontmatter.updated = new Date().toISOString();
   saveTaskFile(task);

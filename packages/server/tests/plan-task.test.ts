@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { DEFAULT_PLANNING_GUARDRAILS } from '@task-factory/shared';
@@ -2813,5 +2813,56 @@ describe('planTask', () => {
     expect(persistedTask.frontmatter.planningStatus).toBe('error');
 
     errorSpy.mockRestore();
+  });
+
+  it('does not recreate a task deleted while planning is running', async () => {
+    const workspacePath = mkdtempSync(join(tmpdir(), 'pi-factory-plan-task-'));
+    tempDirs.push(workspacePath);
+
+    const tasksDir = join(workspacePath, '.pi', 'tasks');
+    mkdirSync(tasksDir, { recursive: true });
+
+    const { createTask, deleteTask, discoverTasks } = await import('../src/task-service.js');
+    const { planTask, stopTaskExecution, getActiveSession } = await import('../src/agent-execution-service.js');
+
+    const task = createTask(workspacePath, tasksDir, {
+      content: 'Delete this task while planning is running',
+      acceptanceCriteria: [],
+    });
+
+    let rejectPrompt: ((err?: unknown) => void) | null = null;
+
+    createAgentSessionMock.mockResolvedValue({
+      session: {
+        subscribe: () => () => {},
+        prompt: () => new Promise<void>((_, reject) => {
+          rejectPrompt = reject;
+        }),
+        abort: async () => {
+          rejectPrompt?.(new Error('aborted'));
+        },
+      },
+    });
+
+    const planningPromise = planTask({
+      task,
+      workspaceId: 'workspace-test',
+      workspacePath,
+      broadcastToWorkspace: () => {},
+    });
+
+    await vi.waitFor(() => {
+      expect(getActiveSession(task.id)).toBeTruthy();
+    });
+
+    deleteTask(task);
+    const stopped = await stopTaskExecution(task.id);
+    expect(stopped).toBe(true);
+
+    const result = await planningPromise;
+    expect(result).toBeNull();
+
+    expect(existsSync(task.filePath)).toBe(false);
+    expect(discoverTasks(tasksDir).find((candidate) => candidate.id === task.id)).toBeUndefined();
   });
 });

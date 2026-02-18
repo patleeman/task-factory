@@ -48,7 +48,7 @@ Conventions:
 | POST | `/api/workspaces/:workspaceId/tasks` | Create task |
 | GET | `/api/workspaces/:workspaceId/tasks/:taskId` | Get task |
 | PATCH | `/api/workspaces/:workspaceId/tasks/:taskId` | Update task fields |
-| DELETE | `/api/workspaces/:workspaceId/tasks/:taskId` | Delete task |
+| DELETE | `/api/workspaces/:workspaceId/tasks/:taskId` | Delete task (stops active planning/execution session first, then removes task files) |
 | POST | `/api/workspaces/:workspaceId/tasks/:taskId/move` | Move phase |
 | POST | `/api/workspaces/:workspaceId/tasks/reorder` | Reorder tasks in a phase |
 | POST | `/api/workspaces/:workspaceId/tasks/:taskId/plan/regenerate` | Regenerate task plan |

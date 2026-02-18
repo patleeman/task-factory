@@ -2251,12 +2251,12 @@ async function registerTaskCallbacks(workspaceId: string): Promise<void> {
       return updateTask(task, updates);
     },
     deleteTask: async (taskId: string) => {
-      const { deleteTask } = await import('./task-service.js');
+      const { deleteTaskWithLifecycle } = await import('./task-deletion-service.js');
       const tasksDir = getTasksDir(workspace);
       const tasks = discoverTasks(tasksDir);
       const task = tasks.find(t => t.id === taskId);
       if (!task) return false;
-      deleteTask(task);
+      await deleteTaskWithLifecycle(task);
       return true;
     },
     moveTask: async (taskId: string, toPhase: string) => {

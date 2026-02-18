@@ -557,6 +557,25 @@ export function getAllActiveSessions(): TaskSession[] {
   return Array.from(activeSessions.values());
 }
 
+async function attachPiSessionIfStillActive(
+  session: TaskSession,
+  piSession: AgentSession,
+  context: string,
+): Promise<boolean> {
+  if (getActiveSession(session.taskId) !== session) {
+    try {
+      await piSession.abort();
+    } catch {
+      // Ignore stale-session abort errors.
+    }
+    console.warn(`[AgentExecution] Ignoring ${context} for stale session on task ${session.taskId}`);
+    return false;
+  }
+
+  session.piSession = piSession;
+  return true;
+}
+
 type TaskConversationPurpose = 'planning' | 'execution';
 
 function getExecutionModelConfig(task: Task): ModelConfig | undefined {
@@ -660,9 +679,13 @@ export async function createTaskConversationSession(
 
   const currentSessionFile = session.sessionFile;
   if (currentSessionFile && currentSessionFile !== task.frontmatter.sessionFile) {
-    task.frontmatter.sessionFile = currentSessionFile;
-    task.frontmatter.updated = new Date().toISOString();
-    saveTaskFile(task);
+    if (existsSync(task.filePath)) {
+      task.frontmatter.sessionFile = currentSessionFile;
+      task.frontmatter.updated = new Date().toISOString();
+      saveTaskFile(task);
+    } else {
+      console.warn(`[AgentExecution] Skipping session file persistence for deleted task ${task.id}`);
+    }
   }
 
   return {
@@ -1554,7 +1577,9 @@ export async function executeTask(options: ExecuteTaskOptions): Promise<TaskSess
       console.log(`[ExecuteTask] Resuming previous session for task ${task.id}: ${task.frontmatter.sessionFile}`);
     }
 
-    session.piSession = piSession;
+    if (!await attachPiSessionIfStillActive(session, piSession, 'execution session setup')) {
+      return session;
+    }
 
     // Subscribe to Pi events
     session.unsubscribe = piSession.subscribe((event: AgentSessionEvent) => {
@@ -1975,6 +2000,11 @@ function handleAgentError(
   clearActiveSessionIfOwned(task.id, session);
 
   session.onComplete?.(false, { errorMessage: normalizedError });
+}
+
+/** Remove the planning callback for a task (cleanup). */
+function cleanupPlanCallback(taskId: string): void {
+  globalThis.__piFactoryPlanCallbacks?.delete(taskId);
 }
 
 /** Remove the completion callback for a task (cleanup). */
@@ -2667,7 +2697,9 @@ export async function resumeChat(
       purpose: 'execution',
     });
 
-    session.piSession = piSession;
+    if (!await attachPiSessionIfStillActive(session, piSession, 'resume chat session setup')) {
+      return false;
+    }
 
     session.unsubscribe = piSession.subscribe((event: AgentSessionEvent) => {
       handlePiEvent(event, session, workspaceId, task.id);
@@ -2776,7 +2808,9 @@ export async function startChat(
       purpose: 'execution',
     });
 
-    session.piSession = piSession;
+    if (!await attachPiSessionIfStillActive(session, piSession, 'start chat session setup')) {
+      return false;
+    }
 
     session.unsubscribe = piSession.subscribe((event: AgentSessionEvent) => {
       handlePiEvent(event, session, workspaceId, task.id);
@@ -2843,17 +2877,19 @@ export async function startChat(
 export async function stopTaskExecution(taskId: string): Promise<boolean> {
   const session = activeSessions.get(taskId);
 
-  if (!session || !session.piSession) {
+  if (!session) {
     return false;
   }
 
   clearExecutionTurnWatchdogs(session);
 
   // Abort the agent session via Pi SDK (interrupts current operation)
-  try {
-    await session.piSession.abort();
-  } catch (err) {
-    console.error(`[stopTaskExecution] abort() failed for task ${taskId}:`, err);
+  if (session.piSession) {
+    try {
+      await session.piSession.abort();
+    } catch (err) {
+      console.error(`[stopTaskExecution] abort() failed for task ${taskId}:`, err);
+    }
   }
 
   // Unsubscribe from events so no further callbacks fire
@@ -2862,7 +2898,8 @@ export async function stopTaskExecution(taskId: string): Promise<boolean> {
   // Prevent onComplete from firing after we stop
   session.onComplete = undefined;
 
-  // Clean up completion callback registry
+  // Clean up callback registries
+  cleanupPlanCallback(taskId);
   cleanupCompletionCallback(taskId);
   cleanupAttachFileCallback(taskId);
 
@@ -3139,7 +3176,11 @@ function savePlanForTask(
   workspacePath?: string,
   broadcastToWorkspace?: (event: any) => void,
 ): void {
-  const latestTask = existsSync(task.filePath) ? parseTaskFile(task.filePath) : task;
+  if (!existsSync(task.filePath)) {
+    throw new Error(`Task ${task.id} no longer exists.`);
+  }
+
+  const latestTask = parseTaskFile(task.filePath);
   const currentState = buildTaskStateSnapshot(latestTask.frontmatter);
 
   if (isForbidden(currentState.mode, 'save_plan')) {
@@ -3193,8 +3234,12 @@ function syncTaskReference(target: Task, source: Task): void {
   target.filePath = source.filePath;
 }
 
-function persistPlanningMutation(task: Task, mutate: (latestTask: Task) => void): Task {
-  const latestTask = existsSync(task.filePath) ? parseTaskFile(task.filePath) : task;
+function persistPlanningMutation(task: Task, mutate: (latestTask: Task) => void): Task | null {
+  if (!existsSync(task.filePath)) {
+    return null;
+  }
+
+  const latestTask = parseTaskFile(task.filePath);
   mutate(latestTask);
   saveTaskFile(latestTask);
   syncTaskReference(task, latestTask);
@@ -3211,6 +3256,10 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
     latestTask.frontmatter.planningStatus = 'running';
     latestTask.frontmatter.updated = new Date().toISOString();
   });
+
+  if (!runningTask) {
+    return null;
+  }
 
   broadcastToWorkspace?.({
     type: 'task:updated',
@@ -3328,7 +3377,10 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
       defaultThinkingLevel: PLANNING_DEFAULT_THINKING_LEVEL,
     });
 
-    session.piSession = piSession;
+    if (!await attachPiSessionIfStillActive(session, piSession, 'planning session setup')) {
+      registry.delete(task.id);
+      return null;
+    }
 
     const abortForPlanningGuardrail = (message: string): void => {
       if (hasPersistedPlan || planningGuardrailAbortMessage) {
@@ -3521,26 +3573,28 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
         latestTask.frontmatter.updated = new Date().toISOString();
       });
 
-      broadcastToWorkspace?.({
-        type: 'task:updated',
-        task: erroredTask,
-        changes: {},
-      });
+      if (erroredTask) {
+        broadcastToWorkspace?.({
+          type: 'task:updated',
+          task: erroredTask,
+          changes: {},
+        });
 
-      void logTaskStateTransition({
-        workspaceId,
-        taskId: erroredTask.id,
-        from: {
-          ...beforeErrorState,
-          mode: 'task_planning',
-        },
-        to: buildTaskStateSnapshot(erroredTask.frontmatter),
-        source: 'planning:missing-save-plan',
-        reason: 'Planning ended without save_plan',
-        broadcastToWorkspace,
-      }).catch((stateErr) => {
-        console.error(`[planTask] Failed to log missing-save-plan state for ${erroredTask.id}:`, stateErr);
-      });
+        void logTaskStateTransition({
+          workspaceId,
+          taskId: erroredTask.id,
+          from: {
+            ...beforeErrorState,
+            mode: 'task_planning',
+          },
+          to: buildTaskStateSnapshot(erroredTask.frontmatter),
+          source: 'planning:missing-save-plan',
+          reason: 'Planning ended without save_plan',
+          broadcastToWorkspace,
+        }).catch((stateErr) => {
+          console.error(`[planTask] Failed to log missing-save-plan state for ${erroredTask.id}:`, stateErr);
+        });
+      }
 
       broadcastActivityEntry(
         broadcastToWorkspace,
@@ -3611,26 +3665,28 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
       latestTask.frontmatter.updated = new Date().toISOString();
     });
 
-    broadcastToWorkspace?.({
-      type: 'task:updated',
-      task: erroredTask,
-      changes: {},
-    });
+    if (erroredTask) {
+      broadcastToWorkspace?.({
+        type: 'task:updated',
+        task: erroredTask,
+        changes: {},
+      });
 
-    void logTaskStateTransition({
-      workspaceId,
-      taskId: erroredTask.id,
-      from: {
-        ...beforeErrorState,
-        mode: 'task_planning',
-      },
-      to: buildTaskStateSnapshot(erroredTask.frontmatter),
-      source: 'planning:error',
-      reason: errMessage,
-      broadcastToWorkspace,
-    }).catch((stateErr) => {
-      console.error(`[planTask] Failed to log planning error state for ${erroredTask.id}:`, stateErr);
-    });
+      void logTaskStateTransition({
+        workspaceId,
+        taskId: erroredTask.id,
+        from: {
+          ...beforeErrorState,
+          mode: 'task_planning',
+        },
+        to: buildTaskStateSnapshot(erroredTask.frontmatter),
+        source: 'planning:error',
+        reason: errMessage,
+        broadcastToWorkspace,
+      }).catch((stateErr) => {
+        console.error(`[planTask] Failed to log planning error state for ${erroredTask.id}:`, stateErr);
+      });
+    }
 
     broadcastActivityEntry(
       broadcastToWorkspace,
@@ -3711,7 +3767,10 @@ function maybeAutoPromoteBacklogTaskAfterPlanning(
 
   const tasksDir = resolveTasksDirForTask(task, workspaceConfig, workspacePath);
   const tasks = discoverTasks(tasksDir);
-  const latestTask = tasks.find((candidate) => candidate.id === task.id) || task;
+  const latestTask = tasks.find((candidate) => candidate.id === task.id);
+  if (!latestTask) {
+    return task;
+  }
 
   const moveValidation = canMoveToPhase(latestTask, 'ready');
   if (!moveValidation.allowed) {
@@ -3786,6 +3845,10 @@ function finalizePlan(
     latestTask.frontmatter.planningStatus = 'completed';
     latestTask.frontmatter.updated = new Date().toISOString();
   });
+
+  if (!updatedTask) {
+    return;
+  }
 
   void logTaskStateTransition({
     workspaceId,

@@ -246,8 +246,12 @@ export function mergeTaskUsageMetrics(
   };
 }
 
-export function persistTaskUsageSample(task: Task, sample: TaskUsageSample): Task {
-  const latestTask = existsSync(task.filePath) ? parseTaskFile(task.filePath) : task;
+export function persistTaskUsageSample(task: Task, sample: TaskUsageSample): Task | null {
+  if (!existsSync(task.filePath)) {
+    return null;
+  }
+
+  const latestTask = parseTaskFile(task.filePath);
 
   latestTask.frontmatter.usageMetrics = mergeTaskUsageMetrics(
     latestTask.frontmatter.usageMetrics,

@@ -55,6 +55,8 @@ Follow one task through this order:
 | 6 | `task_complete` signal triggers completion callback and post hooks |
 | 7 | Server moves task to `complete` and requests next queue kick |
 
+Delete safety: `DELETE /api/workspaces/:workspaceId/tasks/:taskId` stops any active planning/execution session for the task before deleting files, and late completion/persistence callbacks no-op when the task no longer exists.
+
 ### 4) Queue manager flow
 
 | Step | Summary |

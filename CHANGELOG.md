@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Runtime/API docs now define reliability query patterns and alert thresholds for stall ratio and repeated provider failures.
 - Foreman Q&A submit flow now dismisses the Q&A panel immediately after a successful `/qa/respond` call, while preserving existing WS-driven lifecycle reconciliation.
 
+### Fixed
+- Deleting a running task now stops active planning/execution sessions before file removal, and late callbacks no longer recreate deleted task files.
 ## [0.2.0] - 2026-02-17
 
 ### Added
