@@ -73,6 +73,12 @@ import {
   getTaskFactoryGlobalExtensionsDir,
   getWorkspaceTaskFactoryExtensionsDir,
 } from './taskfactory-home.js';
+import {
+  clearExecutionLease,
+  getExecutionLeaseHeartbeatIntervalMs,
+  heartbeatExecutionLease,
+  isExecutionLeaseTrackingEnabled,
+} from './execution-lease-service.js';
 
 // =============================================================================
 // Repo-local Extension Discovery
@@ -356,6 +362,7 @@ interface TaskSession {
   id: string;
   taskId: string;
   workspaceId: string;
+  workspacePath?: string;
   piSession: AgentSession | null;
   status: 'idle' | 'running' | 'paused' | 'completed' | 'error';
   startTime: string;
@@ -419,12 +426,81 @@ interface TaskSession {
   activeTurnTelemetryClosed?: boolean;
   /** Captures assistant stopReason=error for turn-end telemetry */
   activeTurnErrorMessage?: string;
+  /** Interval that refreshes the persisted execution lease heartbeat. */
+  leaseHeartbeatTimer?: ReturnType<typeof setInterval>;
 }
 
 const activeSessions = new Map<string, TaskSession>();
 
+function shouldTrackExecutionLease(session: TaskSession): boolean {
+  if (!isExecutionLeaseTrackingEnabled()) {
+    return false;
+  }
+
+  return Boolean(
+    session.workspacePath
+    && session.task
+    && session.task.frontmatter.phase === 'executing',
+  );
+}
+
+function stopExecutionLeaseHeartbeat(session: TaskSession): void {
+  if (session.leaseHeartbeatTimer) {
+    clearInterval(session.leaseHeartbeatTimer);
+    session.leaseHeartbeatTimer = undefined;
+  }
+}
+
+function refreshExecutionLeaseHeartbeat(session: TaskSession): void {
+  if (!shouldTrackExecutionLease(session)) {
+    return;
+  }
+
+  const workspacePath = session.workspacePath!;
+  const status = session.status;
+
+  void heartbeatExecutionLease(workspacePath, session.taskId, status).catch((err) => {
+    console.warn(`[AgentExecution] Failed to refresh execution lease heartbeat for ${session.taskId}:`, err);
+  });
+}
+
+function startExecutionLeaseHeartbeat(session: TaskSession): void {
+  if (!shouldTrackExecutionLease(session)) {
+    return;
+  }
+
+  stopExecutionLeaseHeartbeat(session);
+  refreshExecutionLeaseHeartbeat(session);
+
+  const intervalMs = getExecutionLeaseHeartbeatIntervalMs();
+  const timer = setInterval(() => {
+    refreshExecutionLeaseHeartbeat(session);
+  }, intervalMs);
+  timer.unref?.();
+  session.leaseHeartbeatTimer = timer;
+}
+
+function clearExecutionLeaseTracking(session: TaskSession): void {
+  stopExecutionLeaseHeartbeat(session);
+
+  if (!session.workspacePath || !isExecutionLeaseTrackingEnabled()) {
+    return;
+  }
+
+  const workspacePath = session.workspacePath;
+  void clearExecutionLease(workspacePath, session.taskId).catch((err) => {
+    console.warn(`[AgentExecution] Failed to clear execution lease for ${session.taskId}:`, err);
+  });
+}
+
 function registerActiveSession(session: TaskSession): void {
+  const previous = activeSessions.get(session.taskId);
+  if (previous && previous !== session) {
+    clearExecutionLeaseTracking(previous);
+  }
+
   activeSessions.set(session.taskId, session);
+  startExecutionLeaseHeartbeat(session);
 }
 
 function clearActiveSessionIfOwned(taskId: string, session: TaskSession): boolean {
@@ -434,6 +510,7 @@ function clearActiveSessionIfOwned(taskId: string, session: TaskSession): boolea
   }
 
   activeSessions.delete(taskId);
+  clearExecutionLeaseTracking(session);
   return true;
 }
 
@@ -1400,6 +1477,7 @@ export async function executeTask(options: ExecuteTaskOptions): Promise<TaskSess
     id: crypto.randomUUID(),
     taskId: task.id,
     workspaceId,
+    workspacePath,
     piSession: null,
     status: 'running',
     startTime: new Date().toISOString(),
@@ -2534,6 +2612,7 @@ export async function resumeChat(
     id: crypto.randomUUID(),
     taskId: task.id,
     workspaceId,
+    workspacePath,
     piSession: null,
     status: 'running',
     startTime: new Date().toISOString(),
@@ -2642,6 +2721,7 @@ export async function startChat(
     id: crypto.randomUUID(),
     taskId: task.id,
     workspaceId,
+    workspacePath,
     piSession: null,
     status: 'running',
     startTime: new Date().toISOString(),
@@ -3157,6 +3237,7 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
     id: crypto.randomUUID(),
     taskId: task.id,
     workspaceId,
+    workspacePath,
     piSession: null,
     status: 'running',
     startTime: new Date().toISOString(),

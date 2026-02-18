@@ -1793,6 +1793,7 @@ import {
   initializeQueueManagers,
 } from './queue-manager.js';
 import { buildExecutionSnapshots } from './execution-snapshot.js';
+import { recoverStaleExecutingSessionsOnStartup } from './startup-execution-recovery.js';
 
 // Start task execution
 app.post('/api/workspaces/:workspaceId/tasks/:taskId/execute', async (req, res) => {
@@ -3301,7 +3302,7 @@ async function resumeInterruptedPlanningRuns(): Promise<void> {
 }
 
 async function main() {
-  server.listen(PORT, HOST, () => {
+  server.listen(PORT, HOST, async () => {
     const nonLoopbackWarning = getNonLoopbackBindWarning(HOST, PORT);
     if (nonLoopbackWarning) {
       logger.warn(nonLoopbackWarning.message, nonLoopbackWarning.data);
@@ -3316,10 +3317,25 @@ async function main() {
 ╚══════════════════════════════════════════════════════════╝
     `);
 
+    // Recover stale executing sessions before queue/planning startup resumes.
+    try {
+      await recoverStaleExecutingSessionsOnStartup({
+        broadcastToWorkspace: (workspaceId, event) => {
+          broadcastToWorkspace(workspaceId, event);
+        },
+      });
+    } catch (err) {
+      logger.error('[Startup] Failed stale execution recovery sweep:', err);
+    }
+
     // Resume queue processing for workspaces that had it enabled
-    initializeQueueManagers((workspaceId, event) => {
-      broadcastToWorkspace(workspaceId, event);
-    });
+    try {
+      await initializeQueueManagers((workspaceId, event) => {
+        broadcastToWorkspace(workspaceId, event);
+      });
+    } catch (err) {
+      logger.error('[Startup] Failed to initialize queue managers:', err);
+    }
 
     // Resume planning tasks that were interrupted by shutdown/restart.
     resumeInterruptedPlanningRuns().catch((err) => {
