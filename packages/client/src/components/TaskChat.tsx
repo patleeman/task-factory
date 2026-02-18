@@ -27,6 +27,15 @@ export interface SlashCommandOption {
   description: string
 }
 
+export type HookSkillPhase = 'pre-planning' | 'pre' | 'post'
+
+export interface HookSkillOption {
+  id: string
+  name: string
+  description: string
+  hooks: HookSkillPhase[]
+}
+
 interface TaskChatProps {
   taskId?: string
   taskPhase?: Phase
@@ -51,6 +60,8 @@ interface TaskChatProps {
   emptyState?: { title: string; subtitle: string }
   /** Optional slash command options for autocomplete in the composer. */
   slashCommands?: SlashCommandOption[]
+  /** Optional execution hook skills shown as informational autocomplete context. */
+  hookSkills?: HookSkillOption[]
   /** Optional element rendered in the header bar, next to reset button */
   headerSlot?: React.ReactNode
   /** Optional element rendered above the input area (e.g. QADialog) */
@@ -176,6 +187,47 @@ function formatContextUsageLabel(percent: number | null | undefined): string {
   if (percent == null) return 'ctx ?'
   const rounded = percent >= 10 ? Math.round(percent) : Math.round(percent * 10) / 10
   return `ctx ${rounded}%`
+}
+
+function fuzzyMatchScore(query: string, candidate: string): number | null {
+  if (query.length === 0) return 0
+
+  let queryIndex = 0
+  let firstMatchIndex = -1
+  let previousMatchIndex = -1
+  let gapPenalty = 0
+
+  for (let candidateIndex = 0; candidateIndex < candidate.length && queryIndex < query.length; candidateIndex += 1) {
+    if (candidate[candidateIndex] !== query[queryIndex]) continue
+
+    if (firstMatchIndex === -1) {
+      firstMatchIndex = candidateIndex
+    }
+
+    if (previousMatchIndex !== -1 && candidateIndex - previousMatchIndex > 1) {
+      gapPenalty += candidateIndex - previousMatchIndex - 1
+    }
+
+    previousMatchIndex = candidateIndex
+    queryIndex += 1
+  }
+
+  if (queryIndex !== query.length || firstMatchIndex === -1 || previousMatchIndex === -1) {
+    return null
+  }
+
+  const span = previousMatchIndex - firstMatchIndex + 1
+  return gapPenalty * 2 + (span - query.length)
+}
+
+function isHookSkillPhase(value: unknown): value is HookSkillPhase {
+  return value === 'pre-planning' || value === 'pre' || value === 'post'
+}
+
+function formatHookSkillPhase(phase: HookSkillPhase): string {
+  if (phase === 'pre-planning') return 'pre-planning'
+  if (phase === 'pre') return 'pre-execution'
+  return 'post-execution'
 }
 
 // Try to guess tool name + detail from content when metadata is missing (old entries)
@@ -662,6 +714,7 @@ export function TaskChat({
   title,
   emptyState,
   slashCommands,
+  hookSkills,
   headerSlot,
   bottomSlot,
   onOpenArtifact,
@@ -783,53 +836,131 @@ export function TaskChat({
     return Array.from(deduped.values())
   }, [slashCommands])
 
+  const normalizedHookSkills = useMemo(() => {
+    if (!hookSkills || hookSkills.length === 0) {
+      return []
+    }
+
+    const deduped = new Map<string, HookSkillOption>()
+
+    for (const skill of hookSkills) {
+      const id = skill.id.trim()
+      if (!id) continue
+
+      if (deduped.has(id)) continue
+
+      const hooks = Array.isArray(skill.hooks)
+        ? Array.from(new Set(skill.hooks.filter((hook): hook is HookSkillPhase => isHookSkillPhase(hook))))
+        : []
+
+      deduped.set(id, {
+        id,
+        name: skill.name.trim() || id,
+        description: skill.description.trim(),
+        hooks,
+      })
+    }
+
+    return Array.from(deduped.values()).sort((a, b) => a.id.localeCompare(b.id))
+  }, [hookSkills])
+
   const slashAutocomplete = useMemo(() => {
-    if (normalizedSlashCommands.length === 0) {
-      return { visible: false, suggestions: [] as SlashCommandOption[] }
+    const empty = { visible: false, query: '', suggestions: [] as SlashCommandOption[] }
+    const hasCatalogEntries = normalizedSlashCommands.length > 0 || normalizedHookSkills.length > 0
+
+    if (!hasCatalogEntries) {
+      return empty
     }
 
     const trimmedStart = input.trimStart()
     if (!trimmedStart.startsWith('/')) {
-      return { visible: false, suggestions: [] as SlashCommandOption[] }
+      return empty
     }
 
     const token = trimmedStart.split(/\s+/u)[0] || ''
     if (!token.startsWith('/')) {
-      return { visible: false, suggestions: [] as SlashCommandOption[] }
+      return empty
     }
 
     const hasArguments = trimmedStart.length > token.length && /\s/u.test(trimmedStart.charAt(token.length))
     if (hasArguments) {
-      return { visible: false, suggestions: [] as SlashCommandOption[] }
+      return empty
     }
 
     const tokenLower = token.toLowerCase()
-    const suggestions = normalizedSlashCommands
-      .filter((option) => {
-        const optionCommand = option.command.toLowerCase()
+    const query = tokenLower.startsWith('/') ? tokenLower.slice(1) : tokenLower
 
-        if (optionCommand.startsWith(tokenLower)) {
-          return true
+    const ranked = normalizedSlashCommands
+      .map((option) => {
+        const candidate = option.command.toLowerCase()
+        const candidateQuery = candidate.startsWith('/') ? candidate.slice(1) : candidate
+
+        const score = fuzzyMatchScore(query, candidateQuery)
+        if (score == null) return null
+
+        const prefixRank = candidate.startsWith(tokenLower) ? 0 : 1
+        return {
+          option,
+          prefixRank,
+          score,
+          length: candidate.length,
         }
-
-        if (tokenLower.startsWith('/skill:') && optionCommand.startsWith('/skill:')) {
-          const typedSkill = tokenLower.slice('/skill:'.length)
-          const candidateSkill = optionCommand.slice('/skill:'.length)
-          return typedSkill.length === 0 || candidateSkill.startsWith(typedSkill)
-        }
-
-        return false
       })
-      .slice(0, 8)
+      .filter((entry): entry is { option: SlashCommandOption; prefixRank: number; score: number; length: number } => entry !== null)
+      .sort((a, b) => {
+        if (a.prefixRank !== b.prefixRank) return a.prefixRank - b.prefixRank
+        if (a.score !== b.score) return a.score - b.score
+        if (a.length !== b.length) return a.length - b.length
+        return a.option.command.localeCompare(b.option.command)
+      })
 
     return {
-      visible: suggestions.length > 0,
-      suggestions,
+      visible: true,
+      query,
+      suggestions: ranked.slice(0, 8).map((entry) => entry.option),
     }
-  }, [input, normalizedSlashCommands])
+  }, [input, normalizedHookSkills, normalizedSlashCommands])
+
+  const hookSkillSuggestions = useMemo(() => {
+    if (!slashAutocomplete.visible || normalizedHookSkills.length === 0) {
+      return []
+    }
+
+    const query = slashAutocomplete.query
+    if (query.length === 0) {
+      return normalizedHookSkills
+    }
+
+    const ranked = normalizedHookSkills
+      .map((skill) => {
+        const candidate = `${skill.id} ${skill.name}`.toLowerCase()
+        const score = fuzzyMatchScore(query, candidate)
+        if (score == null) return null
+
+        const prefixRank = candidate.startsWith(query) ? 0 : 1
+        return {
+          skill,
+          prefixRank,
+          score,
+        }
+      })
+      .filter((entry): entry is { skill: HookSkillOption; prefixRank: number; score: number } => entry !== null)
+      .sort((a, b) => {
+        if (a.prefixRank !== b.prefixRank) return a.prefixRank - b.prefixRank
+        if (a.score !== b.score) return a.score - b.score
+        return a.skill.id.localeCompare(b.skill.id)
+      })
+
+    return ranked.slice(0, 8).map((entry) => entry.skill)
+  }, [normalizedHookSkills, slashAutocomplete.query, slashAutocomplete.visible])
 
   const slashSuggestions = slashAutocomplete.suggestions
   const showSlashAutocomplete = slashAutocomplete.visible
+  const showSlashCommandEmptyState = showSlashAutocomplete && slashSuggestions.length === 0
+  const hasSkillSlashCommands = normalizedSlashCommands.some((option) => option.command.startsWith('/skill:'))
+  const showSlashSkillRegistryEmptyState = showSlashAutocomplete && !hasSkillSlashCommands
+  const showHookSkillEmptyState = showSlashAutocomplete && hookSkillSuggestions.length === 0
+  const isHookSkillRegistryEmpty = normalizedHookSkills.length === 0
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
     const scroller = scrollRef.current
@@ -1578,29 +1709,82 @@ export function TaskChat({
         )}
 
         {showSlashAutocomplete && (
-          <div className="mx-3 mt-2 mb-0.5 rounded-md border border-slate-200 bg-white shadow-sm overflow-hidden" role="listbox" aria-label="Slash command suggestions">
+          <div className="mx-3 mt-2 mb-0.5 rounded-md border border-slate-200 bg-white shadow-sm overflow-hidden" aria-label="Slash autocomplete">
             <div className="px-2 py-1 text-[10px] text-slate-400 font-mono border-b border-slate-100">
-              slash commands · tab to autocomplete
+              command autocomplete
             </div>
-            <div className="max-h-48 overflow-y-auto">
-              {slashSuggestions.map((option, index) => (
-                <button
-                  key={option.command}
-                  type="button"
-                  role="option"
-                  aria-selected={index === selectedSlashCommandIndex}
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => applySlashCommand(option.command)}
-                  className={`w-full text-left px-2 py-1.5 transition-colors ${
-                    index === selectedSlashCommandIndex
-                      ? 'bg-slate-100'
-                      : 'hover:bg-slate-50'
-                  }`}
-                >
-                  <div className="text-xs font-mono text-slate-700">{option.command}</div>
-                  <div className="text-[11px] text-slate-500 truncate">{option.description}</div>
-                </button>
-              ))}
+
+            <div className="border-b border-slate-100">
+              <div className="px-2 py-1 text-[10px] text-slate-400 font-mono">
+                slash commands · tab to autocomplete
+              </div>
+              {showSlashCommandEmptyState ? (
+                <div className="px-2 py-1.5 text-[11px] text-slate-500">No matching slash commands.</div>
+              ) : (
+                <div className="max-h-48 overflow-y-auto" role="listbox" aria-label="Slash command suggestions">
+                  {slashSuggestions.map((option, index) => (
+                    <button
+                      key={option.command}
+                      type="button"
+                      role="option"
+                      aria-selected={index === selectedSlashCommandIndex}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => applySlashCommand(option.command)}
+                      className={`w-full text-left px-2 py-1.5 transition-colors ${
+                        index === selectedSlashCommandIndex
+                          ? 'bg-slate-100'
+                          : 'hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="text-xs font-mono text-slate-700">{option.command}</div>
+                      <div className="text-[11px] text-slate-500 truncate">{option.description}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {showSlashSkillRegistryEmptyState && (
+                <div className="px-2 py-1 text-[10px] text-slate-400 font-mono border-t border-slate-100">
+                  no /skill commands loaded from pi skills
+                </div>
+              )}
+            </div>
+
+            <div>
+              <div className="px-2 py-1 text-[10px] text-slate-400 font-mono border-b border-slate-100">
+                execution hook skills · informational only
+              </div>
+              {showHookSkillEmptyState ? (
+                <div className="px-2 py-1.5 text-[11px] text-slate-500">
+                  {isHookSkillRegistryEmpty
+                    ? 'No execution hook skills loaded.'
+                    : 'No execution hook skills match this query.'}
+                </div>
+              ) : (
+                <div className="max-h-40 overflow-y-auto">
+                  {hookSkillSuggestions.map((skill) => (
+                    <div key={skill.id} className="px-2 py-1.5 border-b border-slate-100 last:border-b-0">
+                      <div className="text-xs font-mono text-slate-700">{skill.id}</div>
+                      <div className="text-[11px] text-slate-500 truncate">{skill.description || skill.name}</div>
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {skill.hooks.length > 0 ? (
+                          skill.hooks.map((hook) => (
+                            <span
+                              key={`${skill.id}-${hook}`}
+                              className="inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-mono text-slate-600"
+                            >
+                              {formatHookSkillPhase(hook)}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-mono text-slate-600">
+                            hook scope unavailable
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}

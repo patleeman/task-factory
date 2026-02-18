@@ -8,8 +8,8 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('client api getWorkspaceSkills', () => {
-  it('loads, normalizes, and merges workspace + global skill sources', async () => {
+describe('client api getWorkspaceSkillCatalog', () => {
+  it('keeps slash skills and execution hook skills in separate registries', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce({
@@ -23,33 +23,45 @@ describe('client api getWorkspaceSkills', () => {
         ok: true,
         json: async () => ([
           { id: 'react-best-practices', name: 'React Best Practices', description: 'React performance patterns' },
-          { id: 'checkpoint', name: 'Checkpoint Override', description: 'Should not replace workspace entry' },
         ]),
       })
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ([
-          { id: 'code-review', name: 'Code Review', description: 'Review changed code' },
+          {
+            id: 'code-review',
+            name: 'Code Review',
+            description: 'Review changed code',
+            hooks: ['post', 'post', 'pre'],
+          },
         ]),
       });
 
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
-    const skills = await api.getWorkspaceSkills('workspace-1');
+    const catalog = await api.getWorkspaceSkillCatalog('workspace-1');
 
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/workspaces/workspace-1/skills');
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/pi/skills');
     expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/factory/skills');
-    expect(skills).toEqual([
-      { id: 'tdd-feature', name: 'TDD Feature', description: 'Build features with tests first' },
-      { id: 'checkpoint', name: 'checkpoint', description: '' },
-      { id: 'react-best-practices', name: 'React Best Practices', description: 'React performance patterns' },
-      { id: 'code-review', name: 'Code Review', description: 'Review changed code' },
-    ]);
+    expect(catalog).toEqual({
+      slashSkills: [
+        { id: 'tdd-feature', name: 'TDD Feature', description: 'Build features with tests first' },
+        { id: 'checkpoint', name: 'checkpoint', description: '' },
+      ],
+      hookSkills: [
+        {
+          id: 'code-review',
+          name: 'Code Review',
+          description: 'Review changed code',
+          hooks: ['post', 'pre'],
+        },
+      ],
+    });
   });
 
-  it('falls back to globally discoverable skills when workspace skills are empty', async () => {
+  it('falls back to global pi skills when workspace-enabled slash skills are empty', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce({ ok: true, json: async () => [] })
@@ -62,24 +74,25 @@ describe('client api getWorkspaceSkills', () => {
       .mockResolvedValueOnce({
         ok: true,
         json: async () => [
-          { id: 'code-review', name: 'Code Review', description: 'Review changed code' },
+          { id: 'code-review', name: 'Code Review', description: 'Review changed code', hooks: ['post'] },
         ],
       });
 
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
-    const skills = await api.getWorkspaceSkills('workspace-1');
+    const catalog = await api.getWorkspaceSkillCatalog('workspace-1');
 
-    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/workspaces/workspace-1/skills');
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/pi/skills');
-    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/factory/skills');
-    expect(skills).toEqual([
-      { id: 'react-best-practices', name: 'React Best Practices', description: 'React performance patterns' },
-      { id: 'code-review', name: 'Code Review', description: 'Review changed code' },
-    ]);
+    expect(catalog).toEqual({
+      slashSkills: [
+        { id: 'react-best-practices', name: 'React Best Practices', description: 'React performance patterns' },
+      ],
+      hookSkills: [
+        { id: 'code-review', name: 'Code Review', description: 'Review changed code', hooks: ['post'] },
+      ],
+    });
   });
 
-  it('returns an empty array when workspace and fallback skills are unavailable', async () => {
+  it('gracefully handles unavailable fallback registries', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ skills: [] }) })
@@ -88,14 +101,12 @@ describe('client api getWorkspaceSkills', () => {
 
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
-    const skills = await api.getWorkspaceSkills('workspace-1');
-    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/workspaces/workspace-1/skills');
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/pi/skills');
-    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/factory/skills');
-    expect(skills).toEqual([]);
+    const catalog = await api.getWorkspaceSkillCatalog('workspace-1');
+
+    expect(catalog).toEqual({ slashSkills: [], hookSkills: [] });
   });
 
-  it('throws server-provided errors', async () => {
+  it('throws server-provided workspace errors', async () => {
     const fetchMock = vi.fn(async () => ({
       ok: false,
       status: 500,
@@ -104,6 +115,32 @@ describe('client api getWorkspaceSkills', () => {
 
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
-    await expect(api.getWorkspaceSkills('workspace-1')).rejects.toThrow('Skills unavailable');
+    await expect(api.getWorkspaceSkillCatalog('workspace-1')).rejects.toThrow('Skills unavailable');
+  });
+
+  it('retains getWorkspaceSkills as slash-only compatibility helper', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => [] })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          { id: 'react-best-practices', name: 'React Best Practices', description: 'React performance patterns' },
+        ],
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          { id: 'code-review', name: 'Code Review', description: 'Review changed code', hooks: ['post'] },
+        ],
+      });
+
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const skills = await api.getWorkspaceSkills('workspace-1');
+
+    expect(skills).toEqual([
+      { id: 'react-best-practices', name: 'React Best Practices', description: 'React performance patterns' },
+    ]);
   });
 });

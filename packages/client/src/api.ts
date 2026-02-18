@@ -148,6 +148,106 @@ export interface WorkspaceSkill {
   description: string
 }
 
+export type WorkspaceSkillHook = 'pre-planning' | 'pre' | 'post'
+
+export interface WorkspaceHookSkill {
+  id: string
+  name: string
+  description: string
+  hooks: WorkspaceSkillHook[]
+}
+
+export interface WorkspaceSkillCatalog {
+  slashSkills: WorkspaceSkill[]
+  hookSkills: WorkspaceHookSkill[]
+}
+
+function normalizeWorkspaceSkills(value: unknown): WorkspaceSkill[] {
+  if (!Array.isArray(value)) return []
+
+  return value
+    .map((skill): WorkspaceSkill | null => {
+      if (!skill || typeof skill !== 'object') return null
+      const raw = skill as Record<string, unknown>
+      if (typeof raw.id !== 'string') return null
+
+      const name = typeof raw.name === 'string' && raw.name.trim().length > 0
+        ? raw.name.trim()
+        : raw.id
+      const description = typeof raw.description === 'string'
+        ? raw.description.trim()
+        : ''
+
+      return {
+        id: raw.id,
+        name,
+        description,
+      }
+    })
+    .filter((skill): skill is WorkspaceSkill => skill !== null)
+}
+
+function mergeWorkspaceSkillLists(...lists: WorkspaceSkill[][]): WorkspaceSkill[] {
+  const deduped = new Map<string, WorkspaceSkill>()
+
+  for (const list of lists) {
+    for (const skill of list) {
+      if (!deduped.has(skill.id)) {
+        deduped.set(skill.id, skill)
+      }
+    }
+  }
+
+  return Array.from(deduped.values())
+}
+
+function isWorkspaceSkillHook(value: unknown): value is WorkspaceSkillHook {
+  return value === 'pre-planning' || value === 'pre' || value === 'post'
+}
+
+function normalizeWorkspaceHookSkills(value: unknown): WorkspaceHookSkill[] {
+  if (!Array.isArray(value)) return []
+
+  return value
+    .map((skill): WorkspaceHookSkill | null => {
+      if (!skill || typeof skill !== 'object') return null
+      const raw = skill as Record<string, unknown>
+      if (typeof raw.id !== 'string') return null
+
+      const name = typeof raw.name === 'string' && raw.name.trim().length > 0
+        ? raw.name.trim()
+        : raw.id
+      const description = typeof raw.description === 'string'
+        ? raw.description.trim()
+        : ''
+      const hooks = Array.isArray(raw.hooks)
+        ? raw.hooks.filter((hook): hook is WorkspaceSkillHook => isWorkspaceSkillHook(hook))
+        : []
+
+      return {
+        id: raw.id,
+        name,
+        description,
+        hooks: Array.from(new Set(hooks)),
+      }
+    })
+    .filter((skill): skill is WorkspaceHookSkill => skill !== null)
+}
+
+function mergeWorkspaceHookSkillLists(...lists: WorkspaceHookSkill[][]): WorkspaceHookSkill[] {
+  const deduped = new Map<string, WorkspaceHookSkill>()
+
+  for (const list of lists) {
+    for (const skill of list) {
+      if (!deduped.has(skill.id)) {
+        deduped.set(skill.id, skill)
+      }
+    }
+  }
+
+  return Array.from(deduped.values())
+}
+
 export const api = {
   async getWorkspaces(): Promise<Workspace[]> {
     const res = await fetch('/api/workspaces')
@@ -615,36 +715,35 @@ export const api = {
   // Planning Agent
   // ─────────────────────────────────────────────────────────────────────────
 
-  async getWorkspaceSkills(workspaceId: string): Promise<WorkspaceSkill[]> {
-    const res = await fetch(`/api/workspaces/${workspaceId}/skills`)
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: 'Failed to load skills' }))
-      throw new Error(err.error || `Failed to load skills (${res.status})`)
+  async getWorkspaceSkillCatalog(workspaceId: string): Promise<WorkspaceSkillCatalog> {
+    const workspaceRes = await fetch(`/api/workspaces/${workspaceId}/skills`)
+    if (!workspaceRes.ok) {
+      const err = await workspaceRes.json().catch(() => ({ error: 'Failed to load skills' }))
+      throw new Error(err.error || `Failed to load skills (${workspaceRes.status})`)
     }
 
-    const data = await res.json().catch(() => [])
-    if (!Array.isArray(data)) return []
+    const workspaceSkills = normalizeWorkspaceSkills(await workspaceRes.json().catch(() => []))
 
-    return data
-      .map((skill): WorkspaceSkill | null => {
-        if (!skill || typeof skill !== 'object') return null
-        const raw = skill as Record<string, unknown>
-        if (typeof raw.id !== 'string') return null
+    const [globalPiSkills, hookSkills] = await Promise.all([
+      fetch('/api/pi/skills')
+        .then(async (res) => (res.ok ? normalizeWorkspaceSkills(await res.json().catch(() => [])) : []))
+        .catch(() => []),
+      fetch('/api/factory/skills')
+        .then(async (res) => (res.ok ? normalizeWorkspaceHookSkills(await res.json().catch(() => [])) : []))
+        .catch(() => []),
+    ])
 
-        const name = typeof raw.name === 'string' && raw.name.trim().length > 0
-          ? raw.name.trim()
-          : raw.id
-        const description = typeof raw.description === 'string'
-          ? raw.description.trim()
-          : ''
+    const slashSkillSource = workspaceSkills.length > 0 ? workspaceSkills : globalPiSkills
 
-        return {
-          id: raw.id,
-          name,
-          description,
-        }
-      })
-      .filter((skill): skill is WorkspaceSkill => skill !== null)
+    return {
+      slashSkills: mergeWorkspaceSkillLists(slashSkillSource),
+      hookSkills: mergeWorkspaceHookSkillLists(hookSkills),
+    }
+  },
+
+  async getWorkspaceSkills(workspaceId: string): Promise<WorkspaceSkill[]> {
+    const { slashSkills } = await api.getWorkspaceSkillCatalog(workspaceId)
+    return slashSkills
   },
 
   async sendPlanningMessage(workspaceId: string, content: string, attachmentIds?: string[]): Promise<void> {

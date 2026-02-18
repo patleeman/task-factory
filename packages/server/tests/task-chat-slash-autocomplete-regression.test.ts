@@ -5,15 +5,18 @@ import { describe, expect, it } from 'vitest';
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
 const taskChatPath = resolve(currentDir, '../../client/src/components/TaskChat.tsx');
+const workspacePagePath = resolve(currentDir, '../../client/src/components/WorkspacePage.tsx');
 
 const taskChatSource = readFileSync(taskChatPath, 'utf-8');
+const workspacePageSource = readFileSync(workspacePagePath, 'utf-8');
 
 describe('task chat slash autocomplete regression checks', () => {
-  it('accepts slash command options and derives filtered slash suggestions', () => {
+  it('accepts slash command and hook skill options with split autocomplete data', () => {
     expect(taskChatSource).toContain('export interface SlashCommandOption');
+    expect(taskChatSource).toContain('export interface HookSkillOption');
     expect(taskChatSource).toContain('slashCommands?: SlashCommandOption[]');
-    expect(taskChatSource).toContain('const slashSuggestions = slashAutocomplete.suggestions');
-    expect(taskChatSource).toContain('const showSlashAutocomplete = slashAutocomplete.visible');
+    expect(taskChatSource).toContain('hookSkills?: HookSkillOption[]');
+    expect(taskChatSource).toContain('const hookSkillSuggestions = useMemo(() => {');
   });
 
   it('supports keyboard navigation and tab completion for slash suggestions', () => {
@@ -23,10 +26,29 @@ describe('task chat slash autocomplete regression checks', () => {
     expect(taskChatSource).toContain('applySlashCommand(selectedCommand.command)');
   });
 
-  it('renders a clickable slash command suggestion menu above the composer', () => {
-    expect(taskChatSource).toContain('role="listbox"');
-    expect(taskChatSource).toContain('slash commands · tab to autocomplete');
-    expect(taskChatSource).toContain('role="option"');
-    expect(taskChatSource).toContain('onClick={() => applySlashCommand(option.command)}');
+  it('uses fuzzy matching to rank slash command suggestions', () => {
+    expect(taskChatSource).toContain('function fuzzyMatchScore(query: string, candidate: string): number | null');
+    expect(taskChatSource).toContain('const score = fuzzyMatchScore(query, candidateQuery)');
+    expect(taskChatSource).toContain('if (a.score !== b.score) return a.score - b.score');
+  });
+
+  it('renders separate slash vs hook sections with graceful empty-state copy', () => {
+    expect(taskChatSource).toContain('execution hook skills · informational only');
+    expect(taskChatSource).toContain('No execution hook skills loaded.');
+    expect(taskChatSource).toContain('No execution hook skills match this query.');
+    expect(taskChatSource).toContain('no /skill commands loaded from pi skills');
+    expect(taskChatSource).toContain('formatHookSkillPhase(hook)');
+    expect(taskChatSource).not.toContain('onClick={() => applySlashCommand(skill.id)}');
+  });
+
+  it('wires split skill catalog data for both foreman and task chats', () => {
+    expect(workspacePageSource).toContain('const BASE_TASK_SLASH_COMMANDS');
+    expect(workspacePageSource).toContain('buildTaskSlashCommands');
+    expect(workspacePageSource).toContain('buildHookSkillOptions');
+    expect(workspacePageSource).toContain('api.getWorkspaceSkillCatalog(workspaceId)');
+    expect(workspacePageSource).toContain('setHookSkillOptions(buildHookSkillOptions(workspaceSkillCatalog.hookSkills))');
+    expect(workspacePageSource).toContain('hookSkills={hookSkillOptions}');
+    expect(workspacePageSource).toContain('slashCommands={taskSlashCommands}');
+    expect(workspacePageSource).toContain('slashCommands={foremanSlashCommands}');
   });
 });
