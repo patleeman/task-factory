@@ -272,6 +272,79 @@ describe('planning slash command handling', () => {
     expect(history.some((message) => message.id === errorMessage?.id)).toBe(true);
   });
 
+  it('surfaces auto-retry notices in foreman chat log', async () => {
+    const homePath = setTempHome();
+    const workspacePath = createTempDir('pi-factory-workspace-');
+    const workspaceId = 'ws-provider-auto-retry';
+
+    writeWorkspaceConfig(workspacePath);
+    registerWorkspace(homePath, workspaceId, workspacePath);
+
+    let subscriber: ((event: any) => void) | undefined;
+
+    createAgentSessionMock.mockResolvedValue({
+      session: {
+        subscribe: (listener: (event: any) => void) => {
+          subscriber = listener;
+          return () => {};
+        },
+        prompt: async () => {
+          subscriber?.({
+            type: 'auto_retry_start',
+            attempt: 1,
+            maxAttempts: 3,
+            delayMs: 2500,
+            errorMessage: '429 rate limit: too many requests',
+          });
+
+          subscriber?.({
+            type: 'auto_retry_end',
+            success: true,
+            attempt: 2,
+          });
+
+          subscriber?.({
+            type: 'message_end',
+            message: {
+              role: 'assistant',
+              stopReason: 'stop',
+              content: [{ type: 'text', text: 'Recovered after retry.' }],
+            },
+          });
+        },
+        abort: async () => {},
+      },
+    });
+
+    const { sendPlanningMessage } = await import('../src/planning-agent-service.js');
+
+    const events: any[] = [];
+    await sendPlanningMessage(workspaceId, 'continue', (event) => events.push(event));
+
+    const retryStartMessage = events
+      .filter((event) => event.type === 'planning:message')
+      .map((event) => event.message as PlanningMessage)
+      .find((message) => (
+        message.role === 'system'
+        && message.content.includes('Foreman retrying after provider error')
+        && message.metadata?.kind === 'auto-retry'
+        && message.metadata?.phase === 'start'
+      ));
+
+    const retryEndMessage = events
+      .filter((event) => event.type === 'planning:message')
+      .map((event) => event.message as PlanningMessage)
+      .find((message) => (
+        message.role === 'system'
+        && message.content.includes('Foreman retry succeeded on attempt 2')
+        && message.metadata?.kind === 'auto-retry'
+        && message.metadata?.phase === 'end'
+      ));
+
+    expect(retryStartMessage).toBeTruthy();
+    expect(retryEndMessage).toBeTruthy();
+  });
+
   it('surfaces thrown provider errors in foreman chat log after retries', async () => {
     const homePath = setTempHome();
     const workspacePath = createTempDir('pi-factory-workspace-');

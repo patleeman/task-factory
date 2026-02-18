@@ -1067,6 +1067,8 @@ function broadcastPlanningContextUsage(session: PlanningSession): void {
 }
 
 type PlanningAutoCompactionEndEvent = Extract<AgentSessionEvent, { type: 'auto_compaction_end' }>;
+type PlanningAutoRetryStartEvent = Extract<AgentSessionEvent, { type: 'auto_retry_start' }>;
+type PlanningAutoRetryEndEvent = Extract<AgentSessionEvent, { type: 'auto_retry_end' }>;
 
 function buildPlanningCompactionStartNotice(reason: 'threshold' | 'overflow'): string {
   if (reason === 'overflow') {
@@ -1098,6 +1100,39 @@ function buildPlanningCompactionEndNotice(event: PlanningAutoCompactionEndEvent)
       ? 'Foreman compaction aborted. Retrying automatically.'
       : 'Foreman compaction aborted.',
     outcome: 'aborted',
+  };
+}
+
+function buildPlanningAutoRetryStartNotice(event: PlanningAutoRetryStartEvent): {
+  message: string;
+  errorMessage: string;
+} {
+  const normalizedError = normalizePlanningErrorMessage(event.errorMessage);
+  const delaySeconds = Math.max(1, Math.round(event.delayMs / 1000));
+
+  return {
+    message: `Foreman retrying after provider error (attempt ${event.attempt}/${event.maxAttempts}) in ${delaySeconds}s: ${normalizedError}`,
+    errorMessage: normalizedError,
+  };
+}
+
+function buildPlanningAutoRetryEndNotice(event: PlanningAutoRetryEndEvent): {
+  message: string;
+  outcome: 'success' | 'failed';
+  errorMessage?: string;
+} {
+  if (event.success) {
+    return {
+      message: `Foreman retry succeeded on attempt ${event.attempt}.`,
+      outcome: 'success',
+    };
+  }
+
+  const normalizedError = normalizePlanningErrorMessage(event.finalError);
+  return {
+    message: `Foreman retry failed after ${event.attempt} attempt(s): ${normalizedError}`,
+    outcome: 'failed',
+    errorMessage: normalizedError,
   };
 }
 
@@ -1318,6 +1353,42 @@ function handlePlanningEvent(
           aborted: event.aborted,
           willRetry: event.willRetry,
           errorMessage: event.errorMessage,
+        },
+      );
+      broadcastPlanningContextUsage(session);
+      break;
+    }
+
+    case 'auto_retry_start': {
+      const notice = buildPlanningAutoRetryStartNotice(event);
+      appendPlanningSystemNotice(
+        session,
+        notice.message,
+        {
+          kind: 'auto-retry',
+          phase: 'start',
+          attempt: event.attempt,
+          maxAttempts: event.maxAttempts,
+          delayMs: event.delayMs,
+          errorMessage: notice.errorMessage,
+        },
+      );
+      broadcastPlanningContextUsage(session);
+      break;
+    }
+
+    case 'auto_retry_end': {
+      const notice = buildPlanningAutoRetryEndNotice(event);
+      appendPlanningSystemNotice(
+        session,
+        notice.message,
+        {
+          kind: 'auto-retry',
+          phase: 'end',
+          outcome: notice.outcome,
+          success: event.success,
+          attempt: event.attempt,
+          finalError: notice.errorMessage,
         },
       );
       broadcastPlanningContextUsage(session);

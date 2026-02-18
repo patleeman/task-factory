@@ -584,6 +584,8 @@ function broadcastTaskContextUsage(session: TaskSession, taskId: string): void {
 }
 
 type AutoCompactionEndEvent = Extract<AgentSessionEvent, { type: 'auto_compaction_end' }>;
+type AutoRetryStartEvent = Extract<AgentSessionEvent, { type: 'auto_retry_start' }>;
+type AutoRetryEndEvent = Extract<AgentSessionEvent, { type: 'auto_retry_end' }>;
 
 function buildCompactionStartNotice(reason: 'threshold' | 'overflow'): string {
   if (reason === 'overflow') {
@@ -615,6 +617,75 @@ function buildCompactionEndNotice(event: AutoCompactionEndEvent): {
       ? 'Compaction aborted. Retrying automatically.'
       : 'Compaction aborted.',
     outcome: 'aborted',
+  };
+}
+
+function normalizeOptionalErrorMessage(errorMessage: unknown): string | null {
+  if (typeof errorMessage === 'string') {
+    const trimmed = errorMessage.trim();
+    if (trimmed.length > 0) {
+      return trimmed;
+    }
+  }
+
+  if (errorMessage instanceof Error) {
+    const trimmed = errorMessage.message?.trim();
+    if (trimmed) {
+      return trimmed;
+    }
+  }
+
+  if (errorMessage == null) {
+    return null;
+  }
+
+  try {
+    const serialized = JSON.stringify(errorMessage);
+    if (serialized && serialized !== '{}') {
+      return serialized;
+    }
+  } catch {
+    // Fall through to String fallback.
+  }
+
+  const fallback = String(errorMessage).trim();
+  if (fallback.length > 0 && fallback !== '[object Object]') {
+    return fallback;
+  }
+
+  return null;
+}
+
+function buildAutoRetryStartNotice(event: AutoRetryStartEvent): {
+  message: string;
+  errorMessage: string;
+} {
+  const normalizedError = normalizeOptionalErrorMessage(event.errorMessage) ?? 'Unknown provider error.';
+  const delaySeconds = Math.max(1, Math.round(event.delayMs / 1000));
+
+  return {
+    message: `Retrying after provider error (attempt ${event.attempt}/${event.maxAttempts}) in ${delaySeconds}s: ${normalizedError}`,
+    errorMessage: normalizedError,
+  };
+}
+
+function buildAutoRetryEndNotice(event: AutoRetryEndEvent): {
+  message: string;
+  outcome: 'success' | 'failed';
+  errorMessage?: string;
+} {
+  if (event.success) {
+    return {
+      message: `Retry succeeded on attempt ${event.attempt}.`,
+      outcome: 'success',
+    };
+  }
+
+  const normalizedError = normalizeOptionalErrorMessage(event.finalError) ?? 'Unknown provider error.';
+  return {
+    message: `Retry failed after ${event.attempt} attempt(s): ${normalizedError}`,
+    outcome: 'failed',
+    errorMessage: normalizedError,
   };
 }
 
@@ -1217,27 +1288,8 @@ function extractToolResultText(result: any): string {
 }
 
 function normalizeAssistantErrorMessage(errorMessage: unknown): string {
-  if (typeof errorMessage === 'string') {
-    const trimmed = errorMessage.trim();
-    if (trimmed.length > 0) {
-      return trimmed;
-    }
-  }
-
-  if (errorMessage == null) {
-    return 'Provider returned stopReason=error without an error message.';
-  }
-
-  try {
-    const serialized = JSON.stringify(errorMessage);
-    if (serialized && serialized !== '{}') {
-      return serialized;
-    }
-  } catch {
-    // Fall through to String() fallback.
-  }
-
-  return String(errorMessage);
+  return normalizeOptionalErrorMessage(errorMessage)
+    ?? 'Provider returned stopReason=error without an error message.';
 }
 
 function getAssistantTurnErrorMessage(message: any): string | null {
@@ -1563,12 +1615,50 @@ function handlePiEvent(
     }
 
     case 'auto_retry_start': {
-      createSystemEvent(workspaceId, taskId, 'phase-change', 'Retrying after error...', {});
+      const notice = buildAutoRetryStartNotice(event);
+      broadcastActivityEntry(
+        broadcast,
+        createSystemEvent(
+          workspaceId,
+          taskId,
+          'phase-change',
+          notice.message,
+          {
+            kind: 'auto-retry',
+            phase: 'start',
+            attempt: event.attempt,
+            maxAttempts: event.maxAttempts,
+            delayMs: event.delayMs,
+            errorMessage: notice.errorMessage,
+          },
+        ),
+        'auto retry start event',
+      );
+      broadcastTaskContextUsage(session, taskId);
       break;
     }
 
     case 'auto_retry_end': {
-      createSystemEvent(workspaceId, taskId, 'phase-change', 'Retry completed', {});
+      const notice = buildAutoRetryEndNotice(event);
+      broadcastActivityEntry(
+        broadcast,
+        createSystemEvent(
+          workspaceId,
+          taskId,
+          'phase-change',
+          notice.message,
+          {
+            kind: 'auto-retry',
+            phase: 'end',
+            outcome: notice.outcome,
+            success: event.success,
+            attempt: event.attempt,
+            finalError: notice.errorMessage,
+          },
+        ),
+        'auto retry end event',
+      );
+      broadcastTaskContextUsage(session, taskId);
       break;
     }
   }
