@@ -393,6 +393,15 @@ export function PipelineBar({
                     </div>
                   ) : (
                     <>
+                      {isBacklog && (
+                        <div
+                          onClick={onCreateTask}
+                          className="shrink-0 w-[80px] h-[112px] rounded-xl border border-dashed border-slate-200 flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors hover:border-slate-400 hover:bg-slate-100 mx-1"
+                        >
+                          <span className="text-lg text-slate-300">+</span>
+                          <span className="text-[10px] text-slate-400 font-medium">New Task</span>
+                        </div>
+                      )}
                       {phaseTasks.map((task, i) => {
                         const isSamePhase = dragSourceRef.current?.fromPhase === phase
                         const showIndicatorBefore =
@@ -429,15 +438,6 @@ export function PipelineBar({
                         phaseTasks.length > 0 && (
                           <VerticalDropIndicator />
                         )}
-                      {isBacklog && (
-                        <div
-                          onClick={onCreateTask}
-                          className="shrink-0 w-[80px] h-[112px] rounded-xl border border-dashed border-slate-200 flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors hover:border-slate-400 hover:bg-slate-100 mx-1"
-                        >
-                          <span className="text-lg text-slate-300">+</span>
-                          <span className="text-[10px] text-slate-400 font-medium">New Task</span>
-                        </div>
-                      )}
                     </>
                   )}
                 </div>
