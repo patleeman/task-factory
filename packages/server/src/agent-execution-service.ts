@@ -382,8 +382,25 @@ interface TaskSession {
   task?: Task;
   /** True when an executing turn has ended and the agent is waiting for user input */
   awaitingUserInput?: boolean;
-  /** Watchdog timer for post-tool stalls (cleared on follow-up events) */
+  /** Enables full-turn watchdog behavior for execution turns */
+  watchdogsEnabled?: boolean;
+  /** Watchdog timer for post-tool stalls (tool ended but no follow-up) */
   postToolStallTimer?: ReturnType<typeof setTimeout>;
+  /** Watchdog timer for prompts that never emit a first SDK event */
+  noFirstEventTimer?: ReturnType<typeof setTimeout>;
+  /** Watchdog timer for tool execution that starts but never ends */
+  toolExecutionTimer?: ReturnType<typeof setTimeout>;
+  /** Watchdog timer for silent assistant streaming/thinking gaps */
+  streamSilenceTimer?: ReturnType<typeof setTimeout>;
+  /** Watchdog timer enforcing max duration for a single turn */
+  maxTurnDurationTimer?: ReturnType<typeof setTimeout>;
+  /** Tracks whether the current turn has emitted at least one SDK event */
+  sawTurnEvent?: boolean;
+  /** Tracks in-flight tool call for tool-execution watchdog metadata */
+  activeToolCallId?: string;
+  activeToolName?: string;
+  /** Prevent duplicate watchdog recovery terminal events */
+  watchdogRecovered?: boolean;
 }
 
 const activeSessions = new Map<string, TaskSession>();
@@ -586,6 +603,29 @@ function broadcastTaskContextUsage(session: TaskSession, taskId: string): void {
 }
 
 const POST_TOOL_STALL_TIMEOUT_MS = 2 * 60 * 1000;
+const NO_FIRST_EVENT_TIMEOUT_MS = 20 * 1000;
+const TOOL_EXECUTION_STALL_TIMEOUT_MS = 2 * 60 * 1000;
+const STREAM_SILENCE_TIMEOUT_MS = 60 * 1000;
+const MAX_TURN_DURATION_TIMEOUT_MS = 10 * 60 * 1000;
+
+type ExecutionWatchdogPhase =
+  | 'post-tool'
+  | 'no-first-event'
+  | 'tool-execution'
+  | 'stream-silence'
+  | 'max-turn-duration';
+
+interface ExecutionWatchdogNotice {
+  phase: ExecutionWatchdogPhase;
+  timeoutMs: number;
+  message: string;
+  toolName?: string;
+  toolCallId?: string;
+}
+
+function isExecutionWatchdogEnabled(session: TaskSession): boolean {
+  return session.watchdogsEnabled === true;
+}
 
 function clearPostToolStallWatchdog(session: TaskSession): void {
   if (!session.postToolStallTimer) {
@@ -596,16 +636,74 @@ function clearPostToolStallWatchdog(session: TaskSession): void {
   session.postToolStallTimer = undefined;
 }
 
-async function handlePostToolStallTimeout(
+function clearNoFirstEventWatchdog(session: TaskSession): void {
+  if (!session.noFirstEventTimer) {
+    return;
+  }
+
+  clearTimeout(session.noFirstEventTimer);
+  session.noFirstEventTimer = undefined;
+}
+
+function clearToolExecutionWatchdog(session: TaskSession): void {
+  if (session.toolExecutionTimer) {
+    clearTimeout(session.toolExecutionTimer);
+    session.toolExecutionTimer = undefined;
+  }
+
+  session.activeToolCallId = undefined;
+  session.activeToolName = undefined;
+}
+
+function clearStreamSilenceWatchdog(session: TaskSession): void {
+  if (!session.streamSilenceTimer) {
+    return;
+  }
+
+  clearTimeout(session.streamSilenceTimer);
+  session.streamSilenceTimer = undefined;
+}
+
+function clearMaxTurnDurationWatchdog(session: TaskSession): void {
+  if (!session.maxTurnDurationTimer) {
+    return;
+  }
+
+  clearTimeout(session.maxTurnDurationTimer);
+  session.maxTurnDurationTimer = undefined;
+}
+
+function clearExecutionTurnWatchdogs(session: TaskSession): void {
+  clearPostToolStallWatchdog(session);
+  clearNoFirstEventWatchdog(session);
+  clearToolExecutionWatchdog(session);
+  clearStreamSilenceWatchdog(session);
+  clearMaxTurnDurationWatchdog(session);
+}
+
+function markExecutionTurnEventReceived(session: TaskSession): void {
+  if (!isExecutionWatchdogEnabled(session) || session.sawTurnEvent) {
+    return;
+  }
+
+  session.sawTurnEvent = true;
+  clearNoFirstEventWatchdog(session);
+}
+
+async function recoverFromExecutionWatchdogTimeout(
   session: TaskSession,
   workspaceId: string,
   taskId: string,
-  toolName: string,
-  toolCallId: string,
+  notice: ExecutionWatchdogNotice,
+  context: string,
 ): Promise<void> {
-  clearPostToolStallWatchdog(session);
+  clearExecutionTurnWatchdogs(session);
 
   if (getActiveSession(taskId) !== session) {
+    return;
+  }
+
+  if (session.watchdogRecovered) {
     return;
   }
 
@@ -613,7 +711,11 @@ async function handlePostToolStallTimeout(
     return;
   }
 
-  const timeoutSeconds = Math.max(1, Math.round(POST_TOOL_STALL_TIMEOUT_MS / 1000));
+  session.watchdogRecovered = true;
+  session.currentStreamText = '';
+  session.currentThinkingText = '';
+  session.toolCallArgs.clear();
+  session.toolCallOutput.clear();
 
   broadcastActivityEntry(
     session.broadcastToWorkspace,
@@ -621,16 +723,16 @@ async function handlePostToolStallTimeout(
       workspaceId,
       taskId,
       'phase-change',
-      `Agent appears stuck after tool "${toolName}" (${timeoutSeconds}s without follow-up). Marking session idle so you can continue.`,
+      notice.message,
       {
         kind: 'agent-turn-stall',
-        phase: 'post-tool',
-        timeoutMs: POST_TOOL_STALL_TIMEOUT_MS,
-        toolName,
-        toolCallId,
+        phase: notice.phase,
+        timeoutMs: notice.timeoutMs,
+        toolName: notice.toolName,
+        toolCallId: notice.toolCallId,
       },
     ),
-    'post-tool stall timeout event',
+    context,
   );
 
   session.status = 'idle';
@@ -642,24 +744,146 @@ async function handlePostToolStallTimeout(
     taskId,
     status: 'idle',
   });
+  session.broadcastToWorkspace?.({ type: 'agent:turn_end', taskId });
 
   broadcastTaskContextUsage(session, taskId);
 
   cleanupCompletionCallback(taskId);
   cleanupAttachFileCallback(taskId);
+  session.onComplete = undefined;
 
-  session.unsubscribe?.();
+  const unsubscribe = session.unsubscribe;
   session.unsubscribe = undefined;
+  unsubscribe?.();
 
-  const piSession = session.piSession;
+  const stalePiSession = session.piSession;
   session.piSession = null;
+
+  clearActiveSessionIfOwned(taskId, session);
+
   try {
-    await piSession?.abort?.();
+    await stalePiSession?.abort?.();
   } catch (err) {
     console.warn(`[AgentExecution] Failed to abort stalled session for ${taskId}:`, err);
   }
+}
 
-  clearActiveSessionIfOwned(taskId, session);
+function armNoFirstEventWatchdog(
+  session: TaskSession,
+  workspaceId: string,
+  taskId: string,
+): void {
+  clearNoFirstEventWatchdog(session);
+
+  const timeout = setTimeout(() => {
+    if (session.sawTurnEvent) {
+      return;
+    }
+
+    const timeoutSeconds = Math.max(1, Math.round(NO_FIRST_EVENT_TIMEOUT_MS / 1000));
+    void recoverFromExecutionWatchdogTimeout(
+      session,
+      workspaceId,
+      taskId,
+      {
+        phase: 'no-first-event',
+        timeoutMs: NO_FIRST_EVENT_TIMEOUT_MS,
+        message: `Agent did not emit any turn events within ${timeoutSeconds}s. Marking session idle so you can continue.`,
+      },
+      'no-first-event watchdog timeout event',
+    );
+  }, NO_FIRST_EVENT_TIMEOUT_MS);
+
+  (timeout as { unref?: () => void }).unref?.();
+  session.noFirstEventTimer = timeout;
+}
+
+function armToolExecutionWatchdog(
+  session: TaskSession,
+  workspaceId: string,
+  taskId: string,
+  toolName: string,
+  toolCallId: string,
+): void {
+  clearToolExecutionWatchdog(session);
+  session.activeToolCallId = toolCallId;
+  session.activeToolName = toolName;
+
+  const timeout = setTimeout(() => {
+    if (session.activeToolCallId !== toolCallId) {
+      return;
+    }
+
+    const timeoutSeconds = Math.max(1, Math.round(TOOL_EXECUTION_STALL_TIMEOUT_MS / 1000));
+    void recoverFromExecutionWatchdogTimeout(
+      session,
+      workspaceId,
+      taskId,
+      {
+        phase: 'tool-execution',
+        timeoutMs: TOOL_EXECUTION_STALL_TIMEOUT_MS,
+        message: `Agent appears stuck while running tool "${toolName}" (${timeoutSeconds}s without completion). Marking session idle so you can continue.`,
+        toolName,
+        toolCallId,
+      },
+      'tool-execution watchdog timeout event',
+    );
+  }, TOOL_EXECUTION_STALL_TIMEOUT_MS);
+
+  (timeout as { unref?: () => void }).unref?.();
+  session.toolExecutionTimer = timeout;
+}
+
+function armStreamSilenceWatchdog(
+  session: TaskSession,
+  workspaceId: string,
+  taskId: string,
+): void {
+  clearStreamSilenceWatchdog(session);
+
+  const timeout = setTimeout(() => {
+    const timeoutSeconds = Math.max(1, Math.round(STREAM_SILENCE_TIMEOUT_MS / 1000));
+    void recoverFromExecutionWatchdogTimeout(
+      session,
+      workspaceId,
+      taskId,
+      {
+        phase: 'stream-silence',
+        timeoutMs: STREAM_SILENCE_TIMEOUT_MS,
+        message: `Agent appears silent during response streaming (${timeoutSeconds}s without text or thinking updates). Marking session idle so you can continue.`,
+      },
+      'stream-silence watchdog timeout event',
+    );
+  }, STREAM_SILENCE_TIMEOUT_MS);
+
+  (timeout as { unref?: () => void }).unref?.();
+  session.streamSilenceTimer = timeout;
+}
+
+function armMaxTurnDurationWatchdog(
+  session: TaskSession,
+  workspaceId: string,
+  taskId: string,
+): void {
+  clearMaxTurnDurationWatchdog(session);
+
+  const timeout = setTimeout(() => {
+    const timeoutSeconds = Math.max(1, Math.round(MAX_TURN_DURATION_TIMEOUT_MS / 1000));
+    void recoverFromExecutionWatchdogTimeout(
+      session,
+      workspaceId,
+      taskId,
+      {
+        phase: 'max-turn-duration',
+        timeoutMs: MAX_TURN_DURATION_TIMEOUT_MS,
+        message: `Agent exceeded max turn duration (${timeoutSeconds}s). Marking session idle so you can continue.`,
+      },
+      'max-turn watchdog timeout event',
+    );
+  }, MAX_TURN_DURATION_TIMEOUT_MS);
+
+  (timeout as { unref?: () => void }).unref?.();
+  session.maxTurnDurationTimer = timeout;
 }
 
 function armPostToolStallWatchdog(
@@ -672,11 +896,40 @@ function armPostToolStallWatchdog(
   clearPostToolStallWatchdog(session);
 
   const timeout = setTimeout(() => {
-    void handlePostToolStallTimeout(session, workspaceId, taskId, toolName, toolCallId);
+    const timeoutSeconds = Math.max(1, Math.round(POST_TOOL_STALL_TIMEOUT_MS / 1000));
+    void recoverFromExecutionWatchdogTimeout(
+      session,
+      workspaceId,
+      taskId,
+      {
+        phase: 'post-tool',
+        timeoutMs: POST_TOOL_STALL_TIMEOUT_MS,
+        message: `Agent appears stuck after tool "${toolName}" (${timeoutSeconds}s without follow-up). Marking session idle so you can continue.`,
+        toolName,
+        toolCallId,
+      },
+      'post-tool stall timeout event',
+    );
   }, POST_TOOL_STALL_TIMEOUT_MS);
 
   (timeout as { unref?: () => void }).unref?.();
   session.postToolStallTimer = timeout;
+}
+
+function startExecutionTurnWatchdogs(
+  session: TaskSession,
+  workspaceId: string,
+  taskId: string,
+): void {
+  if (!isExecutionWatchdogEnabled(session)) {
+    return;
+  }
+
+  clearExecutionTurnWatchdogs(session);
+  session.watchdogRecovered = false;
+  session.sawTurnEvent = false;
+  armNoFirstEventWatchdog(session, workspaceId, taskId);
+  armMaxTurnDurationWatchdog(session, workspaceId, taskId);
 }
 
 type AutoCompactionEndEvent = Extract<AgentSessionEvent, { type: 'auto_compaction_end' }>;
@@ -926,6 +1179,9 @@ export async function executeTask(options: ExecuteTaskOptions): Promise<TaskSess
     onComplete,
     task,
     awaitingUserInput: false,
+    watchdogsEnabled: true,
+    sawTurnEvent: false,
+    watchdogRecovered: false,
   };
 
   registerActiveSession(session);
@@ -1134,6 +1390,7 @@ async function runAgentExecution(
     }
 
     const promptOpts = images && images.length > 0 ? { images } : undefined;
+    startExecutionTurnWatchdogs(session, workspaceId, task.id);
     await session.piSession!.prompt(prompt, promptOpts);
 
     // prompt() resolved — check if the agent signaled completion.
@@ -1141,7 +1398,10 @@ async function runAgentExecution(
     await handleAgentTurnEnd(session, workspaceId, task);
   } catch (err) {
     if (getActiveSession(task.id) !== session) {
-      console.warn(`[AgentExecution] Ignoring execution error for stale session on task ${task.id}:`, err);
+      const staleErrorMessage = normalizeOptionalErrorMessage(err)?.toLowerCase() ?? '';
+      if (!staleErrorMessage.includes('aborted')) {
+        console.warn(`[AgentExecution] Ignoring execution error for stale session on task ${task.id}:`, err);
+      }
       return;
     }
 
@@ -1159,7 +1419,7 @@ async function handleAgentTurnEnd(
   workspaceId: string,
   task: Task,
 ): Promise<void> {
-  clearPostToolStallWatchdog(session);
+  clearExecutionTurnWatchdogs(session);
 
   if (getActiveSession(task.id) !== session) {
     console.warn(`[AgentExecution] Ignoring turn-end for stale session on task ${task.id}`);
@@ -1323,7 +1583,7 @@ function handleAgentError(
   task: Task,
   err: unknown,
 ): void {
-  clearPostToolStallWatchdog(session);
+  clearExecutionTurnWatchdogs(session);
 
   if (getActiveSession(task.id) !== session) {
     console.warn(`[AgentExecution] Ignoring error for stale session on task ${task.id}:`, err);
@@ -1454,10 +1714,22 @@ function handlePiEvent(
   taskId: string,
   onOutput?: (output: string) => void
 ): void {
+  if (getActiveSession(taskId) !== session) {
+    return;
+  }
+
   const broadcast = session.broadcastToWorkspace;
 
-  if (event.type !== 'tool_execution_end') {
-    clearPostToolStallWatchdog(session);
+  if (isExecutionWatchdogEnabled(session)) {
+    if (session.watchdogRecovered) {
+      return;
+    }
+
+    markExecutionTurnEventReceived(session);
+
+    if (event.type !== 'tool_execution_end') {
+      clearPostToolStallWatchdog(session);
+    }
   }
 
   switch (event.type) {
@@ -1489,6 +1761,10 @@ function handlePiEvent(
         break;
       }
 
+      if (isExecutionWatchdogEnabled(session)) {
+        armStreamSilenceWatchdog(session, workspaceId, taskId);
+      }
+
       session.currentStreamText = '';
       session.currentThinkingText = '';
       broadcast?.({ type: 'agent:streaming_start', taskId });
@@ -1506,6 +1782,10 @@ function handlePiEvent(
       if (sub.type === 'text_delta') {
         const delta = sub.delta;
         if (delta) {
+          if (isExecutionWatchdogEnabled(session)) {
+            armStreamSilenceWatchdog(session, workspaceId, taskId);
+          }
+
           session.currentStreamText += delta;
           session.output.push(delta);
           onOutput?.(delta);
@@ -1514,6 +1794,10 @@ function handlePiEvent(
       } else if (sub.type === 'thinking_delta') {
         const delta = (sub as any).delta;
         if (delta) {
+          if (isExecutionWatchdogEnabled(session)) {
+            armStreamSilenceWatchdog(session, workspaceId, taskId);
+          }
+
           session.currentThinkingText += delta;
           broadcast?.({ type: 'agent:thinking_delta', taskId, delta });
         }
@@ -1527,6 +1811,10 @@ function handlePiEvent(
       const message = event.message as any;
       if (message?.role !== 'assistant') {
         break;
+      }
+
+      if (isExecutionWatchdogEnabled(session)) {
+        clearStreamSilenceWatchdog(session);
       }
 
       persistUsageFromAssistantMessage(session, taskId, message);
@@ -1590,6 +1878,11 @@ function handlePiEvent(
     }
 
     case 'tool_execution_start': {
+      if (isExecutionWatchdogEnabled(session)) {
+        clearStreamSilenceWatchdog(session);
+        armToolExecutionWatchdog(session, workspaceId, taskId, event.toolName, event.toolCallId);
+      }
+
       // Capture tool args for later storage
       session.toolCallArgs.set(event.toolCallId, {
         toolName: event.toolName,
@@ -1615,6 +1908,11 @@ function handlePiEvent(
 
     case 'tool_execution_update': {
       const toolCallId = (event as any).toolCallId || '';
+
+      if (isExecutionWatchdogEnabled(session) && toolCallId && session.activeToolCallId === toolCallId && session.activeToolName) {
+        armToolExecutionWatchdog(session, workspaceId, taskId, session.activeToolName, toolCallId);
+      }
+
       const partialResult = (event as any).partialResult;
 
       // Newer SDKs emit structured partialResult; older paths may emit data.
@@ -1642,6 +1940,10 @@ function handlePiEvent(
     }
 
     case 'tool_execution_end': {
+      if (isExecutionWatchdogEnabled(session)) {
+        clearToolExecutionWatchdog(session);
+      }
+
       // Get the stored args for this tool call
       const toolInfo = session.toolCallArgs.get(event.toolCallId);
       const streamedText = session.toolCallOutput.get(event.toolCallId) || '';
@@ -1680,7 +1982,9 @@ function handlePiEvent(
       session.toolCallArgs.delete(event.toolCallId);
       session.toolCallOutput.delete(event.toolCallId);
 
-      armPostToolStallWatchdog(session, workspaceId, taskId, event.toolName, event.toolCallId);
+      if (isExecutionWatchdogEnabled(session)) {
+        armPostToolStallWatchdog(session, workspaceId, taskId, event.toolName, event.toolCallId);
+      }
       break;
     }
 
@@ -1860,6 +2164,7 @@ export async function followUpTask(taskId: string, content: string, images?: Ima
         : undefined;
 
     try {
+      startExecutionTurnWatchdogs(session, session.workspaceId, taskId);
       await session.piSession.prompt(turnContent, hasImages ? { images: images! } : undefined);
     } finally {
       savePlanCallbackCleanup?.();
@@ -2126,7 +2431,7 @@ export async function stopTaskExecution(taskId: string): Promise<boolean> {
     return false;
   }
 
-  clearPostToolStallWatchdog(session);
+  clearExecutionTurnWatchdogs(session);
 
   // Abort the agent session via Pi SDK (interrupts current operation)
   try {

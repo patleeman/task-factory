@@ -1044,6 +1044,386 @@ describe('planTask', () => {
     }
   });
 
+  it('recovers when prompt starts but no SDK events are emitted', async () => {
+    vi.useFakeTimers();
+
+    try {
+      const workspacePath = mkdtempSync(join(tmpdir(), 'pi-factory-plan-task-'));
+      tempDirs.push(workspacePath);
+
+      const tasksDir = join(workspacePath, '.pi', 'tasks');
+      mkdirSync(tasksDir, { recursive: true });
+
+      const { createTask, discoverTasks, moveTaskToPhase } = await import('../src/task-service.js');
+      const { executeTask, getActiveSession } = await import('../src/agent-execution-service.js');
+
+      const task = createTask(workspacePath, tasksDir, {
+        content: 'Recover when execution prompt emits no events',
+        acceptanceCriteria: [],
+      });
+
+      const liveTasks = discoverTasks(tasksDir);
+      const liveTask = liveTasks.find((candidate) => candidate.id === task.id);
+      if (!liveTask) {
+        throw new Error('Live task not found for no-first-event watchdog test');
+      }
+
+      moveTaskToPhase(liveTask, 'executing', 'system', 'Queue manager auto-assigned', liveTasks);
+
+      let rejectPrompt: ((err: unknown) => void) | undefined;
+
+      createAgentSessionMock.mockResolvedValue({
+        session: {
+          subscribe: () => () => {},
+          prompt: async () => {
+            await new Promise<void>((_resolve, reject) => {
+              rejectPrompt = reject;
+            });
+          },
+          abort: async () => {
+            if (rejectPrompt) {
+              rejectPrompt(new Error('aborted'));
+              rejectPrompt = undefined;
+            }
+          },
+        },
+      });
+
+      const broadcasts: any[] = [];
+
+      await executeTask({
+        task: liveTask,
+        workspaceId: 'workspace-test',
+        workspacePath,
+        broadcastToWorkspace: (event: any) => broadcasts.push(event),
+      });
+
+      expect(getActiveSession(task.id)).toBeDefined();
+
+      await vi.advanceTimersByTimeAsync(25_000);
+
+      await vi.waitFor(() => {
+        expect(getActiveSession(task.id)).toBeUndefined();
+      });
+
+      expect(
+        broadcasts.some((event) => (
+          event.type === 'activity:entry'
+          && event.entry?.type === 'system-event'
+          && typeof event.entry?.message === 'string'
+          && event.entry.message.includes('did not emit any turn events')
+        )),
+      ).toBe(true);
+
+      const terminalEvents = broadcasts.filter((event) => event.type === 'agent:turn_end' && event.taskId === task.id);
+      expect(terminalEvents.length).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('recovers when a tool starts but never emits tool_execution_end', async () => {
+    vi.useFakeTimers();
+
+    try {
+      const workspacePath = mkdtempSync(join(tmpdir(), 'pi-factory-plan-task-'));
+      tempDirs.push(workspacePath);
+
+      const tasksDir = join(workspacePath, '.pi', 'tasks');
+      mkdirSync(tasksDir, { recursive: true });
+
+      const { createTask, discoverTasks, moveTaskToPhase } = await import('../src/task-service.js');
+      const { executeTask, getActiveSession } = await import('../src/agent-execution-service.js');
+
+      const task = createTask(workspacePath, tasksDir, {
+        content: 'Recover when tool start has no matching end',
+        acceptanceCriteria: [],
+      });
+
+      const liveTasks = discoverTasks(tasksDir);
+      const liveTask = liveTasks.find((candidate) => candidate.id === task.id);
+      if (!liveTask) {
+        throw new Error('Live task not found for tool-execution watchdog test');
+      }
+
+      moveTaskToPhase(liveTask, 'executing', 'system', 'Queue manager auto-assigned', liveTasks);
+
+      let subscriber: ((event: any) => void) | undefined;
+      let rejectPrompt: ((err: unknown) => void) | undefined;
+
+      createAgentSessionMock.mockResolvedValue({
+        session: {
+          subscribe: (listener: (event: any) => void) => {
+            subscriber = listener;
+            return () => {};
+          },
+          prompt: async () => {
+            subscriber?.({
+              type: 'tool_execution_start',
+              toolName: 'bash',
+              toolCallId: 'call-no-end',
+              args: { command: 'echo hi' },
+            });
+
+            await new Promise<void>((_resolve, reject) => {
+              rejectPrompt = reject;
+            });
+          },
+          abort: async () => {
+            if (rejectPrompt) {
+              rejectPrompt(new Error('aborted'));
+              rejectPrompt = undefined;
+            }
+          },
+        },
+      });
+
+      const broadcasts: any[] = [];
+
+      await executeTask({
+        task: liveTask,
+        workspaceId: 'workspace-test',
+        workspacePath,
+        broadcastToWorkspace: (event: any) => broadcasts.push(event),
+      });
+
+      expect(getActiveSession(task.id)).toBeDefined();
+
+      await vi.advanceTimersByTimeAsync(125_000);
+
+      await vi.waitFor(() => {
+        expect(getActiveSession(task.id)).toBeUndefined();
+      });
+
+      expect(
+        broadcasts.some((event) => (
+          event.type === 'activity:entry'
+          && event.entry?.type === 'system-event'
+          && typeof event.entry?.message === 'string'
+          && event.entry.message.includes('stuck while running tool "bash"')
+        )),
+      ).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('recovers from silent streaming and ignores late stale events without duplicate terminal events', async () => {
+    vi.useFakeTimers();
+
+    try {
+      const workspacePath = mkdtempSync(join(tmpdir(), 'pi-factory-plan-task-'));
+      tempDirs.push(workspacePath);
+
+      const tasksDir = join(workspacePath, '.pi', 'tasks');
+      mkdirSync(tasksDir, { recursive: true });
+
+      const { createTask, discoverTasks, moveTaskToPhase } = await import('../src/task-service.js');
+      const { executeTask, getActiveSession } = await import('../src/agent-execution-service.js');
+
+      const task = createTask(workspacePath, tasksDir, {
+        content: 'Recover when assistant streaming goes silent',
+        acceptanceCriteria: [],
+      });
+
+      const liveTasks = discoverTasks(tasksDir);
+      const liveTask = liveTasks.find((candidate) => candidate.id === task.id);
+      if (!liveTask) {
+        throw new Error('Live task not found for stream-silence watchdog test');
+      }
+
+      moveTaskToPhase(liveTask, 'executing', 'system', 'Queue manager auto-assigned', liveTasks);
+
+      let subscriber: ((event: any) => void) | undefined;
+      let rejectPrompt: ((err: unknown) => void) | undefined;
+
+      createAgentSessionMock.mockResolvedValue({
+        session: {
+          subscribe: (listener: (event: any) => void) => {
+            subscriber = listener;
+            return () => {};
+          },
+          prompt: async () => {
+            subscriber?.({
+              type: 'message_start',
+              message: { role: 'assistant', content: [] },
+            });
+
+            subscriber?.({
+              type: 'message_update',
+              message: { role: 'assistant' },
+              assistantMessageEvent: { type: 'thinking_delta', delta: 'Thinking...' },
+            });
+
+            await new Promise<void>((_resolve, reject) => {
+              rejectPrompt = reject;
+            });
+          },
+          abort: async () => {
+            if (rejectPrompt) {
+              rejectPrompt(new Error('aborted'));
+              rejectPrompt = undefined;
+            }
+          },
+        },
+      });
+
+      const broadcasts: any[] = [];
+
+      await executeTask({
+        task: liveTask,
+        workspaceId: 'workspace-test',
+        workspacePath,
+        broadcastToWorkspace: (event: any) => broadcasts.push(event),
+      });
+
+      expect(getActiveSession(task.id)).toBeDefined();
+
+      await vi.advanceTimersByTimeAsync(65_000);
+
+      await vi.waitFor(() => {
+        expect(getActiveSession(task.id)).toBeUndefined();
+      });
+
+      // Simulate late events from the old session; these must be ignored.
+      subscriber?.({
+        type: 'turn_end',
+        message: { role: 'assistant', stopReason: 'stop' },
+        toolResults: [],
+      });
+      subscriber?.({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          stopReason: 'stop',
+          content: [{ type: 'text', text: 'late stale event' }],
+        },
+      });
+
+      await vi.advanceTimersByTimeAsync(0);
+
+      const stallNotices = broadcasts.filter((event) => (
+        event.type === 'activity:entry'
+        && event.entry?.type === 'system-event'
+        && typeof event.entry?.message === 'string'
+        && event.entry.message.includes('silent during response streaming')
+      ));
+      expect(stallNotices.length).toBe(1);
+
+      const turnEndEvents = broadcasts.filter((event) => event.type === 'agent:turn_end' && event.taskId === task.id);
+      expect(turnEndEvents.length).toBe(1);
+
+      const lateEchoes = broadcasts.filter((event) => (
+        event.type === 'activity:entry'
+        && event.entry?.type === 'chat-message'
+        && typeof event.entry?.content === 'string'
+        && event.entry.content.includes('late stale event')
+      ));
+      expect(lateEchoes.length).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('recovers when a turn exceeds the max duration despite periodic assistant updates', async () => {
+    vi.useFakeTimers();
+
+    try {
+      const workspacePath = mkdtempSync(join(tmpdir(), 'pi-factory-plan-task-'));
+      tempDirs.push(workspacePath);
+
+      const tasksDir = join(workspacePath, '.pi', 'tasks');
+      mkdirSync(tasksDir, { recursive: true });
+
+      const { createTask, discoverTasks, moveTaskToPhase } = await import('../src/task-service.js');
+      const { executeTask, getActiveSession } = await import('../src/agent-execution-service.js');
+
+      const task = createTask(workspacePath, tasksDir, {
+        content: 'Recover when execution turn exceeds max duration watchdog',
+        acceptanceCriteria: [],
+      });
+
+      const liveTasks = discoverTasks(tasksDir);
+      const liveTask = liveTasks.find((candidate) => candidate.id === task.id);
+      if (!liveTask) {
+        throw new Error('Live task not found for max-turn watchdog test');
+      }
+
+      moveTaskToPhase(liveTask, 'executing', 'system', 'Queue manager auto-assigned', liveTasks);
+
+      let subscriber: ((event: any) => void) | undefined;
+      let rejectPrompt: ((err: unknown) => void) | undefined;
+
+      createAgentSessionMock.mockResolvedValue({
+        session: {
+          subscribe: (listener: (event: any) => void) => {
+            subscriber = listener;
+            return () => {};
+          },
+          prompt: async () => {
+            subscriber?.({ type: 'agent_start' });
+            subscriber?.({
+              type: 'message_start',
+              message: { role: 'assistant', content: [] },
+            });
+
+            const heartbeat = setInterval(() => {
+              subscriber?.({
+                type: 'message_update',
+                message: { role: 'assistant' },
+                assistantMessageEvent: { type: 'thinking_delta', delta: '…' },
+              });
+            }, 30_000);
+
+            await new Promise<void>((_resolve, reject) => {
+              rejectPrompt = (err) => {
+                clearInterval(heartbeat);
+                reject(err);
+              };
+            });
+          },
+          abort: async () => {
+            if (rejectPrompt) {
+              rejectPrompt(new Error('aborted'));
+              rejectPrompt = undefined;
+            }
+          },
+        },
+      });
+
+      const broadcasts: any[] = [];
+
+      await executeTask({
+        task: liveTask,
+        workspaceId: 'workspace-test',
+        workspacePath,
+        broadcastToWorkspace: (event: any) => broadcasts.push(event),
+      });
+
+      expect(getActiveSession(task.id)).toBeDefined();
+
+      await vi.advanceTimersByTimeAsync(605_000);
+
+      await vi.waitFor(() => {
+        expect(getActiveSession(task.id)).toBeUndefined();
+      });
+
+      expect(
+        broadcasts.some((event) => (
+          event.type === 'activity:entry'
+          && event.entry?.type === 'system-event'
+          && typeof event.entry?.message === 'string'
+          && event.entry.message.includes('exceeded max turn duration')
+        )),
+      ).toBe(true);
+
+      const turnEndEvents = broadcasts.filter((event) => event.type === 'agent:turn_end' && event.taskId === task.id);
+      expect(turnEndEvents.length).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('auto-promotes backlog tasks to ready when backlog automation is enabled', async () => {
     const workspacePath = mkdtempSync(join(tmpdir(), 'pi-factory-plan-task-'));
     tempDirs.push(workspacePath);
