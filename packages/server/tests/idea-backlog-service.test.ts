@@ -149,4 +149,65 @@ describe('idea backlog service', () => {
     const backlog = await getIdeaBacklog('ws-2');
     expect(backlog.items).toEqual([]);
   });
+
+  describe('updateIdeaBacklogItem', () => {
+    it('updates the text of an existing idea', async () => {
+      const homePath = setTempHome();
+      const workspacePath = createTempDir('pi-factory-workspace-update-');
+
+      writeWorkspaceConfig(workspacePath);
+      registerWorkspaces(homePath, [{ id: 'ws-upd', path: workspacePath, name: 'workspace-upd' }]);
+
+      const { addIdeaBacklogItem, updateIdeaBacklogItem, getIdeaBacklog } = await import('../src/idea-backlog-service.js');
+
+      await addIdeaBacklogItem('ws-upd', 'Original text');
+      const backlog = await getIdeaBacklog('ws-upd');
+      const ideaId = backlog.items[0].id;
+
+      const updated = await updateIdeaBacklogItem('ws-upd', ideaId, 'Updated text');
+      expect(updated.items[0].text).toBe('Updated text');
+      expect(updated.items[0].id).toBe(ideaId);
+
+      // Persisted on disk
+      const diskBacklog = JSON.parse(
+        readFileSync(join(workspacePath, '.taskfactory', 'idea-backlog.json'), 'utf-8'),
+      ) as IdeaBacklog;
+      expect(diskBacklog.items[0].text).toBe('Updated text');
+    });
+
+    it('rejects empty or whitespace-only text', async () => {
+      const homePath = setTempHome();
+      const workspacePath = createTempDir('pi-factory-workspace-update-empty-');
+
+      writeWorkspaceConfig(workspacePath);
+      registerWorkspaces(homePath, [{ id: 'ws-upd-empty', path: workspacePath, name: 'workspace-upd-empty' }]);
+
+      const { addIdeaBacklogItem, updateIdeaBacklogItem, getIdeaBacklog } = await import('../src/idea-backlog-service.js');
+
+      await addIdeaBacklogItem('ws-upd-empty', 'Original');
+      const backlog = await getIdeaBacklog('ws-upd-empty');
+      const ideaId = backlog.items[0].id;
+
+      await expect(updateIdeaBacklogItem('ws-upd-empty', ideaId, '')).rejects.toThrow('Idea text is required');
+      await expect(updateIdeaBacklogItem('ws-upd-empty', ideaId, '   ')).rejects.toThrow('Idea text is required');
+
+      // Text unchanged
+      const afterReject = await getIdeaBacklog('ws-upd-empty');
+      expect(afterReject.items[0].text).toBe('Original');
+    });
+
+    it('rejects unknown idea IDs', async () => {
+      const homePath = setTempHome();
+      const workspacePath = createTempDir('pi-factory-workspace-update-missing-');
+
+      writeWorkspaceConfig(workspacePath);
+      registerWorkspaces(homePath, [{ id: 'ws-upd-missing', path: workspacePath, name: 'workspace-upd-missing' }]);
+
+      const { updateIdeaBacklogItem } = await import('../src/idea-backlog-service.js');
+
+      await expect(updateIdeaBacklogItem('ws-upd-missing', 'nonexistent-id', 'Some text')).rejects.toThrow(
+        'Idea not found: nonexistent-id',
+      );
+    });
+  });
 });

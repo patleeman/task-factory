@@ -138,3 +138,20 @@ export async function reorderIdeaBacklogItems(workspaceId: string, orderedIdeaId
   await persistIdeaBacklog(workspaceId, backlog);
   return backlog;
 }
+
+export async function updateIdeaBacklogItem(workspaceId: string, ideaId: string, text: string): Promise<IdeaBacklog> {
+  const trimmedText = text.trim();
+  if (!trimmedText) {
+    throw new Error('Idea text is required');
+  }
+
+  const backlog = await getIdeaBacklog(workspaceId);
+  const item = backlog.items.find((i) => i.id === ideaId);
+  if (!item) {
+    throw new Error(`Idea not found: ${ideaId}`);
+  }
+
+  item.text = trimmedText;
+  await persistIdeaBacklog(workspaceId, backlog);
+  return backlog;
+}

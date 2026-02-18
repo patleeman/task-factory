@@ -1157,6 +1157,17 @@ export function WorkspacePage() {
     }
   }, [workspaceId, ideaBacklog, showToast])
 
+  const handleEditIdea = useCallback(async (ideaId: string, text: string) => {
+    if (!workspaceId) return
+    try {
+      const updatedBacklog = await api.updateIdeaBacklogItem(workspaceId, ideaId, text)
+      setIdeaBacklog(updatedBacklog)
+    } catch (err) {
+      console.error('Failed to update idea:', err)
+      showToast('Failed to update idea')
+    }
+  }, [workspaceId, showToast])
+
   const handlePromoteIdea = useCallback((idea: IdeaBacklogItem) => {
     setNewTaskPrefill({
       id: `${idea.id}-${Date.now()}`,
@@ -1834,6 +1845,7 @@ export function WorkspacePage() {
                   onDeleteIdea={handleDeleteIdea}
                   onReorderIdeas={handleReorderIdeas}
                   onPromoteIdea={handlePromoteIdea}
+                  onEditIdea={handleEditIdea}
                 />
               ) : (
                 <ShelfPane

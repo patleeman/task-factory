@@ -97,8 +97,8 @@ Use `metadata.signal` + `metadata.outcome` + `metadata.sessionId`/`turnId` to bu
 |---|---|---|
 | GET | `/api/workspaces/:workspaceId/automation` | Read effective automation settings |
 | PATCH | `/api/workspaces/:workspaceId/automation` | Update workflow overrides |
-| GET | `/api/workspaces/:workspaceId/queue/status` | Queue status |
-| POST | `/api/workspaces/:workspaceId/queue/start` | Enable queue |
+| GET | `/api/workspaces/:workspaceId/queue/status` | Queue status (includes optional `executionBreakers`) |
+| POST | `/api/workspaces/:workspaceId/queue/start` | Enable queue (also clears open execution breakers as manual resume) |
 | POST | `/api/workspaces/:workspaceId/queue/stop` | Disable queue |
 
 ### Pi migration + settings endpoints
@@ -123,6 +123,7 @@ Use `metadata.signal` + `metadata.outcome` + `metadata.sessionId`/`turnId` to bu
 | POST | `/api/workspaces/:workspaceId/shelf/push-all` | Promote all drafts |
 | GET | `/api/workspaces/:workspaceId/idea-backlog` | Read idea backlog |
 | POST | `/api/workspaces/:workspaceId/idea-backlog/items` | Add idea |
+| PATCH | `/api/workspaces/:workspaceId/idea-backlog/items/:ideaId` | Update idea text |
 | DELETE | `/api/workspaces/:workspaceId/idea-backlog/items/:ideaId` | Delete idea |
 | POST | `/api/workspaces/:workspaceId/idea-backlog/reorder` | Reorder ideas |
 

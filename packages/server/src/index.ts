@@ -2630,6 +2630,7 @@ import {
   addIdeaBacklogItem,
   removeIdeaBacklogItem,
   reorderIdeaBacklogItems,
+  updateIdeaBacklogItem,
 } from './idea-backlog-service.js';
 
 // ─── Planning Attachments ────────────────────────────────────────────────────
@@ -3031,6 +3032,27 @@ app.post('/api/workspaces/:workspaceId/idea-backlog/reorder', async (req, res) =
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Failed to reorder ideas';
     res.status(400).json({ error: message });
+  }
+});
+
+// Update an idea in workspace idea backlog
+app.patch('/api/workspaces/:workspaceId/idea-backlog/items/:ideaId', async (req, res) => {
+  const workspace = await getWorkspaceById(req.params.workspaceId);
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return;
+  }
+
+  const text = typeof req.body?.text === 'string' ? req.body.text : '';
+
+  try {
+    const backlog = await updateIdeaBacklogItem(workspace.id, req.params.ideaId, text);
+    broadcastToWorkspace(workspace.id, { type: 'idea_backlog:updated', workspaceId: workspace.id, backlog });
+    res.json(backlog);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to update idea';
+    const status = message.startsWith('Idea not found') ? 404 : 400;
+    res.status(status).json({ error: message });
   }
 });
 

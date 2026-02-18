@@ -10,6 +10,7 @@ interface IdeaBacklogPaneProps {
   onDeleteIdea: (ideaId: string) => Promise<void> | void
   onReorderIdeas: (ideaIds: string[]) => Promise<void> | void
   onPromoteIdea: (idea: IdeaBacklogItem) => void
+  onEditIdea: (ideaId: string, text: string) => Promise<void> | void
 }
 
 function moveIdeaBeforeTarget(ideaIds: string[], draggedIdeaId: string, targetIdeaId: string): string[] {
@@ -34,6 +35,7 @@ export function IdeaBacklogPane({
   onDeleteIdea,
   onReorderIdeas,
   onPromoteIdea,
+  onEditIdea,
 }: IdeaBacklogPaneProps) {
   const [draftText, setDraftText] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -41,6 +43,14 @@ export function IdeaBacklogPane({
   const [dropTargetIdeaId, setDropTargetIdeaId] = useState<string | null>(null)
   const [dropAtEnd, setDropAtEnd] = useState(false)
   const dragIdeaIdRef = useRef<string | null>(null)
+
+  const [editingIdeaId, setEditingIdeaId] = useState<string | null>(null)
+  const [editingText, setEditingText] = useState('')
+  const [isSavingEdit, setIsSavingEdit] = useState(false)
+  // Guards against concurrent saves (e.g. Enter + blur firing in quick succession on some browsers)
+  const savingEditRef = useRef(false)
+  // Suppresses the blur-triggered save when Escape is pressed
+  const cancellingRef = useRef(false)
 
   const ideas = backlog?.items || []
   const canSubmit = draftText.trim().length > 0 && !isSubmitting
@@ -66,6 +76,43 @@ export function IdeaBacklogPane({
       // Parent handler is expected to surface user-facing errors.
     } finally {
       setIsSubmitting(false)
+    }
+  }
+
+  const startEditing = (idea: IdeaBacklogItem) => {
+    cancellingRef.current = false
+    savingEditRef.current = false
+    setEditingIdeaId(idea.id)
+    setEditingText(idea.text)
+  }
+
+  const cancelEditing = () => {
+    cancellingRef.current = true
+    setEditingIdeaId(null)
+    setEditingText('')
+  }
+
+  const saveEdit = async (ideaId: string) => {
+    if (cancellingRef.current || savingEditRef.current) return
+    const text = editingText.trim()
+    if (!text) {
+      // Empty text — cancel without saving
+      setEditingIdeaId(null)
+      setEditingText('')
+      return
+    }
+
+    savingEditRef.current = true
+    setIsSavingEdit(true)
+    try {
+      await onEditIdea(ideaId, text)
+    } catch {
+      // Parent handler is expected to surface user-facing errors.
+    } finally {
+      savingEditRef.current = false
+      setIsSavingEdit(false)
+      setEditingIdeaId(null)
+      setEditingText('')
     }
   }
 
@@ -161,12 +208,14 @@ export function IdeaBacklogPane({
             {ideas.map((idea) => {
               const isDragging = draggingIdeaId === idea.id
               const isDropTarget = dropTargetIdeaId === idea.id && !isDragging
+              const isEditing = editingIdeaId === idea.id
 
               return (
                 <li
                   key={idea.id}
-                  draggable
+                  draggable={!isEditing}
                   onDragStart={(event) => {
+                    if (isEditing) return
                     dragIdeaIdRef.current = idea.id
                     setDraggingIdeaId(idea.id)
                     setDropTargetIdeaId(null)
@@ -191,7 +240,9 @@ export function IdeaBacklogPane({
                       ? 'border-slate-300 bg-slate-50 opacity-60'
                       : isDropTarget
                         ? 'border-blue-400 bg-blue-50'
-                        : 'border-slate-200 bg-white'
+                        : isEditing
+                          ? 'border-slate-400 bg-white'
+                          : 'border-slate-200 bg-white'
                   }`}
                 >
                   <div className="flex items-start gap-2">
@@ -200,30 +251,61 @@ export function IdeaBacklogPane({
                     </span>
 
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm text-slate-700 whitespace-pre-wrap break-words">{idea.text}</p>
+                      {isEditing ? (
+                        <input
+                          autoFocus
+                          type="text"
+                          value={editingText}
+                          onChange={(event) => setEditingText(event.target.value)}
+                          disabled={isSavingEdit}
+                          className="w-full text-sm text-slate-700 border-0 outline-none bg-transparent p-0 focus:outline-none"
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter') {
+                              event.preventDefault()
+                              void saveEdit(idea.id)
+                            } else if (event.key === 'Escape') {
+                              event.preventDefault()
+                              cancelEditing()
+                            }
+                          }}
+                          onBlur={() => {
+                            void saveEdit(idea.id)
+                          }}
+                        />
+                      ) : (
+                        <p
+                          className="text-sm text-slate-700 whitespace-pre-wrap break-words cursor-text hover:text-slate-900"
+                          title="Click to edit"
+                          onClick={() => startEditing(idea)}
+                        >
+                          {idea.text}
+                        </p>
+                      )}
                     </div>
 
-                    <div className="flex items-center gap-2 shrink-0 ml-2">
-                      <button
-                        type="button"
-                        onClick={() => onPromoteIdea(idea)}
-                        className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700 font-medium"
-                      >
-                        Create Task
-                        <AppIcon icon={ArrowRight} size="xs" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          void onDeleteIdea(idea.id)
-                        }}
-                        className="inline-flex items-center gap-1 text-xs px-2 py-1.5 rounded bg-slate-100 text-slate-600 hover:bg-slate-200"
-                        aria-label="Delete idea"
-                        title="Delete idea"
-                      >
-                        <AppIcon icon={Trash2} size="xs" />
-                      </button>
-                    </div>
+                    {!isEditing && (
+                      <div className="flex items-center gap-2 shrink-0 ml-2">
+                        <button
+                          type="button"
+                          onClick={() => onPromoteIdea(idea)}
+                          className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700 font-medium"
+                        >
+                          Create Task
+                          <AppIcon icon={ArrowRight} size="xs" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void onDeleteIdea(idea.id)
+                          }}
+                          className="inline-flex items-center gap-1 text-xs px-2 py-1.5 rounded bg-slate-100 text-slate-600 hover:bg-slate-200"
+                          aria-label="Delete idea"
+                          title="Delete idea"
+                        >
+                          <AppIcon icon={Trash2} size="xs" />
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </li>
               )

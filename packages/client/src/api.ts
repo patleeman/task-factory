@@ -941,6 +941,19 @@ export const api = {
     return res.json()
   },
 
+  async updateIdeaBacklogItem(workspaceId: string, ideaId: string, text: string): Promise<IdeaBacklog> {
+    const res = await fetch(`/api/workspaces/${workspaceId}/idea-backlog/items/${ideaId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to update idea' }))
+      throw new Error(err.error || `Failed to update idea (${res.status})`)
+    }
+    return res.json()
+  },
+
   // ─────────────────────────────────────────────────────────────────────────
   // New Task Form (planning agent integration)
   // ─────────────────────────────────────────────────────────────────────────
