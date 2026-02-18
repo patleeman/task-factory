@@ -22,6 +22,7 @@ import type {
   WorkspaceWorkflowSettingsResponse,
   WorkflowDefaultsConfig,
   ModelConfig,
+  ModelProfile,
 } from '@task-factory/shared'
 
 export interface AvailableModel {
@@ -136,6 +137,7 @@ export interface PiFactorySettings {
   taskDefaults?: TaskDefaults
   planningGuardrails?: Partial<PlanningGuardrails>
   workflowDefaults?: WorkflowDefaultsConfig
+  modelProfiles?: ModelProfile[]
   [key: string]: unknown
 }
 

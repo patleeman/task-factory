@@ -73,6 +73,15 @@ export interface ModelConfig {
   thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 }
 
+export interface ModelProfile {
+  id: string;
+  name: string;
+  planningModelConfig: ModelConfig;
+  executionModelConfig: ModelConfig;
+  /** Legacy alias retained for compatibility with older clients. */
+  modelConfig?: ModelConfig;
+}
+
 export interface TaskDefaults {
   /** Preferred model for planning runs (acceptance criteria + plan generation). */
   planningModelConfig?: ModelConfig;
@@ -1114,6 +1123,8 @@ export interface NewTaskFormState {
   selectedPrePlanningSkillIds?: string[];
   planningModelConfig?: ModelConfig;
   executionModelConfig?: ModelConfig;
+  /** Selected reusable model profile ID from settings. */
+  selectedModelProfileId?: string;
   /** Legacy single-model field (treated as execution model). */
   modelConfig?: ModelConfig;
   skillOrder?: string[];

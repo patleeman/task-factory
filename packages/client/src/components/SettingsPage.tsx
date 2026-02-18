@@ -7,6 +7,7 @@ import {
   DEFAULT_PLANNING_PROMPT_TEMPLATE,
   DEFAULT_EXECUTION_PROMPT_TEMPLATE,
   type ModelConfig,
+  type ModelProfile,
   type TaskDefaults,
   type PlanningGuardrails,
   type WorkflowDefaultsConfig,
@@ -133,6 +134,79 @@ function normalizeWorkflowDefaultsForUi(settings: PiFactorySettings | null | und
   }
 }
 
+function cloneModelConfig(modelConfig: ModelConfig | undefined): ModelConfig | undefined {
+  if (!modelConfig) {
+    return undefined
+  }
+
+  return {
+    provider: modelConfig.provider,
+    modelId: modelConfig.modelId,
+    thinkingLevel: modelConfig.thinkingLevel,
+  }
+}
+
+function createModelProfileId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+
+  return `profile-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+function getFirstAvailableModelConfig(models: AvailableModel[]): ModelConfig | undefined {
+  if (models.length === 0) {
+    return undefined
+  }
+
+  const first = models[0]
+  return {
+    provider: first.provider,
+    modelId: first.id,
+    thinkingLevel: first.reasoning ? 'medium' : undefined,
+  }
+}
+
+function normalizeModelProfilesForUi(
+  settings: PiFactorySettings | null | undefined,
+  models: AvailableModel[],
+): ModelProfile[] {
+  const rawProfiles = settings?.modelProfiles
+  if (!Array.isArray(rawProfiles)) {
+    return []
+  }
+
+  const normalizedProfiles: ModelProfile[] = []
+
+  for (const profile of rawProfiles) {
+    if (!profile || typeof profile !== 'object') {
+      continue
+    }
+
+    const id = typeof profile.id === 'string' ? profile.id.trim() : ''
+    const name = typeof profile.name === 'string' ? profile.name.trim() : ''
+    const planningModelConfig = normalizeModelConfigForUi(models, profile.planningModelConfig)
+    const executionModelConfig = normalizeModelConfigForUi(
+      models,
+      profile.executionModelConfig ?? profile.modelConfig,
+    )
+
+    if (!id || !name || !planningModelConfig || !executionModelConfig) {
+      continue
+    }
+
+    normalizedProfiles.push({
+      id,
+      name,
+      planningModelConfig,
+      executionModelConfig,
+      modelConfig: executionModelConfig,
+    })
+  }
+
+  return normalizedProfiles
+}
+
 function authStateLabel(authState: PiProviderAuthState): string {
   switch (authState) {
     case 'api_key':
@@ -190,6 +264,7 @@ export function SettingsPage() {
   const [workflowDefaultsForm, setWorkflowDefaultsForm] = useState<WorkspaceWorkflowSettings>({
     ...DEFAULT_WORKFLOW_SETTINGS,
   })
+  const [modelProfilesForm, setModelProfilesForm] = useState<ModelProfile[]>([])
   const [voiceInputHotkey, setVoiceInputHotkey] = useState(DEFAULT_VOICE_INPUT_HOTKEY)
 
   const [isSavingSystemSettings, setIsSavingSystemSettings] = useState(false)
@@ -238,6 +313,7 @@ export function SettingsPage() {
         setForm(normalizeTaskDefaultsForUi(defaults, availableModels, availableSkills))
         setPlanningGuardrailsForm(normalizePlanningGuardrailsForUi(settings))
         setWorkflowDefaultsForm(normalizeWorkflowDefaultsForUi(settings))
+        setModelProfilesForm(normalizeModelProfilesForUi(settings, availableModels))
         setVoiceInputHotkey(normalizeVoiceInputHotkey(settings.voiceInputHotkey))
         setAuthOverview(auth)
       })
@@ -358,6 +434,35 @@ export function SettingsPage() {
 
       const savedDefaults = await api.saveTaskDefaults(payload)
 
+      const normalizedProfiles: ModelProfile[] = modelProfilesForm.map((profile, index) => {
+        const name = profile.name.trim()
+        if (!name) {
+          throw new Error(`Model profile ${index + 1} name is required`)
+        }
+
+        const planningModelConfig = cloneModelConfig(profile.planningModelConfig)
+        const executionModelConfig = cloneModelConfig(profile.executionModelConfig ?? profile.modelConfig)
+
+        const hasPlanningModel = Boolean(planningModelConfig?.provider?.trim() && planningModelConfig?.modelId?.trim())
+        const hasExecutionModel = Boolean(executionModelConfig?.provider?.trim() && executionModelConfig?.modelId?.trim())
+
+        if (!hasPlanningModel || !hasExecutionModel) {
+          throw new Error(`Model profile ${name} must include planning and execution models`)
+        }
+
+        const finalPlanningModelConfig = planningModelConfig as ModelConfig
+        const finalExecutionModelConfig = executionModelConfig as ModelConfig
+
+        return {
+          id: profile.id,
+          name,
+          planningModelConfig: finalPlanningModelConfig,
+          executionModelConfig: finalExecutionModelConfig,
+          // Keep legacy alias aligned for backward compatibility.
+          modelConfig: finalExecutionModelConfig,
+        }
+      })
+
       const currentSettings = await api.getPiFactorySettings()
       const workflowDefaults: WorkflowDefaultsConfig = {
         readyLimit: workflowDefaultsForm.readyLimit,
@@ -373,13 +478,15 @@ export function SettingsPage() {
           maxToolCalls: planningGuardrailsForm.maxToolCalls,
         },
         workflowDefaults,
+        modelProfiles: normalizedProfiles,
       }
 
       await api.savePiFactorySettings(nextSettings)
       setPlanningGuardrailsForm(normalizePlanningGuardrailsForUi(nextSettings))
       setWorkflowDefaultsForm(normalizeWorkflowDefaultsForUi(nextSettings))
+      setModelProfilesForm(normalizeModelProfilesForUi(nextSettings, models))
       setForm(normalizeTaskDefaultsForUi(savedDefaults, models, skills))
-      setDefaultsSaveMessage('Task defaults, planning guardrails, and workflow defaults saved')
+      setDefaultsSaveMessage('Task defaults, model profiles, planning guardrails, and workflow defaults saved')
     } catch (err) {
       console.error('Failed to save settings:', err)
       setDefaultsError(err instanceof Error ? err.message : 'Failed to save settings')
@@ -855,6 +962,124 @@ export function SettingsPage() {
                     }}
                   />
                 </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h4 className="text-sm font-semibold text-slate-800">Model Profiles</h4>
+                    <p className="text-xs text-slate-500 mt-0.5">Save reusable planning + execution model combinations for quick task creation.</p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={models.length === 0}
+                    onClick={() => {
+                      const nextIndex = modelProfilesForm.length + 1
+                      const fallbackModel = getFirstAvailableModelConfig(models)
+                      const defaultPlanningModel = cloneModelConfig(form.planningModelConfig) ?? cloneModelConfig(fallbackModel)
+                      const defaultExecutionModel = cloneModelConfig(form.executionModelConfig ?? form.modelConfig) ?? cloneModelConfig(fallbackModel)
+                      if (!defaultPlanningModel || !defaultExecutionModel) {
+                        return
+                      }
+
+                      setModelProfilesForm((current) => [
+                        ...current,
+                        {
+                          id: createModelProfileId(),
+                          name: `Profile ${nextIndex}`,
+                          planningModelConfig: defaultPlanningModel,
+                          executionModelConfig: defaultExecutionModel,
+                          modelConfig: defaultExecutionModel,
+                        },
+                      ])
+                    }}
+                    className="btn btn-secondary text-xs py-1 px-2 disabled:opacity-50"
+                  >
+                    Add Profile
+                  </button>
+                </div>
+
+                {modelProfilesForm.length === 0 ? (
+                  <p className="text-xs text-slate-500">No model profiles yet.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {modelProfilesForm.map((profile, index) => (
+                      <div key={profile.id} className="rounded-lg border border-slate-200 bg-white p-3 space-y-3">
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            value={profile.name}
+                            onChange={(event) => {
+                              const name = event.target.value
+                              setModelProfilesForm((current) => current.map((candidate) => (
+                                candidate.id === profile.id
+                                  ? { ...candidate, name }
+                                  : candidate
+                              )))
+                            }}
+                            placeholder={`Profile ${index + 1}`}
+                            className="flex-1 text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setModelProfilesForm((current) => current.filter((candidate) => candidate.id !== profile.id))
+                            }}
+                            className="text-xs text-red-600 hover:text-red-700"
+                          >
+                            Remove
+                          </button>
+                        </div>
+
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <div>
+                            <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">
+                              Planning Model
+                            </label>
+                            <ModelSelector
+                              value={profile.planningModelConfig}
+                              onChange={(config) => {
+                                if (!config) {
+                                  return
+                                }
+
+                                setModelProfilesForm((current) => current.map((candidate) => (
+                                  candidate.id === profile.id
+                                    ? { ...candidate, planningModelConfig: config }
+                                    : candidate
+                                )))
+                              }}
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">
+                              Execution Model
+                            </label>
+                            <ModelSelector
+                              value={profile.executionModelConfig ?? profile.modelConfig}
+                              onChange={(config) => {
+                                if (!config) {
+                                  return
+                                }
+
+                                setModelProfilesForm((current) => current.map((candidate) => (
+                                  candidate.id === profile.id
+                                    ? {
+                                        ...candidate,
+                                        executionModelConfig: config,
+                                        modelConfig: config,
+                                      }
+                                    : candidate
+                                )))
+                              }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-3">

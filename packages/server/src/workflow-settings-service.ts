@@ -7,6 +7,8 @@ import {
   type WorkspaceWorkflowSettings,
   type WorkspaceWorkflowSettingsResponse,
   type WorkflowDefaultsConfig,
+  type ModelConfig,
+  type ModelProfile,
 } from '@task-factory/shared';
 import {
   loadPiFactorySettings,
@@ -15,6 +17,14 @@ import {
 
 const SLOT_LIMIT_MIN = 1;
 const SLOT_LIMIT_MAX = 100;
+const ALLOWED_THINKING_LEVELS = new Set<NonNullable<ModelConfig['thinkingLevel']>>([
+  'off',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+]);
 
 export interface WorkflowSettingsPatch {
   readyLimit?: number | null;
@@ -83,6 +93,118 @@ function parseNullableBoolean(
   return { ok: true, value };
 }
 
+function parseModelConfig(
+  value: unknown,
+  fieldName: string,
+): { ok: true; value: ModelConfig } | { ok: false; error: string } {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return { ok: false, error: `${fieldName} must be an object with provider and modelId` };
+  }
+
+  const provider = (value as { provider?: unknown }).provider;
+  const modelId = (value as { modelId?: unknown }).modelId;
+  const thinkingLevel = (value as { thinkingLevel?: unknown }).thinkingLevel;
+
+  if (typeof provider !== 'string' || provider.trim().length === 0) {
+    return { ok: false, error: `${fieldName}.provider must be a non-empty string` };
+  }
+
+  if (typeof modelId !== 'string' || modelId.trim().length === 0) {
+    return { ok: false, error: `${fieldName}.modelId must be a non-empty string` };
+  }
+
+  if (thinkingLevel !== undefined) {
+    if (typeof thinkingLevel !== 'string' || !ALLOWED_THINKING_LEVELS.has(thinkingLevel as NonNullable<ModelConfig['thinkingLevel']>)) {
+      return { ok: false, error: `${fieldName}.thinkingLevel must be one of: off, minimal, low, medium, high, xhigh` };
+    }
+  }
+
+  const modelConfig: ModelConfig = {
+    provider: provider.trim(),
+    modelId: modelId.trim(),
+  };
+
+  if (typeof thinkingLevel === 'string') {
+    modelConfig.thinkingLevel = thinkingLevel as ModelConfig['thinkingLevel'];
+  }
+
+  return { ok: true, value: modelConfig };
+}
+
+function parseModelProfiles(
+  value: unknown,
+): { ok: true; value: ModelProfile[] | undefined } | { ok: false; error: string } {
+  if (value === undefined) {
+    return { ok: true, value: undefined };
+  }
+
+  if (value === null) {
+    return { ok: true, value: [] };
+  }
+
+  if (!Array.isArray(value)) {
+    return { ok: false, error: 'modelProfiles must be an array when provided' };
+  }
+
+  const normalizedProfiles: ModelProfile[] = [];
+  const seenIds = new Set<string>();
+
+  for (let index = 0; index < value.length; index += 1) {
+    const rawProfile = value[index];
+    const fieldPrefix = `modelProfiles[${index}]`;
+
+    if (!rawProfile || typeof rawProfile !== 'object' || Array.isArray(rawProfile)) {
+      return { ok: false, error: `${fieldPrefix} must be an object` };
+    }
+
+    const id = (rawProfile as { id?: unknown }).id;
+    const name = (rawProfile as { name?: unknown }).name;
+
+    if (typeof id !== 'string' || id.trim().length === 0) {
+      return { ok: false, error: `${fieldPrefix}.id must be a non-empty string` };
+    }
+
+    if (typeof name !== 'string' || name.trim().length === 0) {
+      return { ok: false, error: `${fieldPrefix}.name must be a non-empty string` };
+    }
+
+    const normalizedId = id.trim();
+    if (seenIds.has(normalizedId)) {
+      return { ok: false, error: `${fieldPrefix}.id must be unique` };
+    }
+    seenIds.add(normalizedId);
+
+    const planningResult = parseModelConfig(
+      (rawProfile as { planningModelConfig?: unknown }).planningModelConfig,
+      `${fieldPrefix}.planningModelConfig`,
+    );
+    if (!planningResult.ok) {
+      return planningResult;
+    }
+
+    const executionSource = (rawProfile as { executionModelConfig?: unknown; modelConfig?: unknown }).executionModelConfig
+      ?? (rawProfile as { modelConfig?: unknown }).modelConfig;
+    const executionResult = parseModelConfig(
+      executionSource,
+      `${fieldPrefix}.executionModelConfig`,
+    );
+    if (!executionResult.ok) {
+      return executionResult;
+    }
+
+    normalizedProfiles.push({
+      id: normalizedId,
+      name: name.trim(),
+      planningModelConfig: planningResult.value,
+      executionModelConfig: executionResult.value,
+      // Keep legacy alias aligned for backward compatibility.
+      modelConfig: executionResult.value,
+    });
+  }
+
+  return { ok: true, value: normalizedProfiles };
+}
+
 export function normalizePiFactorySettingsPayload(
   payload: PiFactorySettings,
 ): { ok: true; value: PiFactorySettings } | { ok: false; error: string } {
@@ -90,10 +212,22 @@ export function normalizePiFactorySettingsPayload(
     return { ok: false, error: 'Request body must be an object' };
   }
 
+  const normalized: PiFactorySettings = { ...payload };
+
+  const modelProfilesResult = parseModelProfiles(payload.modelProfiles);
+  if (!modelProfilesResult.ok) {
+    return modelProfilesResult;
+  }
+
+  if (modelProfilesResult.value === undefined) {
+    delete normalized.modelProfiles;
+  } else {
+    normalized.modelProfiles = modelProfilesResult.value;
+  }
+
   const rawDefaults = payload.workflowDefaults;
 
   if (rawDefaults === undefined || rawDefaults === null) {
-    const normalized: PiFactorySettings = { ...payload };
     delete normalized.workflowDefaults;
     return { ok: true, value: normalized };
   }
@@ -154,10 +288,7 @@ export function normalizePiFactorySettingsPayload(
     normalizedDefaults.readyToExecuting = readyToExecutingResult.value;
   }
 
-  const normalized: PiFactorySettings = {
-    ...payload,
-    workflowDefaults: normalizedDefaults,
-  };
+  normalized.workflowDefaults = normalizedDefaults;
 
   return { ok: true, value: normalized };
 }

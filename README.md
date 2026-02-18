@@ -20,7 +20,7 @@ Task Factory has a fairly opinionated workflow. Tasks progress through stages:
 
 - **Backlog**: Tasks are staged in the backlog as an agent is run to generate a plan. You can review the plan before marking it as ready.
 - **Ready**: Once a task is ready for execution, place it in the ready queue, or let it Auto Promote from the backlog.
-- **Executing**: Tasks are executed one at a time by default (but that number is configurable). Optional pre-planning, pre-execution, and post-execution skills run around planning/implementation; starter post hooks include `checkpoint`, `code-review`, and `update-docs`.
+- **Executing**: Tasks are executed one at a time by default (but that number is configurable). Optional pre-planning, pre-execution, and post-execution skills run around planning/implementation; starter post hooks include `checkpoint`, `code-review`, and `update-docs`. New Task also supports reusable model profiles (planning+execution model/thinking presets) for one-click model selection. Queue automation includes a provider/model-aware execution circuit breaker for repeated `rate_limit`/`quota`/`auth` failures, with cooldown + manual resume.
 - **Completed**: Once in completed state, you can review the task before archiving it.
 
 This keeps agent output aligned to your review capacity and prevents overproduction.

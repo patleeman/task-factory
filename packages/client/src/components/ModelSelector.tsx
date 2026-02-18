@@ -7,6 +7,7 @@ interface ModelSelectorProps {
   onChange: (config: ModelConfig | undefined) => void
   /** Render in compact mode for inline use in headers/toolbars */
   compact?: boolean
+  disabled?: boolean
 }
 
 const THINKING_LEVELS = [
@@ -18,7 +19,7 @@ const THINKING_LEVELS = [
   { value: 'xhigh', label: 'XHi' },
 ] as const
 
-export function ModelSelector({ value, onChange, compact }: ModelSelectorProps) {
+export function ModelSelector({ value, onChange, compact, disabled = false }: ModelSelectorProps) {
   const [models, setModels] = useState<AvailableModel[]>([])
   const [isLoading, setIsLoading] = useState(true)
 
@@ -81,7 +82,8 @@ export function ModelSelector({ value, onChange, compact }: ModelSelectorProps) 
         <select
           value={selectedKey}
           onChange={(e) => handleModelChange(e.target.value)}
-          className="text-xs border border-slate-200 rounded px-2 py-1 bg-white text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-400 focus:border-transparent max-w-[200px]"
+          disabled={disabled}
+          className="text-xs border border-slate-200 rounded px-2 py-1 bg-white text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-400 focus:border-transparent max-w-[200px] disabled:opacity-60"
         >
           <option value="">Default model</option>
           {Object.entries(grouped).map(([provider, providerModels]) => (
@@ -99,7 +101,8 @@ export function ModelSelector({ value, onChange, compact }: ModelSelectorProps) 
           <select
             value={value.thinkingLevel || 'medium'}
             onChange={(e) => handleThinkingChange(e.target.value)}
-            className="text-xs border border-slate-200 rounded px-1.5 py-1 bg-white text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-400 focus:border-transparent"
+            disabled={disabled}
+            className="text-xs border border-slate-200 rounded px-1.5 py-1 bg-white text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-400 focus:border-transparent disabled:opacity-60"
           >
             {THINKING_LEVELS.map(level => (
               <option key={level.value} value={level.value}>
@@ -117,7 +120,8 @@ export function ModelSelector({ value, onChange, compact }: ModelSelectorProps) 
       <select
         value={selectedKey}
         onChange={(e) => handleModelChange(e.target.value)}
-        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent"
+        disabled={disabled}
+        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent disabled:opacity-60"
       >
         <option value="">Default (from Pi settings)</option>
         {Object.entries(grouped).map(([provider, providerModels]) => (
@@ -139,7 +143,8 @@ export function ModelSelector({ value, onChange, compact }: ModelSelectorProps) 
           <select
             value={value.thinkingLevel || 'medium'}
             onChange={(e) => handleThinkingChange(e.target.value)}
-            className="flex-1 text-sm border border-slate-200 rounded-lg px-2 py-1.5 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent"
+            disabled={disabled}
+            className="flex-1 text-sm border border-slate-200 rounded-lg px-2 py-1.5 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent disabled:opacity-60"
           >
             {THINKING_LEVELS.map(level => (
               <option key={level.value} value={level.value}>

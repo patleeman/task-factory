@@ -22,7 +22,7 @@ How Task Factory stores and resolves global + workspace settings, including firs
 
 | Path | Purpose |
 |---|---|
-| `~/.taskfactory/settings.json` | Global Task Factory settings (theme, defaults, workflow automation defaults) |
+| `~/.taskfactory/settings.json` | Global Task Factory settings (theme, task defaults, reusable model profiles, workflow automation defaults) |
 | `~/.taskfactory/agent/auth.json` | Provider credentials used by Task Factory runtime |
 | `~/.taskfactory/agent/skills/` | Global Pi-style skills migrated from legacy Pi data |
 | `~/.taskfactory/skills/` | Global execution hook skills (`pre-planning`, `pre`, `post`) |

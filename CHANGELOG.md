@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Execution reliability telemetry signals in task activity metadata for turn lifecycle timing, stall recovery, provider retry outcomes, and compaction outcomes.
 - Regression coverage for execution reliability telemetry and failure-path watchdog recovery behavior.
 - Provider/model execution circuit breaker for queue automation, including cooldown status in queue APIs/events and manual resume override via queue start.
+- Reusable model profiles in Settings (named planning+execution model/thinking presets), with New Task profile dropdown that applies and locks model selectors when selected.
 
 ### Changed
 - Added pre-planning hook support (`prePlanningSkills` / `pre-planning`) across task defaults, task forms, and planning lifecycle execution.

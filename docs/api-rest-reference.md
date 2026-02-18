@@ -108,6 +108,8 @@ Use `metadata.signal` + `metadata.outcome` + `metadata.sessionId`/`turnId` to bu
 | GET | `/api/pi-migration/status` | Read one-time legacy `~/.pi` migration state (`pending`, `migrated`, `skipped`, `not_needed`) |
 | POST | `/api/pi-migration/migrate` | Persist migration decision and copy selected categories (`auth`, `skills`, `extensions`) into `~/.taskfactory` |
 | POST | `/api/pi-migration/skip` | Persist explicit skip decision so startup prompt is suppressed |
+| GET | `/api/settings` | Read Task Factory global settings (`voiceInputHotkey`, `planningGuardrails`, `workflowDefaults`, `modelProfiles`) |
+| POST | `/api/settings` | Save Task Factory global settings (rejects malformed payloads with `400`) |
 | GET | `/api/pi/settings` | Read Pi agent settings used by Task Factory |
 | GET | `/api/pi/auth` | Read provider auth overview from `~/.taskfactory/agent/auth.json` |
 

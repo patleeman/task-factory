@@ -18,6 +18,7 @@ export interface TaskDraft {
   selectedSkillIds: string[]
   selectedPreSkillIds: string[]
   selectedPrePlanningSkillIds: string[]
+  selectedModelProfileId?: string
   planningModelConfig?: DraftModelConfig
   executionModelConfig?: DraftModelConfig
   /** Legacy single-model field (treated as execution model). */
@@ -29,6 +30,7 @@ const EMPTY_DRAFT: TaskDraft = {
   selectedSkillIds: [...DEFAULT_POST_EXECUTION_SKILLS],
   selectedPreSkillIds: [...DEFAULT_PRE_EXECUTION_SKILLS],
   selectedPrePlanningSkillIds: [...DEFAULT_PRE_PLANNING_SKILLS],
+  selectedModelProfileId: undefined,
   planningModelConfig: undefined,
   executionModelConfig: undefined,
   modelConfig: undefined,
@@ -59,6 +61,9 @@ function loadDraft(storageKey: string): TaskDraft | null {
       selectedPrePlanningSkillIds: Array.isArray(parsed.selectedPrePlanningSkillIds)
         ? parsed.selectedPrePlanningSkillIds
         : [...DEFAULT_PRE_PLANNING_SKILLS],
+      selectedModelProfileId: typeof parsed.selectedModelProfileId === 'string'
+        ? parsed.selectedModelProfileId
+        : undefined,
       planningModelConfig: parsed.planningModelConfig || undefined,
       executionModelConfig,
       modelConfig: executionModelConfig,

@@ -48,7 +48,7 @@ On connect, server sends:
 | `task:reordered` | `{ phase, taskIds }` |
 | `task:plan_generated` | `{ taskId, plan }` |
 | `activity:entry` | `{ entry }` (includes execution reliability system-events when `entry.metadata.kind === "execution-reliability"`) |
-| `queue:status` | `{ status }` |
+| `queue:status` | `{ status }` (status includes optional `executionBreakers[]` with `{ provider, modelId, category, openedAt, retryAt, remainingMs, failureCount, threshold, cooldownMs }`) |
 | `workspace:automation_updated` | `{ workspaceId, settings, overrides, globalDefaults }` |
 | `idea_backlog:updated` | `{ workspaceId, backlog }` |
 | `shelf:updated` | `{ workspaceId, shelf }` |
@@ -84,7 +84,7 @@ On connect, server sends:
 | `planning:tool_end` | `{ workspaceId, toolCallId, toolName, isError, result? }` |
 | `planning:turn_end` | `{ workspaceId }` |
 | `planning:session_reset` | `{ workspaceId, sessionId }` |
-| `planning:task_form_updated` | `{ workspaceId, formState }` |
+| `planning:task_form_updated` | `{ workspaceId, formState }` (`formState` may include `selectedModelProfileId`, `planningModelConfig`, `executionModelConfig`, skills, and content updates) |
 | `qa:request` | `{ workspaceId, request }` |
 
 ### Runtime notes

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react'
 import { ArrowLeft, X } from 'lucide-react'
-import type { ModelConfig, NewTaskFormState, TaskDefaults } from '@task-factory/shared'
+import type { ModelConfig, ModelProfile, NewTaskFormState, TaskDefaults } from '@task-factory/shared'
 import {
   DEFAULT_PRE_PLANNING_SKILLS,
   DEFAULT_PRE_EXECUTION_SKILLS,
@@ -52,6 +52,52 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+function cloneModelConfig(modelConfig: ModelConfig | undefined): ModelConfig | undefined {
+  if (!modelConfig) {
+    return undefined
+  }
+
+  return {
+    provider: modelConfig.provider,
+    modelId: modelConfig.modelId,
+    thinkingLevel: modelConfig.thinkingLevel,
+  }
+}
+
+function normalizeModelProfiles(rawProfiles: unknown): ModelProfile[] {
+  if (!Array.isArray(rawProfiles)) {
+    return []
+  }
+
+  return rawProfiles
+    .map((profile): ModelProfile | null => {
+      if (!profile || typeof profile !== 'object') {
+        return null
+      }
+
+      const id = typeof profile.id === 'string' ? profile.id.trim() : ''
+      const name = typeof profile.name === 'string' ? profile.name.trim() : ''
+      const planningModelConfig = cloneModelConfig((profile as { planningModelConfig?: ModelConfig }).planningModelConfig)
+      const executionModelConfig = cloneModelConfig(
+        (profile as { executionModelConfig?: ModelConfig; modelConfig?: ModelConfig }).executionModelConfig
+          ?? (profile as { modelConfig?: ModelConfig }).modelConfig,
+      )
+
+      if (!id || !name || !planningModelConfig || !executionModelConfig) {
+        return null
+      }
+
+      return {
+        id,
+        name,
+        planningModelConfig,
+        executionModelConfig,
+        modelConfig: executionModelConfig,
+      }
+    })
+    .filter((profile): profile is ModelProfile => profile !== null)
+}
+
 export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdates, prefillRequest }: CreateTaskPaneProps) {
   const { initialDraft, restoredFromDraft, updateDraft, clearDraft, dismissRestoredBanner } = useLocalStorageDraft(workspaceId)
   const whiteboardStorageKey = getCreateTaskWhiteboardStorageKey(workspaceId)
@@ -89,6 +135,12 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
       ?? initialDraft.executionModelConfig
       ?? initialDraft.modelConfig) as ModelConfig | undefined
   )
+  const [selectedModelProfileId, setSelectedModelProfileId] = useState<string | undefined>(
+    typeof prefillRequest?.formState.selectedModelProfileId === 'string'
+      ? prefillRequest.formState.selectedModelProfileId
+      : initialDraft.selectedModelProfileId,
+  )
+  const [modelProfiles, setModelProfiles] = useState<ModelProfile[]>([])
   const [taskDefaults, setTaskDefaults] = useState<TaskDefaults>({
     planningModelConfig: undefined,
     executionModelConfig: undefined,
@@ -120,9 +172,13 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
   }, [])
 
   useEffect(() => {
-    api.getWorkspaceTaskDefaults(workspaceId)
-      .then((defaults) => {
+    Promise.all([
+      api.getWorkspaceTaskDefaults(workspaceId),
+      api.getPiFactorySettings(),
+    ])
+      .then(([defaults, settings]) => {
         setTaskDefaults(defaults)
+        setModelProfiles(normalizeModelProfiles(settings.modelProfiles))
 
         // Preserve restored drafts with user-entered content.
         if (hasRestoredDraftContent) {
@@ -135,9 +191,10 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
         setSelectedSkillIds(formDefaults.selectedSkillIds)
         setPlanningModelConfig(formDefaults.planningModelConfig)
         setExecutionModelConfig(formDefaults.executionModelConfig)
+        setSelectedModelProfileId(undefined)
       })
       .catch((err) => {
-        console.error('Failed to load task defaults:', err)
+        console.error('Failed to load task defaults/settings:', err)
       })
   }, [workspaceId, hasRestoredDraftContent])
 
@@ -150,6 +207,7 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
       selectedPrePlanningSkillIds,
       planningModelConfig,
       executionModelConfig,
+      selectedModelProfileId,
       // Keep legacy field aligned for older agent extensions.
       modelConfig: executionModelConfig,
     }
@@ -171,12 +229,13 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
         selectedPrePlanningSkillIds,
         planningModelConfig,
         executionModelConfig,
+        selectedModelProfileId,
         // Keep legacy field aligned for older agent extensions.
         modelConfig: executionModelConfig,
       }).catch(() => {})
     }, 300)
     return () => { if (syncTimer.current) clearTimeout(syncTimer.current) }
-  }, [workspaceId, content, selectedSkillIds, selectedPreSkillIds, selectedPrePlanningSkillIds, planningModelConfig, executionModelConfig])
+  }, [workspaceId, content, selectedSkillIds, selectedPreSkillIds, selectedPrePlanningSkillIds, planningModelConfig, executionModelConfig, selectedModelProfileId])
 
   // Apply incoming updates from the planning agent
   useEffect(() => {
@@ -187,6 +246,9 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
     if (agentFormUpdates.selectedPreSkillIds !== undefined) setSelectedPreSkillIds(agentFormUpdates.selectedPreSkillIds)
     if (agentFormUpdates.selectedPrePlanningSkillIds !== undefined) {
       setSelectedPrePlanningSkillIds(agentFormUpdates.selectedPrePlanningSkillIds)
+    }
+    if (agentFormUpdates.selectedModelProfileId !== undefined) {
+      setSelectedModelProfileId(agentFormUpdates.selectedModelProfileId)
     }
     if (agentFormUpdates.planningModelConfig !== undefined) {
       setPlanningModelConfig(agentFormUpdates.planningModelConfig)
@@ -214,6 +276,9 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
     if (updates.selectedPrePlanningSkillIds !== undefined) {
       setSelectedPrePlanningSkillIds(updates.selectedPrePlanningSkillIds)
     }
+    if (updates.selectedModelProfileId !== undefined) {
+      setSelectedModelProfileId(updates.selectedModelProfileId)
+    }
     if (updates.planningModelConfig !== undefined) setPlanningModelConfig(updates.planningModelConfig)
     if (updates.executionModelConfig !== undefined) {
       setExecutionModelConfig(updates.executionModelConfig)
@@ -221,6 +286,25 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
       setExecutionModelConfig(updates.modelConfig)
     }
   }, [prefillRequest])
+
+  const selectedModelProfile = selectedModelProfileId
+    ? modelProfiles.find((profile) => profile.id === selectedModelProfileId)
+    : undefined
+
+  useEffect(() => {
+    if (!selectedModelProfileId) {
+      return
+    }
+
+    const matchedProfile = modelProfiles.find((profile) => profile.id === selectedModelProfileId)
+    if (!matchedProfile) {
+      setSelectedModelProfileId(undefined)
+      return
+    }
+
+    setPlanningModelConfig(cloneModelConfig(matchedProfile.planningModelConfig))
+    setExecutionModelConfig(cloneModelConfig(matchedProfile.executionModelConfig ?? matchedProfile.modelConfig))
+  }, [selectedModelProfileId, modelProfiles])
 
   // Measure container width to decide side-by-side vs stacked layout
   useLayoutEffect(() => {
@@ -257,6 +341,10 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
   }, [planningModelConfig, updateDraft])
 
   useEffect(() => {
+    updateDraft({ selectedModelProfileId })
+  }, [selectedModelProfileId, updateDraft])
+
+  useEffect(() => {
     updateDraft({
       executionModelConfig,
       // Keep legacy field aligned for backward compatibility.
@@ -272,6 +360,7 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
     setSelectedPreSkillIds(formDefaults.selectedPreSkillIds)
     setSelectedSkillIds(formDefaults.selectedSkillIds)
     setSkillConfigs({})
+    setSelectedModelProfileId(undefined)
     setPlanningModelConfig(formDefaults.planningModelConfig)
     setExecutionModelConfig(formDefaults.executionModelConfig)
     setPendingFiles([])
@@ -374,14 +463,21 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
           })
         : [...selectedSkillIds]
 
+      const resolvedPlanningModelConfig = selectedModelProfile
+        ? cloneModelConfig(selectedModelProfile.planningModelConfig)
+        : planningModelConfig
+      const resolvedExecutionModelConfig = selectedModelProfile
+        ? cloneModelConfig(selectedModelProfile.executionModelConfig ?? selectedModelProfile.modelConfig)
+        : executionModelConfig
+
       await onSubmit({
         content,
         prePlanningSkills: sanitizedPrePlanningSkillIds,
         preExecutionSkills: sanitizedPreSkillIds,
         postExecutionSkills: sanitizedPostSkillIds,
         skillConfigs: hasSkillConfigs ? skillConfigs : undefined,
-        planningModelConfig,
-        executionModelConfig,
+        planningModelConfig: resolvedPlanningModelConfig,
+        executionModelConfig: resolvedExecutionModelConfig,
         pendingFiles: pendingFiles.length > 0 ? pendingFiles : undefined,
         sourceDraftId: prefillRequest?.sourceDraftId,
       })
@@ -514,15 +610,45 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
     <div className="shrink-0 space-y-3">
       <div>
         <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+          Model Profile
+        </label>
+        <select
+          value={selectedModelProfileId ?? ''}
+          onChange={(event) => {
+            const nextValue = event.target.value.trim()
+            setSelectedModelProfileId(nextValue.length > 0 ? nextValue : undefined)
+          }}
+          className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent"
+        >
+          <option value="">No profile (manual selection)</option>
+          {modelProfiles.map((profile) => (
+            <option key={profile.id} value={profile.id}>{profile.name}</option>
+          ))}
+        </select>
+        {selectedModelProfile && (
+          <p className="mt-1 text-xs text-slate-500">Using profile: {selectedModelProfile.name}</p>
+        )}
+      </div>
+
+      <div>
+        <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
           Planning Model
         </label>
-        <ModelSelector value={planningModelConfig} onChange={setPlanningModelConfig} />
+        <ModelSelector
+          value={planningModelConfig}
+          onChange={setPlanningModelConfig}
+          disabled={Boolean(selectedModelProfile)}
+        />
       </div>
       <div>
         <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
           Execution Model
         </label>
-        <ModelSelector value={executionModelConfig} onChange={setExecutionModelConfig} />
+        <ModelSelector
+          value={executionModelConfig}
+          onChange={setExecutionModelConfig}
+          disabled={Boolean(selectedModelProfile)}
+        />
       </div>
     </div>
   )

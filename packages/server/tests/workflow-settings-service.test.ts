@@ -64,6 +64,108 @@ describe('workflow-settings-service', () => {
     });
   });
 
+  it('normalizes reusable model profiles in global settings payloads', () => {
+    const result = normalizePiFactorySettingsPayload({
+      modelProfiles: [
+        {
+          id: 'deep-think',
+          name: 'Deep Think',
+          planningModelConfig: {
+            provider: 'openai',
+            modelId: 'gpt-5.3',
+            thinkingLevel: 'xhigh',
+          },
+          executionModelConfig: {
+            provider: 'anthropic',
+            modelId: 'claude-sonnet-4.6',
+            thinkingLevel: 'medium',
+          },
+        },
+      ],
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        modelProfiles: [
+          {
+            id: 'deep-think',
+            name: 'Deep Think',
+            planningModelConfig: {
+              provider: 'openai',
+              modelId: 'gpt-5.3',
+              thinkingLevel: 'xhigh',
+            },
+            executionModelConfig: {
+              provider: 'anthropic',
+              modelId: 'claude-sonnet-4.6',
+              thinkingLevel: 'medium',
+            },
+            modelConfig: {
+              provider: 'anthropic',
+              modelId: 'claude-sonnet-4.6',
+              thinkingLevel: 'medium',
+            },
+          },
+        ],
+      },
+    });
+  });
+
+  it('rejects malformed model profile entries', () => {
+    const missingName = normalizePiFactorySettingsPayload({
+      modelProfiles: [
+        {
+          id: 'missing-name',
+          planningModelConfig: { provider: 'openai', modelId: 'gpt-5.3' },
+          executionModelConfig: { provider: 'openai', modelId: 'gpt-5.3' },
+        } as any,
+      ],
+    });
+
+    expect(missingName.ok).toBe(false);
+    if (!missingName.ok) {
+      expect(missingName.error).toContain('modelProfiles[0].name');
+    }
+
+    const missingExecution = normalizePiFactorySettingsPayload({
+      modelProfiles: [
+        {
+          id: 'missing-exec',
+          name: 'Missing Exec',
+          planningModelConfig: { provider: 'openai', modelId: 'gpt-5.3' },
+        } as any,
+      ],
+    });
+
+    expect(missingExecution.ok).toBe(false);
+    if (!missingExecution.ok) {
+      expect(missingExecution.error).toContain('modelProfiles[0].executionModelConfig');
+    }
+
+    const duplicateIds = normalizePiFactorySettingsPayload({
+      modelProfiles: [
+        {
+          id: 'shared-id',
+          name: 'One',
+          planningModelConfig: { provider: 'openai', modelId: 'gpt-5.3' },
+          executionModelConfig: { provider: 'openai', modelId: 'gpt-5.3' },
+        },
+        {
+          id: 'shared-id',
+          name: 'Two',
+          planningModelConfig: { provider: 'openai', modelId: 'gpt-5.3' },
+          executionModelConfig: { provider: 'openai', modelId: 'gpt-5.3' },
+        },
+      ],
+    });
+
+    expect(duplicateIds.ok).toBe(false);
+    if (!duplicateIds.ok) {
+      expect(duplicateIds.error).toContain('modelProfiles[1].id must be unique');
+    }
+  });
+
   it('rejects empty workspace workflow patch payloads', () => {
     const result = parseWorkspaceWorkflowPatch({});
 

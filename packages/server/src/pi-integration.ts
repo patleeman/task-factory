@@ -12,7 +12,7 @@ import {
 } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
-import type { TaskDefaults, PlanningGuardrails, WorkflowDefaultsConfig, ForemanSettings } from '@task-factory/shared';
+import type { TaskDefaults, PlanningGuardrails, WorkflowDefaultsConfig, ForemanSettings, ModelProfile } from '@task-factory/shared';
 import {
   getTaskFactoryAgentDir,
   getTaskFactoryGlobalExtensionsDir,
@@ -80,6 +80,8 @@ export interface PiFactorySettings {
   planningGuardrails?: Partial<PlanningGuardrails>;
   // Global workflow defaults (slots + automation)
   workflowDefaults?: WorkflowDefaultsConfig;
+  // Reusable task model presets
+  modelProfiles?: ModelProfile[];
   // Skill configuration
   skills?: {
     enabled: string[];
