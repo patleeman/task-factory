@@ -22,11 +22,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Default post-execution skill order now includes `update-docs` for new tasks.
 - Runtime/API docs now define reliability query patterns and alert thresholds for stall ratio and repeated provider failures.
 - Foreman Q&A lifecycle is now more resilient across workspace switches: pending prompts recover on workspace resume via persisted-history + `/qa/pending` fallback, and the Q&A panel dismisses immediately after successful `/qa/respond` and `/qa/abort` calls while WS events continue idempotent reconciliation.
+- Task chat slash autocomplete now renders a single ranked list that merges slash command registry entries with discovered hook skills as clickable `/skill:<id>` suggestions.
+- Execution pipeline skill assignment now uses an explicit lane selector (pre-planning/pre-execution/post-execution) with lane-scoped skill options in the add control.
+- Root package metadata now pins `pnpm` via `packageManager` for consistent tooling across environments.
 
 ### Fixed
 - Creating a new task no longer auto-redirects the UI; after submission, navigation stays on the current route unless the user explicitly opens a task.
 - Late task-create completions from a previously active workspace no longer mutate the current workspace UI or pull focus back.
 - Deleting a running task now stops active planning/execution sessions before file removal, and late callbacks no longer recreate deleted task files.
+- Slash autocomplete keyboard navigation now keeps the highlighted suggestion scrolled into view while moving through results.
+
 ## [0.2.0] - 2026-02-17
 
 ### Added

@@ -38,17 +38,10 @@ interface DropTarget {
 
 const DRAG_MIME = 'application/task-factory-execution-pipeline-skill'
 
-function parseSelection(selection: string): { lane: Lane; skillId: string } | null {
-  const separatorIndex = selection.indexOf(':')
-  if (separatorIndex === -1) return null
-
-  const lane = selection.slice(0, separatorIndex)
-  const skillId = selection.slice(separatorIndex + 1)
-
-  if (!skillId) return null
-  if (lane !== 'pre-planning' && lane !== 'pre' && lane !== 'post') return null
-
-  return { lane, skillId }
+function laneLabel(lane: Lane): string {
+  if (lane === 'pre-planning') return 'Pre-Planning'
+  if (lane === 'pre') return 'Pre-Execution'
+  return 'Post-Execution'
 }
 
 function parseDragPayload(raw: string): DragPayload | null {
@@ -78,6 +71,7 @@ export function ExecutionPipelineEditor({
   showSkillConfigControls = true,
 }: ExecutionPipelineEditorProps) {
   const [selection, setSelection] = useState('')
+  const [selectionLane, setSelectionLane] = useState<Lane>('pre')
   const [dragSource, setDragSource] = useState<DragPayload | null>(null)
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null)
   const [configSkillId, setConfigSkillId] = useState<string | null>(null)
@@ -104,17 +98,16 @@ export function ExecutionPipelineEditor({
     return new Set(selectedSkillIds)
   }, [selectedSkillIds])
 
-  const addablePrePlanningSkills = useMemo(() => {
-    return availableSkills.filter((skill) => !selectedPrePlanningSkillSet.has(skill.id))
-  }, [availableSkills, selectedPrePlanningSkillSet])
+  const selectedSkillSetForLane = useCallback((lane: Lane): Set<string> => {
+    if (lane === 'pre-planning') return selectedPrePlanningSkillSet
+    if (lane === 'pre') return selectedPreSkillSet
+    return selectedPostSkillSet
+  }, [selectedPostSkillSet, selectedPrePlanningSkillSet, selectedPreSkillSet])
 
-  const addablePreSkills = useMemo(() => {
-    return availableSkills.filter((skill) => !selectedPreSkillSet.has(skill.id))
-  }, [availableSkills, selectedPreSkillSet])
-
-  const addablePostSkills = useMemo(() => {
-    return availableSkills.filter((skill) => !selectedPostSkillSet.has(skill.id))
-  }, [availableSkills, selectedPostSkillSet])
+  const addableSkillsForLane = useMemo(() => {
+    const selectedSet = selectedSkillSetForLane(selectionLane)
+    return availableSkills.filter((skill) => !selectedSet.has(skill.id))
+  }, [availableSkills, selectedSkillSetForLane, selectionLane])
 
   const configSkill = configSkillId
     ? skillById.get(configSkillId) ?? null
@@ -204,7 +197,7 @@ export function ExecutionPipelineEditor({
 
     applyLaneTokens(payload.fromLane, sourceAfterRemoval)
     applyLaneTokens(toLane, targetAfterInsert)
-  }, [applyLaneTokens, getLaneTokens, skillById])
+  }, [applyLaneTokens, getLaneTokens])
 
   const readDragPayload = useCallback((e: React.DragEvent): DragPayload | null => {
     const raw = e.dataTransfer.getData(DRAG_MIME)
@@ -284,31 +277,26 @@ export function ExecutionPipelineEditor({
   }, [applyLaneTokens, getLaneTokens])
 
   const handleAddSelection = useCallback(() => {
-    const parsed = parseSelection(selection)
-    if (!parsed) return
+    const skillId = selection.trim()
+    if (!skillId) return
 
-    const alreadySelected = parsed.lane === 'pre-planning'
-      ? selectedPrePlanningSkillSet.has(parsed.skillId)
-      : parsed.lane === 'pre'
-        ? selectedPreSkillSet.has(parsed.skillId)
-        : selectedPostSkillSet.has(parsed.skillId)
-
-    if (alreadySelected) {
+    const selectedSet = selectedSkillSetForLane(selectionLane)
+    if (selectedSet.has(skillId)) {
       setSelection('')
       return
     }
 
-    const skill = skillById.get(parsed.skillId)
+    const skill = skillById.get(skillId)
     if (!skill) {
       return
     }
 
-    if (parsed.lane === 'pre-planning') {
-      onPrePlanningSkillsChange([...selectedPrePlanningSkillIds, parsed.skillId])
-    } else if (parsed.lane === 'pre') {
-      onPreSkillsChange([...selectedPreSkillIds, parsed.skillId])
+    if (selectionLane === 'pre-planning') {
+      onPrePlanningSkillsChange([...selectedPrePlanningSkillIds, skillId])
+    } else if (selectionLane === 'pre') {
+      onPreSkillsChange([...selectedPreSkillIds, skillId])
     } else {
-      onPostSkillsChange([...selectedSkillIds, parsed.skillId])
+      onPostSkillsChange([...selectedSkillIds, skillId])
     }
 
     setSelection('')
@@ -317,12 +305,11 @@ export function ExecutionPipelineEditor({
     onPrePlanningSkillsChange,
     onPreSkillsChange,
     selectedPrePlanningSkillIds,
-    selectedPrePlanningSkillSet,
     selectedPreSkillIds,
-    selectedPreSkillSet,
     selectedSkillIds,
-    selectedPostSkillSet,
     selection,
+    selectionLane,
+    selectedSkillSetForLane,
     skillById,
   ])
 
@@ -473,11 +460,7 @@ export function ExecutionPipelineEditor({
       <div className="rounded-xl border border-slate-200 bg-white p-3">
         <div className="flex items-center justify-between gap-3">
           <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-            {lane === 'pre-planning'
-              ? 'Pre-Planning'
-              : lane === 'pre'
-                ? 'Pre-Execution'
-                : 'Post-Execution'}
+            {laneLabel(lane)}
           </h4>
           <span className="text-[11px] text-slate-400">
             {skillIds.length} skill{skillIds.length === 1 ? '' : 's'}
@@ -512,57 +495,40 @@ export function ExecutionPipelineEditor({
   }
 
   const canAdd = useMemo(() => {
-    const parsed = parseSelection(selection)
-    if (!parsed) return false
+    const skillId = selection.trim()
+    if (!skillId) return false
 
-    const alreadySelected = parsed.lane === 'pre-planning'
-      ? selectedPrePlanningSkillSet.has(parsed.skillId)
-      : parsed.lane === 'pre'
-        ? selectedPreSkillSet.has(parsed.skillId)
-        : selectedPostSkillSet.has(parsed.skillId)
+    const selectedSet = selectedSkillSetForLane(selectionLane)
+    if (selectedSet.has(skillId)) return false
 
-    if (alreadySelected) return false
-
-    const skill = skillById.get(parsed.skillId)
-    return Boolean(skill)
-  }, [selection, selectedPrePlanningSkillSet, selectedPreSkillSet, selectedPostSkillSet, skillById])
+    return skillById.has(skillId)
+  }, [selection, selectionLane, selectedSkillSetForLane, skillById])
 
   return (
     <div className="min-w-0 rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-3">
       <div className="flex flex-wrap items-center gap-2">
+        <select
+          value={selectionLane}
+          onChange={(e) => setSelectionLane(e.target.value as Lane)}
+          className="shrink-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          aria-label="Select lane"
+        >
+          <option value="pre-planning">Pre-Planning</option>
+          <option value="pre">Pre-Execution</option>
+          <option value="post">Post-Execution</option>
+        </select>
+
         <select
           value={selection}
           onChange={(e) => setSelection(e.target.value)}
           className="min-w-0 flex-1 basis-56 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
         >
           <option value="">Select a skill…</option>
-          {addablePrePlanningSkills.length > 0 && (
-            <optgroup label="Add to pre-planning">
-              {addablePrePlanningSkills.map((skill) => (
-                <option key={`pre-planning-${skill.id}`} value={`pre-planning:${skill.id}`}>
-                  {skill.name}
-                </option>
-              ))}
-            </optgroup>
-          )}
-          {addablePreSkills.length > 0 && (
-            <optgroup label="Add to pre-execution">
-              {addablePreSkills.map((skill) => (
-                <option key={`pre-${skill.id}`} value={`pre:${skill.id}`}>
-                  {skill.name}
-                </option>
-              ))}
-            </optgroup>
-          )}
-          {addablePostSkills.length > 0 && (
-            <optgroup label="Add to post-execution">
-              {addablePostSkills.map((skill) => (
-                <option key={`post-${skill.id}`} value={`post:${skill.id}`}>
-                  {skill.name}
-                </option>
-              ))}
-            </optgroup>
-          )}
+          {addableSkillsForLane.map((skill) => (
+            <option key={skill.id} value={skill.id}>
+              {skill.name}
+            </option>
+          ))}
         </select>
 
         <button

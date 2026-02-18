@@ -11,12 +11,12 @@ const taskChatSource = readFileSync(taskChatPath, 'utf-8');
 const workspacePageSource = readFileSync(workspacePagePath, 'utf-8');
 
 describe('task chat slash autocomplete regression checks', () => {
-  it('accepts slash command and hook skill options with split autocomplete data', () => {
+  it('accepts slash command and hook skill options with combined slash catalog data', () => {
     expect(taskChatSource).toContain('export interface SlashCommandOption');
     expect(taskChatSource).toContain('export interface HookSkillOption');
     expect(taskChatSource).toContain('slashCommands?: SlashCommandOption[]');
     expect(taskChatSource).toContain('hookSkills?: HookSkillOption[]');
-    expect(taskChatSource).toContain('const hookSkillSuggestions = useMemo(() => {');
+    expect(taskChatSource).toContain('const slashCatalog = new Map<string, SlashCommandOption>()');
   });
 
   it('supports keyboard navigation and tab completion for slash suggestions', () => {
@@ -24,6 +24,7 @@ describe('task chat slash autocomplete regression checks', () => {
     expect(taskChatSource).toContain("if (e.key === 'ArrowUp')");
     expect(taskChatSource).toContain("if (e.key === 'Tab')");
     expect(taskChatSource).toContain('applySlashCommand(selectedCommand.command)');
+    expect(taskChatSource).toContain('selectedSuggestion?.scrollIntoView({ block: \'nearest\' })');
   });
 
   it('uses fuzzy matching to rank slash command suggestions', () => {
@@ -32,13 +33,13 @@ describe('task chat slash autocomplete regression checks', () => {
     expect(taskChatSource).toContain('if (a.score !== b.score) return a.score - b.score');
   });
 
-  it('renders separate slash vs hook sections with graceful empty-state copy', () => {
-    expect(taskChatSource).toContain('execution hook skills · informational only');
-    expect(taskChatSource).toContain('No execution hook skills loaded.');
-    expect(taskChatSource).toContain('No execution hook skills match this query.');
-    expect(taskChatSource).toContain('no /skill commands loaded from pi skills');
-    expect(taskChatSource).toContain('formatHookSkillPhase(hook)');
-    expect(taskChatSource).not.toContain('onClick={() => applySlashCommand(skill.id)}');
+  it('renders a flat slash list with no section headers and clickable /skill entries', () => {
+    expect(taskChatSource).toContain('buildHookSkillSlashDescription(skill)');
+    expect(taskChatSource).toContain('const command = `/skill:${skill.id}`');
+    expect(taskChatSource).toContain('onClick={() => applySlashCommand(option.command)}');
+    expect(taskChatSource).not.toContain('command autocomplete');
+    expect(taskChatSource).not.toContain('slash commands · tab to autocomplete');
+    expect(taskChatSource).not.toContain('execution hook skills · informational only');
   });
 
   it('wires split skill catalog data for both foreman and task chats', () => {

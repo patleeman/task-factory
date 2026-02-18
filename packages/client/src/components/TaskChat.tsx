@@ -230,6 +230,18 @@ function formatHookSkillPhase(phase: HookSkillPhase): string {
   return 'post-execution'
 }
 
+function formatHookSkillSummary(hooks: HookSkillPhase[]): string {
+  if (hooks.length === 0) return 'hook scope unavailable'
+  return hooks.map((hook) => formatHookSkillPhase(hook)).join(' · ')
+}
+
+function buildHookSkillSlashDescription(skill: HookSkillOption): string {
+  const base = skill.description || skill.name
+  const scope = formatHookSkillSummary(skill.hooks)
+  if (!base) return `Execution hook skill · ${scope}`
+  return `${base} · ${scope}`
+}
+
 // Try to guess tool name + detail from content when metadata is missing (old entries)
 function guessToolInfo(content: string): { prefix: string; detail: string } | null {
   const first = content.trimStart()
@@ -740,6 +752,7 @@ export function TaskChat({
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const whiteboardSceneRef = useRef<WhiteboardSceneSnapshot | null>(null)
+  const slashSuggestionRefs = useRef<Array<HTMLButtonElement | null>>([])
   const dragDepthRef = useRef(0)
   const dictationStartedForCurrentPressRef = useRef(false)
   const voiceHotkeyReleaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -865,10 +878,26 @@ export function TaskChat({
   }, [hookSkills])
 
   const slashAutocomplete = useMemo(() => {
-    const empty = { visible: false, query: '', suggestions: [] as SlashCommandOption[] }
-    const hasCatalogEntries = normalizedSlashCommands.length > 0 || normalizedHookSkills.length > 0
+    const empty = { visible: false, suggestions: [] as SlashCommandOption[] }
 
-    if (!hasCatalogEntries) {
+    const slashCatalog = new Map<string, SlashCommandOption>()
+
+    for (const option of normalizedSlashCommands) {
+      slashCatalog.set(option.command, option)
+    }
+
+    for (const skill of normalizedHookSkills) {
+      const command = `/skill:${skill.id}`
+      if (!slashCatalog.has(command)) {
+        slashCatalog.set(command, {
+          command,
+          description: buildHookSkillSlashDescription(skill),
+        })
+      }
+    }
+
+    const allSlashCommands = Array.from(slashCatalog.values())
+    if (allSlashCommands.length === 0) {
       return empty
     }
 
@@ -890,7 +919,7 @@ export function TaskChat({
     const tokenLower = token.toLowerCase()
     const query = tokenLower.startsWith('/') ? tokenLower.slice(1) : tokenLower
 
-    const ranked = normalizedSlashCommands
+    const ranked = allSlashCommands
       .map((option) => {
         const candidate = option.command.toLowerCase()
         const candidateQuery = candidate.startsWith('/') ? candidate.slice(1) : candidate
@@ -916,51 +945,13 @@ export function TaskChat({
 
     return {
       visible: true,
-      query,
       suggestions: ranked.slice(0, 8).map((entry) => entry.option),
     }
   }, [input, normalizedHookSkills, normalizedSlashCommands])
 
-  const hookSkillSuggestions = useMemo(() => {
-    if (!slashAutocomplete.visible || normalizedHookSkills.length === 0) {
-      return []
-    }
-
-    const query = slashAutocomplete.query
-    if (query.length === 0) {
-      return normalizedHookSkills
-    }
-
-    const ranked = normalizedHookSkills
-      .map((skill) => {
-        const candidate = `${skill.id} ${skill.name}`.toLowerCase()
-        const score = fuzzyMatchScore(query, candidate)
-        if (score == null) return null
-
-        const prefixRank = candidate.startsWith(query) ? 0 : 1
-        return {
-          skill,
-          prefixRank,
-          score,
-        }
-      })
-      .filter((entry): entry is { skill: HookSkillOption; prefixRank: number; score: number } => entry !== null)
-      .sort((a, b) => {
-        if (a.prefixRank !== b.prefixRank) return a.prefixRank - b.prefixRank
-        if (a.score !== b.score) return a.score - b.score
-        return a.skill.id.localeCompare(b.skill.id)
-      })
-
-    return ranked.slice(0, 8).map((entry) => entry.skill)
-  }, [normalizedHookSkills, slashAutocomplete.query, slashAutocomplete.visible])
-
   const slashSuggestions = slashAutocomplete.suggestions
   const showSlashAutocomplete = slashAutocomplete.visible
   const showSlashCommandEmptyState = showSlashAutocomplete && slashSuggestions.length === 0
-  const hasSkillSlashCommands = normalizedSlashCommands.some((option) => option.command.startsWith('/skill:'))
-  const showSlashSkillRegistryEmptyState = showSlashAutocomplete && !hasSkillSlashCommands
-  const showHookSkillEmptyState = showSlashAutocomplete && hookSkillSuggestions.length === 0
-  const isHookSkillRegistryEmpty = normalizedHookSkills.length === 0
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
     const scroller = scrollRef.current
@@ -1069,6 +1060,14 @@ export function TaskChat({
       return Math.min(prev, slashSuggestions.length - 1)
     })
   }, [showSlashAutocomplete, slashSuggestions.length])
+
+  useEffect(() => {
+    if (!showSlashAutocomplete) return
+    if (slashSuggestions.length === 0) return
+
+    const selectedSuggestion = slashSuggestionRefs.current[selectedSlashCommandIndex]
+    selectedSuggestion?.scrollIntoView({ block: 'nearest' })
+  }, [showSlashAutocomplete, slashSuggestions.length, selectedSlashCommandIndex])
 
   useEffect(() => {
     return scheduleScrollToBottom()
@@ -1710,82 +1709,33 @@ export function TaskChat({
 
         {showSlashAutocomplete && (
           <div className="mx-3 mt-2 mb-0.5 rounded-md border border-slate-200 bg-white shadow-sm overflow-hidden" aria-label="Slash autocomplete">
-            <div className="px-2 py-1 text-[10px] text-slate-400 font-mono border-b border-slate-100">
-              command autocomplete
-            </div>
-
-            <div className="border-b border-slate-100">
-              <div className="px-2 py-1 text-[10px] text-slate-400 font-mono">
-                slash commands · tab to autocomplete
+            {showSlashCommandEmptyState ? (
+              <div className="px-2 py-1.5 text-[11px] text-slate-500">No matching slash commands.</div>
+            ) : (
+              <div className="max-h-56 overflow-y-auto" role="listbox" aria-label="Slash command suggestions">
+                {slashSuggestions.map((option, index) => (
+                  <button
+                    key={option.command}
+                    ref={(element) => {
+                      slashSuggestionRefs.current[index] = element
+                    }}
+                    type="button"
+                    role="option"
+                    aria-selected={index === selectedSlashCommandIndex}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => applySlashCommand(option.command)}
+                    className={`w-full text-left px-2 py-1.5 transition-colors ${
+                      index === selectedSlashCommandIndex
+                        ? 'bg-slate-100'
+                        : 'hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className="text-xs font-mono text-slate-700">{option.command}</div>
+                    <div className="text-[11px] text-slate-500 truncate">{option.description}</div>
+                  </button>
+                ))}
               </div>
-              {showSlashCommandEmptyState ? (
-                <div className="px-2 py-1.5 text-[11px] text-slate-500">No matching slash commands.</div>
-              ) : (
-                <div className="max-h-48 overflow-y-auto" role="listbox" aria-label="Slash command suggestions">
-                  {slashSuggestions.map((option, index) => (
-                    <button
-                      key={option.command}
-                      type="button"
-                      role="option"
-                      aria-selected={index === selectedSlashCommandIndex}
-                      onMouseDown={(event) => event.preventDefault()}
-                      onClick={() => applySlashCommand(option.command)}
-                      className={`w-full text-left px-2 py-1.5 transition-colors ${
-                        index === selectedSlashCommandIndex
-                          ? 'bg-slate-100'
-                          : 'hover:bg-slate-50'
-                      }`}
-                    >
-                      <div className="text-xs font-mono text-slate-700">{option.command}</div>
-                      <div className="text-[11px] text-slate-500 truncate">{option.description}</div>
-                    </button>
-                  ))}
-                </div>
-              )}
-              {showSlashSkillRegistryEmptyState && (
-                <div className="px-2 py-1 text-[10px] text-slate-400 font-mono border-t border-slate-100">
-                  no /skill commands loaded from pi skills
-                </div>
-              )}
-            </div>
-
-            <div>
-              <div className="px-2 py-1 text-[10px] text-slate-400 font-mono border-b border-slate-100">
-                execution hook skills · informational only
-              </div>
-              {showHookSkillEmptyState ? (
-                <div className="px-2 py-1.5 text-[11px] text-slate-500">
-                  {isHookSkillRegistryEmpty
-                    ? 'No execution hook skills loaded.'
-                    : 'No execution hook skills match this query.'}
-                </div>
-              ) : (
-                <div className="max-h-40 overflow-y-auto">
-                  {hookSkillSuggestions.map((skill) => (
-                    <div key={skill.id} className="px-2 py-1.5 border-b border-slate-100 last:border-b-0">
-                      <div className="text-xs font-mono text-slate-700">{skill.id}</div>
-                      <div className="text-[11px] text-slate-500 truncate">{skill.description || skill.name}</div>
-                      <div className="mt-1 flex flex-wrap gap-1">
-                        {skill.hooks.length > 0 ? (
-                          skill.hooks.map((hook) => (
-                            <span
-                              key={`${skill.id}-${hook}`}
-                              className="inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-mono text-slate-600"
-                            >
-                              {formatHookSkillPhase(hook)}
-                            </span>
-                          ))
-                        ) : (
-                          <span className="inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-mono text-slate-600">
-                            hook scope unavailable
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+            )}
           </div>
         )}
 
