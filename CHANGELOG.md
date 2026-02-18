@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Added pre-planning hook support (`prePlanningSkills` / `pre-planning`) across task defaults, task forms, and planning lifecycle execution.
+- Skill lane assignment is now universal: any discovered skill can be used in pre-planning, pre-execution, or post-execution lanes without hook-compatibility filtering.
 - Default post-execution skill order now includes `update-docs` for new tasks.
 - Runtime/API docs now define reliability query patterns and alert thresholds for stall ratio and repeated provider failures.
 

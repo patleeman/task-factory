@@ -17,7 +17,7 @@ import { resolveTaskFactoryHomePath } from './taskfactory-home.js';
 // Skill Discovery
 // =============================================================================
 
-const DEFAULT_SKILL_HOOKS: SkillHook[] = ['pre', 'post'];
+const DEFAULT_SKILL_HOOKS: SkillHook[] = ['pre-planning', 'pre', 'post'];
 const SUPPORTED_SKILL_HOOKS: SkillHook[] = ['pre-planning', 'pre', 'post'];
 const SKILL_HOOK_SET = new Set<SkillHook>(SUPPORTED_SKILL_HOOKS);
 const USER_SKILLS_DIR = resolveTaskFactoryHomePath('skills');
@@ -50,7 +50,7 @@ export function getFactoryUserSkillsDir(): string {
 function parseSkillHooks(metadata: Record<string, string>, skillId: string): SkillHook[] {
   const rawHooks = metadata.hooks ?? metadata.hook;
   if (!rawHooks) {
-    console.warn(`[Skills] ${skillId} missing metadata.hooks; defaulting to pre,post for backward compatibility`);
+    console.warn(`[Skills] ${skillId} missing metadata.hooks; defaulting to pre-planning,pre,post`);
     return [...DEFAULT_SKILL_HOOKS];
   }
 
@@ -63,7 +63,7 @@ function parseSkillHooks(metadata: Record<string, string>, skillId: string): Ski
   const dedupedHooks = Array.from(new Set(parsedHooks));
 
   if (dedupedHooks.length === 0) {
-    console.warn(`[Skills] ${skillId} has invalid metadata.hooks="${rawHooks}"; defaulting to pre,post`);
+    console.warn(`[Skills] ${skillId} has invalid metadata.hooks="${rawHooks}"; defaulting to pre-planning,pre,post`);
     return [...DEFAULT_SKILL_HOOKS];
   }
 
@@ -228,10 +228,6 @@ export function discoverPostExecutionSkills(): PostExecutionSkill[] {
   return mergedSkills;
 }
 
-export function skillSupportsHook(skill: PostExecutionSkill, hook: SkillHook): boolean {
-  return skill.hooks.includes(hook);
-}
-
 /**
  * Get a single skill by ID.
  */
@@ -272,7 +268,6 @@ async function runFailFastPreHookSkills(
   piSession: SkillSession,
   skillIds: string[],
   ctx: RunSkillsContext,
-  hook: 'pre-planning' | 'pre',
   hookLabel: 'pre-planning' | 'pre-execution',
 ): Promise<void> {
   const { taskId, workspaceId, broadcastToWorkspace, skillConfigs } = ctx;
@@ -291,20 +286,6 @@ async function runFailFastPreHookSkills(
         { skillId }
       );
       broadcastToWorkspace?.({ type: 'activity:entry', entry: notFoundEntry });
-      throw new Error(errMsg);
-    }
-
-    if (!skillSupportsHook(skill, hook)) {
-      const errMsg = `Skill "${skillId}" does not support the ${hookLabel} hook`;
-      console.warn(`[Skills] ${errMsg}`);
-      const invalidHookEntry = await createSystemEvent(
-        workspaceId,
-        taskId,
-        'phase-change',
-        errMsg,
-        { skillId, hooks: skill.hooks }
-      );
-      broadcastToWorkspace?.({ type: 'activity:entry', entry: invalidHookEntry });
       throw new Error(errMsg);
     }
 
@@ -361,7 +342,7 @@ export async function runPrePlanningSkills(
   skillIds: string[],
   ctx: RunSkillsContext,
 ): Promise<void> {
-  await runFailFastPreHookSkills(piSession, skillIds, ctx, 'pre-planning', 'pre-planning');
+  await runFailFastPreHookSkills(piSession, skillIds, ctx, 'pre-planning');
 }
 
 /**
@@ -373,7 +354,7 @@ export async function runPreExecutionSkills(
   skillIds: string[],
   ctx: RunSkillsContext,
 ): Promise<void> {
-  await runFailFastPreHookSkills(piSession, skillIds, ctx, 'pre', 'pre-execution');
+  await runFailFastPreHookSkills(piSession, skillIds, ctx, 'pre-execution');
 }
 
 /**
@@ -479,18 +460,6 @@ export async function runPostExecutionSkills(
         { skillId }
       );
       broadcastToWorkspace?.({ type: 'activity:entry', entry: notFoundEntry });
-      continue;
-    }
-
-    if (!skillSupportsHook(skill, 'post')) {
-      const invalidHookEntry = await createSystemEvent(
-        workspaceId,
-        taskId,
-        'phase-change',
-        `Post-execution skill "${skillId}" does not support the post hook — skipping`,
-        { skillId, hooks: skill.hooks }
-      );
-      broadcastToWorkspace?.({ type: 'activity:entry', entry: invalidHookEntry });
       continue;
     }
 

@@ -123,25 +123,16 @@ export function TaskDetailPane({
 
   const handleSaveEdit = async () => {
     try {
-      const shouldSanitizeByHooks = availableSkills.length > 0
-      const skillById = new Map(availableSkills.map((skill) => [skill.id, skill]))
-      const sanitizedPrePlanningSkillIds = shouldSanitizeByHooks
-        ? selectedPrePlanningSkillIds.filter((skillId) => {
-            const skill = skillById.get(skillId)
-            return Boolean(skill && skill.hooks.includes('pre-planning'))
-          })
+      const shouldSanitizeByKnownSkills = availableSkills.length > 0
+      const knownSkillIds = new Set(availableSkills.map((skill) => skill.id))
+      const sanitizedPrePlanningSkillIds = shouldSanitizeByKnownSkills
+        ? selectedPrePlanningSkillIds.filter((skillId) => knownSkillIds.has(skillId))
         : [...selectedPrePlanningSkillIds]
-      const sanitizedPreSkillIds = shouldSanitizeByHooks
-        ? selectedPreSkillIds.filter((skillId) => {
-            const skill = skillById.get(skillId)
-            return Boolean(skill && skill.hooks.includes('pre'))
-          })
+      const sanitizedPreSkillIds = shouldSanitizeByKnownSkills
+        ? selectedPreSkillIds.filter((skillId) => knownSkillIds.has(skillId))
         : [...selectedPreSkillIds]
-      const sanitizedPostSkillIds = shouldSanitizeByHooks
-        ? selectedSkillIds.filter((skillId) => {
-            const skill = skillById.get(skillId)
-            return Boolean(skill && skill.hooks.includes('post'))
-          })
+      const sanitizedPostSkillIds = shouldSanitizeByKnownSkills
+        ? selectedSkillIds.filter((skillId) => knownSkillIds.has(skillId))
         : [...selectedSkillIds]
 
       await fetch(`/api/workspaces/${workspaceId}/tasks/${task.id}`, {

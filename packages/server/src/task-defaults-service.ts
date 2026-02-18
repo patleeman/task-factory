@@ -730,39 +730,6 @@ export function validateTaskDefaults(
     };
   }
 
-  const incompatiblePrePlanningSkills = defaults.prePlanningSkills.filter((skillId) => {
-    const skill = skillById.get(skillId);
-    return skill ? !skill.hooks.includes('pre-planning') : false;
-  });
-  if (incompatiblePrePlanningSkills.length > 0) {
-    return {
-      ok: false,
-      error: `Pre-planning skills do not support pre-planning hook: ${incompatiblePrePlanningSkills.join(', ')}`,
-    };
-  }
-
-  const incompatiblePreSkills = defaults.preExecutionSkills.filter((skillId) => {
-    const skill = skillById.get(skillId);
-    return skill ? !skill.hooks.includes('pre') : false;
-  });
-  if (incompatiblePreSkills.length > 0) {
-    return {
-      ok: false,
-      error: `Pre-execution skills do not support pre hook: ${incompatiblePreSkills.join(', ')}`,
-    };
-  }
-
-  const incompatiblePostSkills = defaults.postExecutionSkills.filter((skillId) => {
-    const skill = skillById.get(skillId);
-    return skill ? !skill.hooks.includes('post') : false;
-  });
-  if (incompatiblePostSkills.length > 0) {
-    return {
-      ok: false,
-      error: `Post-execution skills do not support post hook: ${incompatiblePostSkills.join(', ')}`,
-    };
-  }
-
   return { ok: true };
 }
 

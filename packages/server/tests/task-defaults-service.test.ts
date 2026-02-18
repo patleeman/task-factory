@@ -171,61 +171,17 @@ describe('validateTaskDefaults', () => {
     }
   });
 
-  it('rejects pre-planning defaults that reference non-pre-planning skills', () => {
+  it('accepts cross-lane defaults when skill IDs exist', () => {
     const defaults: TaskDefaults = {
       planningModelConfig: undefined,
       executionModelConfig: undefined,
       modelConfig: undefined,
       prePlanningSkills: ['checkpoint'],
-      preExecutionSkills: [],
-      postExecutionSkills: ['code-review'],
-    };
-
-    const result = validateTaskDefaults(defaults, AVAILABLE_MODELS, AVAILABLE_SKILLS);
-
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error).toContain('do not support pre-planning hook');
-      expect(result.error).toContain('checkpoint');
-    }
-  });
-
-  it('rejects pre-execution defaults that reference post-only skills', () => {
-    const defaults: TaskDefaults = {
-      planningModelConfig: undefined,
-      executionModelConfig: undefined,
-      modelConfig: undefined,
-      prePlanningSkills: [],
-      preExecutionSkills: ['checkpoint'],
-      postExecutionSkills: ['code-review'],
-    };
-
-    const result = validateTaskDefaults(defaults, AVAILABLE_MODELS, AVAILABLE_SKILLS);
-
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error).toContain('do not support pre hook');
-      expect(result.error).toContain('checkpoint');
-    }
-  });
-
-  it('rejects post-execution defaults that reference pre-only skills', () => {
-    const defaults: TaskDefaults = {
-      planningModelConfig: undefined,
-      executionModelConfig: undefined,
-      modelConfig: undefined,
-      prePlanningSkills: [],
-      preExecutionSkills: [],
+      preExecutionSkills: ['code-review'],
       postExecutionSkills: ['tdd-test-first'],
     };
 
-    const result = validateTaskDefaults(defaults, AVAILABLE_MODELS, AVAILABLE_SKILLS);
-
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error).toContain('do not support post hook');
-      expect(result.error).toContain('tdd-test-first');
-    }
+    expect(validateTaskDefaults(defaults, AVAILABLE_MODELS, AVAILABLE_SKILLS)).toEqual({ ok: true });
   });
 });
 

@@ -23,7 +23,7 @@ How to safely customize Task Factory with repo extensions (`extensions/`) and ex
 | Surface | Location | Runtime role |
 |---|---|---|
 | Repo extension | `extensions/<id>.ts` or `extensions/<id>/index.ts` | Registers Pi tools for sessions |
-| Execution skill | `skills/<id>/SKILL.md` and `~/.taskfactory/skills/<id>/SKILL.md` | Adds pre-planning / pre / post hook prompt behavior |
+| Execution skill | `skills/<id>/SKILL.md` and `~/.taskfactory/skills/<id>/SKILL.md` | Reusable prompt behavior assignable to pre-planning / pre / post lanes |
 
 ### Extension discovery and audience scoping
 
@@ -42,7 +42,7 @@ How to safely customize Task Factory with repo extensions (`extensions/`) and ex
 | Merge rule | User skill with same ID overrides starter skill |
 | Required file | `SKILL.md` with YAML frontmatter + markdown body |
 | Required fields | `name`, `description` (`name` must match directory ID) |
-| Hook metadata | `hooks` supports `pre-planning`, `pre`, `post`, or combinations |
+| Hook metadata | `hooks` supports `pre-planning`, `pre`, `post` (stored for compatibility; lane assignment controls execution) |
 
 ### Tool destination options (`create_skill` / `create_extension`)
 
@@ -54,6 +54,8 @@ How to safely customize Task Factory with repo extensions (`extensions/`) and ex
 | `create_extension` | `repo-local` | `<workspace>/.taskfactory/extensions/<id>.ts` |
 
 ### Hook execution semantics
+
+Execution is lane-driven: if a skill is assigned to a lane, it runs in that lane regardless of `metadata.hooks`.
 
 | Hook | Behavior |
 |---|---|

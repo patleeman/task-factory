@@ -5,7 +5,7 @@ metadata:
   author: task-factory
   version: "1.0"
   type: follow-up
-  hooks: post
+  hooks: pre-planning,pre,post
   workflow-id: tdd
   pairs-with: tdd-test-first
 ---

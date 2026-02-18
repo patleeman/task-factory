@@ -10,7 +10,7 @@ const CONFIG_FIELD_KEY_PATTERN = /^[a-zA-Z0-9_-]+$/;
 const ALLOWED_CONFIG_TYPES = new Set<SkillConfigField['type']>(['string', 'number', 'boolean', 'select']);
 
 const DEFAULT_DONE_SIGNAL = 'HOOK_DONE';
-const DEFAULT_SKILL_HOOKS: SkillHook[] = ['pre', 'post'];
+const DEFAULT_SKILL_HOOKS: SkillHook[] = ['pre-planning', 'pre', 'post'];
 const SUPPORTED_SKILL_HOOKS: SkillHook[] = ['pre-planning', 'pre', 'post'];
 const SKILL_HOOK_SET = new Set<SkillHook>(SUPPORTED_SKILL_HOOKS);
 const DEFAULT_FACTORY_SKILLS_DIR = resolveTaskFactoryHomePath('skills');

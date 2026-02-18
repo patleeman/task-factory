@@ -158,27 +158,16 @@ function normalizeSkillIdList(
   };
 }
 
-function validateHookSkillIds(
+function validateKnownSkillIds(
   fieldName: string,
-  hookLabel: string,
-  hook: 'pre-planning' | 'pre' | 'post',
   skillIds: string[] | undefined,
-  skillsById: Map<string, { hooks: string[] }>,
+  knownSkillIds: Set<string>,
 ): string | null {
   if (!skillIds) return null;
 
-  const unknown = skillIds.filter((skillId) => !skillsById.has(skillId));
+  const unknown = skillIds.filter((skillId) => !knownSkillIds.has(skillId));
   if (unknown.length > 0) {
     return `Unknown ${fieldName}: ${unknown.join(', ')}`;
-  }
-
-  const incompatible = skillIds.filter((skillId) => {
-    const skill = skillsById.get(skillId);
-    return skill ? !skill.hooks.includes(hook) : false;
-  });
-
-  if (incompatible.length > 0) {
-    return `${hookLabel} do not support ${hook} hook: ${incompatible.join(', ')}`;
   }
 
   return null;
@@ -201,32 +190,26 @@ function validateTaskHookSelection(
   request.postExecutionSkills = parsedPostExecution.value;
 
   const skills = discoverPostExecutionSkills();
-  const skillsById = new Map(skills.map((skill) => [skill.id, { hooks: skill.hooks as string[] }]));
+  const knownSkillIds = new Set(skills.map((skill) => skill.id));
 
-  const prePlanningValidation = validateHookSkillIds(
+  const prePlanningValidation = validateKnownSkillIds(
     'pre-planning skills',
-    'Pre-planning skills',
-    'pre-planning',
     request.prePlanningSkills,
-    skillsById,
+    knownSkillIds,
   );
   if (prePlanningValidation) return { ok: false, error: prePlanningValidation };
 
-  const preExecutionValidation = validateHookSkillIds(
+  const preExecutionValidation = validateKnownSkillIds(
     'pre-execution skills',
-    'Pre-execution skills',
-    'pre',
     request.preExecutionSkills,
-    skillsById,
+    knownSkillIds,
   );
   if (preExecutionValidation) return { ok: false, error: preExecutionValidation };
 
-  const postExecutionValidation = validateHookSkillIds(
+  const postExecutionValidation = validateKnownSkillIds(
     'post-execution skills',
-    'Post-execution skills',
-    'post',
     request.postExecutionSkills,
-    skillsById,
+    knownSkillIds,
   );
   if (postExecutionValidation) return { ok: false, error: postExecutionValidation };
 

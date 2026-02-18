@@ -5,7 +5,7 @@ metadata:
   author: task-factory
   version: "1.0"
   type: loop
-  hooks: post
+  hooks: pre-planning,pre,post
   max-iterations: "5"
   done-signal: HOOK_DONE
 config:

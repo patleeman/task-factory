@@ -62,7 +62,7 @@ function normalizeTaskDefaultsForUi(
   models: AvailableModel[],
   skills: PostExecutionSkill[],
 ): TaskDefaults {
-  const skillsById = new Map(skills.map((skill) => [skill.id, skill]))
+  const knownSkillIds = new Set(skills.map((skill) => skill.id))
   const executionModelConfig = normalizeModelConfigForUi(
     models,
     defaults.executionModelConfig ?? defaults.modelConfig,
@@ -73,18 +73,9 @@ function normalizeTaskDefaultsForUi(
     executionModelConfig,
     // Keep legacy alias aligned for backward compatibility.
     modelConfig: executionModelConfig,
-    prePlanningSkills: defaults.prePlanningSkills.filter((skillId) => {
-      const skill = skillsById.get(skillId)
-      return Boolean(skill && skill.hooks.includes('pre-planning'))
-    }),
-    preExecutionSkills: defaults.preExecutionSkills.filter((skillId) => {
-      const skill = skillsById.get(skillId)
-      return Boolean(skill && skill.hooks.includes('pre'))
-    }),
-    postExecutionSkills: defaults.postExecutionSkills.filter((skillId) => {
-      const skill = skillsById.get(skillId)
-      return Boolean(skill && skill.hooks.includes('post'))
-    }),
+    prePlanningSkills: defaults.prePlanningSkills.filter((skillId) => knownSkillIds.has(skillId)),
+    preExecutionSkills: defaults.preExecutionSkills.filter((skillId) => knownSkillIds.has(skillId)),
+    postExecutionSkills: defaults.postExecutionSkills.filter((skillId) => knownSkillIds.has(skillId)),
     planningPromptTemplate: defaults.planningPromptTemplate,
     executionPromptTemplate: defaults.executionPromptTemplate,
   }
@@ -355,21 +346,12 @@ export function SettingsPage() {
     setForm((current) => {
       if (!current) return current
 
-      const skillsById = new Map(nextSkills.map((skill) => [skill.id, skill]))
+      const knownSkillIds = new Set(nextSkills.map((skill) => skill.id))
       return {
         ...current,
-        prePlanningSkills: current.prePlanningSkills.filter((skillId) => {
-          const skill = skillsById.get(skillId)
-          return Boolean(skill && skill.hooks.includes('pre-planning'))
-        }),
-        preExecutionSkills: current.preExecutionSkills.filter((skillId) => {
-          const skill = skillsById.get(skillId)
-          return Boolean(skill && skill.hooks.includes('pre'))
-        }),
-        postExecutionSkills: current.postExecutionSkills.filter((skillId) => {
-          const skill = skillsById.get(skillId)
-          return Boolean(skill && skill.hooks.includes('post'))
-        }),
+        prePlanningSkills: current.prePlanningSkills.filter((skillId) => knownSkillIds.has(skillId)),
+        preExecutionSkills: current.preExecutionSkills.filter((skillId) => knownSkillIds.has(skillId)),
+        postExecutionSkills: current.postExecutionSkills.filter((skillId) => knownSkillIds.has(skillId)),
       }
     })
   }, [])

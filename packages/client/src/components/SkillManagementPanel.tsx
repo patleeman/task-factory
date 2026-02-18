@@ -24,11 +24,6 @@ interface SkillFormState {
   id: string
   description: string
   type: SkillType
-  hooks: {
-    prePlanning: boolean
-    pre: boolean
-    post: boolean
-  }
   workflowId: string
   pairedSkillId: string
   maxIterations: string
@@ -58,11 +53,6 @@ function createBlankSkillForm(): SkillFormState {
     id: '',
     description: '',
     type: 'follow-up',
-    hooks: {
-      prePlanning: false,
-      pre: true,
-      post: true,
-    },
     workflowId: '',
     pairedSkillId: '',
     maxIterations: '1',
@@ -77,11 +67,6 @@ function toSkillForm(skill: PostExecutionSkill): SkillFormState {
     id: skill.id,
     description: skill.description,
     type: skill.type,
-    hooks: {
-      prePlanning: skill.hooks.includes('pre-planning'),
-      pre: skill.hooks.includes('pre'),
-      post: skill.hooks.includes('post'),
-    },
     workflowId: skill.workflowId || '',
     pairedSkillId: skill.pairedSkillId || '',
     maxIterations: String(skill.maxIterations || 1),
@@ -334,15 +319,7 @@ export function SkillManagementPanel({ skills, onSkillsChange }: SkillManagement
       return
     }
 
-    const hooks: Array<'pre-planning' | 'pre' | 'post'> = []
-    if (form.hooks.prePlanning) hooks.push('pre-planning')
-    if (form.hooks.pre) hooks.push('pre')
-    if (form.hooks.post) hooks.push('post')
-
-    if (hooks.length === 0) {
-      setSaveError('Select at least one hook (pre-planning, pre, and/or post)')
-      return
-    }
+    const hooks: Array<'pre-planning' | 'pre' | 'post'> = ['pre-planning', 'pre', 'post']
 
     const parsedMaxIterations = Number.parseInt(form.maxIterations, 10)
     if (!Number.isInteger(parsedMaxIterations) || parsedMaxIterations <= 0) {
@@ -593,32 +570,9 @@ export function SkillManagementPanel({ skills, onSkillsChange }: SkillManagement
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <label className="text-xs text-slate-600">
-                Hooks
-                <div className="mt-1 flex flex-wrap items-center gap-4 rounded-lg border border-slate-200 px-3 py-2 bg-slate-50">
-                  <label className="inline-flex items-center gap-1.5 text-xs text-slate-700">
-                    <input
-                      type="checkbox"
-                      checked={form.hooks.prePlanning}
-                      onChange={(event) => setForm({ ...form, hooks: { ...form.hooks, prePlanning: event.target.checked } })}
-                    />
-                    pre-planning
-                  </label>
-                  <label className="inline-flex items-center gap-1.5 text-xs text-slate-700">
-                    <input
-                      type="checkbox"
-                      checked={form.hooks.pre}
-                      onChange={(event) => setForm({ ...form, hooks: { ...form.hooks, pre: event.target.checked } })}
-                    />
-                    pre
-                  </label>
-                  <label className="inline-flex items-center gap-1.5 text-xs text-slate-700">
-                    <input
-                      type="checkbox"
-                      checked={form.hooks.post}
-                      onChange={(event) => setForm({ ...form, hooks: { ...form.hooks, post: event.target.checked } })}
-                    />
-                    post
-                  </label>
+                Availability
+                <div className="mt-1 rounded-lg border border-slate-200 px-3 py-2 bg-slate-50 text-xs text-slate-600">
+                  Skills are available in pre-planning, pre-execution, and post-execution by default.
                 </div>
               </label>
 

@@ -38,13 +38,6 @@ interface DropTarget {
 
 const DRAG_MIME = 'application/task-factory-execution-pipeline-skill'
 
-function supportsHook(skill: PostExecutionSkill, lane: Lane): boolean {
-  if (!Array.isArray(skill.hooks) || skill.hooks.length === 0) {
-    return true
-  }
-  return skill.hooks.includes(lane)
-}
-
 function parseSelection(selection: string): { lane: Lane; skillId: string } | null {
   const separatorIndex = selection.indexOf(':')
   if (separatorIndex === -1) return null
@@ -112,15 +105,15 @@ export function ExecutionPipelineEditor({
   }, [selectedSkillIds])
 
   const addablePrePlanningSkills = useMemo(() => {
-    return availableSkills.filter((skill) => !selectedPrePlanningSkillSet.has(skill.id) && supportsHook(skill, 'pre-planning'))
+    return availableSkills.filter((skill) => !selectedPrePlanningSkillSet.has(skill.id))
   }, [availableSkills, selectedPrePlanningSkillSet])
 
   const addablePreSkills = useMemo(() => {
-    return availableSkills.filter((skill) => !selectedPreSkillSet.has(skill.id) && supportsHook(skill, 'pre'))
+    return availableSkills.filter((skill) => !selectedPreSkillSet.has(skill.id))
   }, [availableSkills, selectedPreSkillSet])
 
   const addablePostSkills = useMemo(() => {
-    return availableSkills.filter((skill) => !selectedPostSkillSet.has(skill.id) && supportsHook(skill, 'post'))
+    return availableSkills.filter((skill) => !selectedPostSkillSet.has(skill.id))
   }, [availableSkills, selectedPostSkillSet])
 
   const configSkill = configSkillId
@@ -178,11 +171,6 @@ export function ExecutionPipelineEditor({
   }, [onPostSkillsChange, onPrePlanningSkillsChange, onPreSkillsChange])
 
   const moveSkill = useCallback((payload: DragPayload, toLane: Lane, toDisplayIndex: number) => {
-    const skill = skillById.get(payload.skillId)
-    if (skill && !supportsHook(skill, toLane)) {
-      return
-    }
-
     if (payload.fromLane === toLane) {
       const laneTokens = getLaneTokens(toLane)
       const sourceDisplayIndex = findDisplayIndexForSkill(laneTokens, payload)
@@ -311,7 +299,7 @@ export function ExecutionPipelineEditor({
     }
 
     const skill = skillById.get(parsed.skillId)
-    if (!skill || !supportsHook(skill, parsed.lane)) {
+    if (!skill) {
       return
     }
 
@@ -386,8 +374,6 @@ export function ExecutionPipelineEditor({
       fromDisplayIndex: displayIndex,
     }
 
-    const hookMismatch = Boolean(skill && !supportsHook(skill, lane))
-
     return (
       <div
         key={`${lane}-${skillId}-${displayIndex}`}
@@ -430,9 +416,7 @@ export function ExecutionPipelineEditor({
             {skill?.name ?? skillId}
           </div>
           <div className="text-xs text-slate-500 truncate">
-            {hookMismatch
-              ? 'Skill does not support this hook'
-              : (skill?.description ?? 'Skill is not available in this workspace')}
+            {skill?.description ?? 'Skill is not available in this workspace'}
           </div>
         </div>
 
@@ -540,9 +524,7 @@ export function ExecutionPipelineEditor({
     if (alreadySelected) return false
 
     const skill = skillById.get(parsed.skillId)
-    if (!skill) return false
-
-    return supportsHook(skill, parsed.lane)
+    return Boolean(skill)
   }, [selection, selectedPrePlanningSkillSet, selectedPreSkillSet, selectedPostSkillSet, skillById])
 
   return (

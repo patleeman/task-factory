@@ -22,52 +22,37 @@ function createSession() {
   };
 }
 
-describe('hook-aware skill execution', () => {
+describe('universal skill execution across lanes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('blocks pre-execution when a skill does not support the pre hook', async () => {
+  it('runs pre-execution skills regardless of metadata hooks', async () => {
     const session = createSession();
 
-    await expect(
-      runPreExecutionSkills(session, ['checkpoint'], {
-        taskId: 'TEST-1',
-        workspaceId: 'workspace-1',
-      }),
-    ).rejects.toThrow('does not support the pre-execution hook');
+    await runPreExecutionSkills(session, ['checkpoint'], {
+      taskId: 'TEST-1',
+      workspaceId: 'workspace-1',
+    });
 
-    expect(session.prompt).not.toHaveBeenCalled();
+    expect(session.prompt).toHaveBeenCalledTimes(1);
   });
 
-  it('blocks pre-planning when a skill does not support the pre-planning hook', async () => {
+  it('runs pre-planning skills regardless of metadata hooks', async () => {
     const session = createSession();
 
-    await expect(
-      runPrePlanningSkills(session, ['checkpoint'], {
-        taskId: 'TEST-1A',
-        workspaceId: 'workspace-1',
-      }),
-    ).rejects.toThrow('does not support the pre-planning hook');
-
-    expect(session.prompt).not.toHaveBeenCalled();
-  });
-
-  it('skips post-execution skills that do not support the post hook', async () => {
-    const session = createSession();
-
-    await runPostExecutionSkills(session, ['tdd-test-first'], {
+    await runPrePlanningSkills(session, ['checkpoint'], {
       taskId: 'TEST-2',
       workspaceId: 'workspace-1',
     });
 
-    expect(session.prompt).not.toHaveBeenCalled();
+    expect(session.prompt).toHaveBeenCalledTimes(1);
   });
 
-  it('runs skills when the configured hook is supported', async () => {
+  it('runs post-execution skills regardless of metadata hooks', async () => {
     const session = createSession();
 
-    await runPreExecutionSkills(session, ['tdd-test-first'], {
+    await runPostExecutionSkills(session, ['tdd-test-first'], {
       taskId: 'TEST-3',
       workspaceId: 'workspace-1',
     });

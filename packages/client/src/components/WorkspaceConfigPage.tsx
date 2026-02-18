@@ -152,21 +152,12 @@ export function WorkspaceConfigPage() {
         setAllExtensions(extensionsData)
         setTaskSkills(taskSkillsData)
 
-        const skillsById = new Map(taskSkillsData.map((skill) => [skill.id, skill]))
+        const knownSkillIds = new Set(taskSkillsData.map((skill) => skill.id))
         setTaskDefaults({
           ...workspaceTaskDefaults,
-          prePlanningSkills: workspaceTaskDefaults.prePlanningSkills.filter((skillId) => {
-            const skill = skillsById.get(skillId)
-            return Boolean(skill && skill.hooks.includes('pre-planning'))
-          }),
-          preExecutionSkills: workspaceTaskDefaults.preExecutionSkills.filter((skillId) => {
-            const skill = skillsById.get(skillId)
-            return Boolean(skill && skill.hooks.includes('pre'))
-          }),
-          postExecutionSkills: workspaceTaskDefaults.postExecutionSkills.filter((skillId) => {
-            const skill = skillsById.get(skillId)
-            return Boolean(skill && skill.hooks.includes('post'))
-          }),
+          prePlanningSkills: workspaceTaskDefaults.prePlanningSkills.filter((skillId) => knownSkillIds.has(skillId)),
+          preExecutionSkills: workspaceTaskDefaults.preExecutionSkills.filter((skillId) => knownSkillIds.has(skillId)),
+          postExecutionSkills: workspaceTaskDefaults.postExecutionSkills.filter((skillId) => knownSkillIds.has(skillId)),
         })
 
         setConfig({

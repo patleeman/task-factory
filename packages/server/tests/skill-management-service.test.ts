@@ -100,7 +100,7 @@ describe('skill-management-service', () => {
     const initialContent = readFileSync(skillMdPath, 'utf-8');
     expect(initialContent).toContain('name: custom-review');
     expect(initialContent).toContain('description: Review output using {{style}} tone.');
-    expect(initialContent).toContain('hooks: pre,post');
+    expect(initialContent).toContain('hooks: pre-planning,pre,post');
 
     const updatedId = updateFactorySkill(
       'custom-review',
@@ -121,7 +121,7 @@ describe('skill-management-service', () => {
     const updatedContent = readFileSync(skillMdPath, 'utf-8');
     expect(updatedContent).toContain('description: Updated description');
     expect(updatedContent).toContain('type: loop');
-    expect(updatedContent).toContain('hooks: pre,post');
+    expect(updatedContent).toContain('hooks: pre-planning,pre,post');
     expect(updatedContent).toContain('max-iterations: "3"');
     expect(updatedContent).toContain('done-signal: DONE_NOW');
   });
@@ -182,7 +182,7 @@ Use {{style}} tone.
 
     const importedContent = readFileSync(importedPath, 'utf-8');
     expect(importedContent).toContain('name: imported-skill');
-    expect(importedContent).toContain('hooks: pre,post');
+    expect(importedContent).toContain('hooks: pre-planning,pre,post');
     expect(importedContent).toContain('done-signal: FINISHED');
     expect(importedContent).toContain('Use {{style}} tone.');
   });
