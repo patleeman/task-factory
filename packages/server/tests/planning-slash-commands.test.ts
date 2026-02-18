@@ -4,6 +4,31 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import type { PlanningMessage } from '@task-factory/shared';
 
+const createAgentSessionMock = vi.fn();
+
+vi.mock('@mariozechner/pi-coding-agent', () => ({
+  createAgentSession: (...args: any[]) => createAgentSessionMock(...args),
+  AuthStorage: class AuthStorage {},
+  DefaultResourceLoader: class DefaultResourceLoader {
+    async reload(): Promise<void> {
+      // no-op for tests
+    }
+  },
+  ModelRegistry: class ModelRegistry {
+    find(): undefined {
+      return undefined;
+    }
+  },
+  SessionManager: {
+    create: () => ({}),
+  },
+  SettingsManager: {
+    create: () => ({
+      applyOverrides: () => {},
+    }),
+  },
+}));
+
 const originalHome = process.env.HOME;
 const originalUserProfile = process.env.USERPROFILE;
 const tempRoots: string[] = [];
@@ -54,6 +79,7 @@ function writeWorkspaceConfig(workspacePath: string): void {
 afterEach(() => {
   vi.restoreAllMocks();
   vi.resetModules();
+  createAgentSessionMock.mockReset();
 
   process.env.HOME = originalHome;
   process.env.USERPROFILE = originalUserProfile;
@@ -192,5 +218,98 @@ describe('planning slash command handling', () => {
 
     const history = getPlanningMessages(workspaceId);
     expect(history.every((message) => message.role === 'system')).toBe(true);
+  });
+
+  it('surfaces provider stopReason=error messages in foreman chat log', async () => {
+    const homePath = setTempHome();
+    const workspacePath = createTempDir('pi-factory-workspace-');
+    const workspaceId = 'ws-provider-stop-error';
+
+    writeWorkspaceConfig(workspacePath);
+    registerWorkspace(homePath, workspaceId, workspacePath);
+
+    let subscriber: ((event: any) => void) | undefined;
+    const providerError = 'You have hit your ChatGPT usage limit (plus plan). Try again in ~90 min.';
+
+    createAgentSessionMock.mockResolvedValue({
+      session: {
+        subscribe: (listener: (event: any) => void) => {
+          subscriber = listener;
+          return () => {};
+        },
+        prompt: async () => {
+          subscriber?.({
+            type: 'message_end',
+            message: {
+              role: 'assistant',
+              stopReason: 'error',
+              errorMessage: providerError,
+              content: [],
+            },
+          });
+        },
+        abort: async () => {},
+      },
+    });
+
+    const { sendPlanningMessage, getPlanningMessages } = await import('../src/planning-agent-service.js');
+
+    const events: any[] = [];
+    await sendPlanningMessage(workspaceId, 'continue', (event) => events.push(event));
+
+    const errorMessage = events
+      .filter((event) => event.type === 'planning:message')
+      .map((event) => event.message as PlanningMessage)
+      .find((message) => (
+        message.role === 'system'
+        && message.content.includes('Foreman turn failed:')
+        && message.content.includes('ChatGPT usage limit')
+      ));
+
+    expect(errorMessage).toBeTruthy();
+
+    const history = getPlanningMessages(workspaceId);
+    expect(history.some((message) => message.id === errorMessage?.id)).toBe(true);
+  });
+
+  it('surfaces thrown provider errors in foreman chat log after retries', async () => {
+    const homePath = setTempHome();
+    const workspacePath = createTempDir('pi-factory-workspace-');
+    const workspaceId = 'ws-provider-throw-error';
+
+    writeWorkspaceConfig(workspacePath);
+    registerWorkspace(homePath, workspaceId, workspacePath);
+
+    const promptError = new Error('Rate limit exceeded');
+
+    createAgentSessionMock.mockImplementation(() => ({
+      session: {
+        subscribe: () => () => {},
+        prompt: async () => {
+          throw promptError;
+        },
+        abort: async () => {},
+      },
+    }));
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const { sendPlanningMessage } = await import('../src/planning-agent-service.js');
+
+    const events: any[] = [];
+    await sendPlanningMessage(workspaceId, 'continue', (event) => events.push(event));
+
+    const finalErrorMessage = events
+      .filter((event) => event.type === 'planning:message')
+      .map((event) => event.message as PlanningMessage)
+      .find((message) => (
+        message.role === 'system'
+        && message.content.includes('Foreman turn failed: Rate limit exceeded')
+      ));
+
+    expect(finalErrorMessage).toBeTruthy();
+    expect(createAgentSessionMock).toHaveBeenCalledTimes(2);
+
+    errorSpy.mockRestore();
   });
 });

@@ -932,6 +932,55 @@ function extractPlanningToolResultText(result: unknown): string {
   return '';
 }
 
+function normalizePlanningErrorMessage(error: unknown): string {
+  if (typeof error === 'string') {
+    const trimmed = error.trim();
+    if (trimmed.length > 0) {
+      return trimmed;
+    }
+  }
+
+  if (error instanceof Error) {
+    const message = error.message?.trim();
+    if (message) {
+      return message;
+    }
+  }
+
+  if (error == null) {
+    return 'Unknown provider error.';
+  }
+
+  try {
+    const serialized = JSON.stringify(error);
+    if (serialized && serialized !== '{}') {
+      return serialized;
+    }
+  } catch {
+    // Fall through to String fallback.
+  }
+
+  const fallback = String(error).trim();
+  return fallback || 'Unknown provider error.';
+}
+
+function getPlanningAssistantTurnErrorMessage(message: unknown): string | null {
+  if (!message || typeof message !== 'object') {
+    return null;
+  }
+
+  const assistantMessage = message as { role?: unknown; stopReason?: unknown; errorMessage?: unknown };
+  if (assistantMessage.role !== 'assistant') {
+    return null;
+  }
+
+  if (assistantMessage.stopReason !== 'error') {
+    return null;
+  }
+
+  return normalizePlanningErrorMessage(assistantMessage.errorMessage);
+}
+
 function extractPlanningToolResultDetails(result: unknown): Record<string, unknown> | undefined {
   if (!result || typeof result !== 'object' || Array.isArray(result)) return undefined;
   const details = (result as { details?: unknown }).details;
@@ -1131,6 +1180,19 @@ function handlePlanningEvent(
         session.messages.push(planningMsg);
         persistMessages(workspaceId, session.messages);
         broadcast({ type: 'planning:message', workspaceId, message: planningMsg });
+      }
+
+      const assistantTurnError = getPlanningAssistantTurnErrorMessage(event.message);
+      if (assistantTurnError) {
+        appendPlanningSystemNotice(
+          session,
+          `Foreman turn failed: ${assistantTurnError}`,
+          {
+            kind: 'foreman-turn-error',
+            stopReason: (event.message as any)?.stopReason,
+            errorMessage: assistantTurnError,
+          },
+        );
       }
 
       broadcast({
@@ -1619,12 +1681,17 @@ async function sendToAgent(
           session.status = 'error';
           broadcast({ type: 'planning:status', workspaceId, status: 'error' });
           // Add error message to conversation
+          const recreateErrMessage = normalizePlanningErrorMessage(recreateErr);
           const errMsg: PlanningMessage = {
             id: crypto.randomUUID(),
-            role: 'assistant',
-            content: 'I encountered an error and could not recover. Please try resetting the conversation.',
+            role: 'system',
+            content: `Foreman session recovery failed: ${recreateErrMessage}`,
             timestamp: new Date().toISOString(),
             sessionId: session.sessionId,
+            metadata: {
+              kind: 'foreman-session-recovery-error',
+              errorMessage: recreateErrMessage,
+            },
           };
           session.messages.push(errMsg);
           persistMessages(workspaceId, session.messages);
@@ -1635,12 +1702,17 @@ async function sendToAgent(
         // All retries exhausted
         session.status = 'error';
         broadcast({ type: 'planning:status', workspaceId, status: 'error' });
+        const normalizedError = normalizePlanningErrorMessage(err);
         const errMsg: PlanningMessage = {
           id: crypto.randomUUID(),
-          role: 'assistant',
-          content: 'Something went wrong. Please try again or reset the conversation.',
+          role: 'system',
+          content: `Foreman turn failed: ${normalizedError}`,
           timestamp: new Date().toISOString(),
           sessionId: session.sessionId,
+          metadata: {
+            kind: 'foreman-turn-error',
+            errorMessage: normalizedError,
+          },
         };
         session.messages.push(errMsg);
         persistMessages(workspaceId, session.messages);

@@ -1216,6 +1216,42 @@ function extractToolResultText(result: any): string {
   return '';
 }
 
+function normalizeAssistantErrorMessage(errorMessage: unknown): string {
+  if (typeof errorMessage === 'string') {
+    const trimmed = errorMessage.trim();
+    if (trimmed.length > 0) {
+      return trimmed;
+    }
+  }
+
+  if (errorMessage == null) {
+    return 'Provider returned stopReason=error without an error message.';
+  }
+
+  try {
+    const serialized = JSON.stringify(errorMessage);
+    if (serialized && serialized !== '{}') {
+      return serialized;
+    }
+  } catch {
+    // Fall through to String() fallback.
+  }
+
+  return String(errorMessage);
+}
+
+function getAssistantTurnErrorMessage(message: any): string | null {
+  if (!message || message.role !== 'assistant') {
+    return null;
+  }
+
+  if (message.stopReason !== 'error') {
+    return null;
+  }
+
+  return normalizeAssistantErrorMessage(message.errorMessage);
+}
+
 function shouldSkipToolEchoMessage(session: TaskSession, content: string): boolean {
   if (!content) return false;
   if (!session.lastToolResultText) return false;
@@ -1349,6 +1385,25 @@ function handlePiEvent(
           broadcast,
           createChatMessage(workspaceId, taskId, 'agent', sanitizedContent),
           'assistant message',
+        );
+      }
+
+      const assistantTurnError = getAssistantTurnErrorMessage(message);
+      if (assistantTurnError) {
+        broadcastActivityEntry(
+          broadcast,
+          createSystemEvent(
+            workspaceId,
+            taskId,
+            'phase-change',
+            `Agent turn failed: ${assistantTurnError}`,
+            {
+              kind: 'agent-turn-error',
+              stopReason: message.stopReason,
+              errorMessage: assistantTurnError,
+            },
+          ),
+          'assistant turn error event',
         );
       }
 

@@ -780,6 +780,77 @@ describe('planTask', () => {
     await stopTaskExecution(task.id);
   });
 
+  it('surfaces provider quota/rate-limit errors in the task activity log', async () => {
+    const workspacePath = mkdtempSync(join(tmpdir(), 'pi-factory-plan-task-'));
+    tempDirs.push(workspacePath);
+
+    const tasksDir = join(workspacePath, '.pi', 'tasks');
+    mkdirSync(tasksDir, { recursive: true });
+
+    const { createTask, discoverTasks, moveTaskToPhase } = await import('../src/task-service.js');
+    const { executeTask, getActiveSession } = await import('../src/agent-execution-service.js');
+
+    const task = createTask(workspacePath, tasksDir, {
+      content: 'Surface provider failures in activity log',
+      acceptanceCriteria: [],
+    });
+
+    const liveTasks = discoverTasks(tasksDir);
+    const liveTask = liveTasks.find((candidate) => candidate.id === task.id);
+    if (!liveTask) {
+      throw new Error('Live task not found for execution test');
+    }
+
+    moveTaskToPhase(liveTask, 'executing', 'system', 'Queue manager auto-assigned', liveTasks);
+
+    let subscriber: ((event: any) => void) | undefined;
+    const providerError = 'You have hit your ChatGPT usage limit (plus plan). Try again in ~90 min.';
+
+    createAgentSessionMock.mockResolvedValue({
+      session: {
+        subscribe: (listener: (event: any) => void) => {
+          subscriber = listener;
+          return () => {};
+        },
+        prompt: async () => {
+          subscriber?.({
+            type: 'message_end',
+            message: {
+              role: 'assistant',
+              stopReason: 'error',
+              errorMessage: providerError,
+              content: [],
+            },
+          });
+        },
+        abort: async () => {},
+      },
+    });
+
+    const broadcasts: any[] = [];
+
+    await executeTask({
+      task: liveTask,
+      workspaceId: 'workspace-test',
+      workspacePath,
+      broadcastToWorkspace: (event: any) => broadcasts.push(event),
+    });
+
+    await vi.waitFor(() => {
+      expect(
+        broadcasts.some((event) => (
+          event.type === 'activity:entry'
+          && event.entry?.type === 'system-event'
+          && typeof event.entry?.message === 'string'
+          && event.entry.message.includes('Agent turn failed:')
+          && event.entry.message.includes('ChatGPT usage limit')
+        )),
+      ).toBe(true);
+    });
+
+    expect(getActiveSession(task.id)?.awaitingUserInput).toBe(true);
+  });
+
   it('auto-promotes backlog tasks to ready when backlog automation is enabled', async () => {
     const workspacePath = mkdtempSync(join(tmpdir(), 'pi-factory-plan-task-'));
     tempDirs.push(workspacePath);
