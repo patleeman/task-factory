@@ -65,6 +65,55 @@ Follow one task through this order:
 | 5 | Move to `executing` and run `executeTask` |
 | 6 | On completion, move to `complete` and kick queue again |
 
+### Execution reliability telemetry and alerting
+
+Execution emits structured reliability signals as `system-event` activity entries with `metadata.kind = "execution-reliability"`.
+
+Key metadata fields:
+
+- `signal`: `turn_start`, `first_token`, `turn_end`, `turn_stall_recovered`, `provider_retry_start`, `provider_retry_end`, `compaction_end`
+- `eventType`: `turn`, `provider_retry`, `compaction`
+- `sessionId`, `turnId`, `turnNumber`
+- Outcome/timing fields: `outcome`, `durationMs`, `timeToFirstTokenMs`
+- Failure context fields: `stallPhase`, `timeoutMs`, `toolName`, `toolCallId`, `errorMessage`, `attempt`, `maxAttempts` (retry-start), `delayMs`
+
+#### Query path
+
+Use existing activity APIs (`/api/workspaces/:workspaceId/activity` or `/api/workspaces/:workspaceId/tasks/:taskId/activity`) and filter on metadata.
+
+```bash
+# Example: fetch latest reliability events for a workspace
+curl -s "$BASE_URL/api/workspaces/$WORKSPACE_ID/activity?limit=500" \
+  | jq '.[]
+    | select(.type=="system-event")
+    | select(.metadata.kind=="execution-reliability")
+    | {taskId, signal: .metadata.signal, outcome: .metadata.outcome, sessionId: .metadata.sessionId, turnId: .metadata.turnId}'
+```
+
+#### Alert thresholds
+
+1. **Stall ratio**
+   - Numerator: count of `signal=turn_stall_recovered`
+   - Denominator: count of `signal=turn_start`
+   - Window: trailing 15 minutes
+   - Thresholds:
+     - Warning: `stall_ratio >= 0.02` with at least 25 turns in the window
+     - Critical: `stall_ratio >= 0.05` with at least 25 turns in the window
+
+2. **Repeated provider failures**
+   - Signal: `signal=provider_retry_end` with `outcome=failed`
+   - Window: trailing 10 minutes
+   - Thresholds:
+     - Warning: `>= 3` failed retry-end signals per workspace
+     - Critical: `>= 5` failed retry-end signals per workspace
+
+3. **Compaction instability (optional but recommended)**
+   - Signal: `signal=compaction_end` with `outcome=failed`
+   - Window: trailing 15 minutes
+   - Thresholds:
+     - Warning: `>= 3` failures
+     - Critical: `>= 6` failures
+
 ### Startup recovery
 
 At server startup, queue managers resume for enabled workspaces and interrupted planning runs are restarted.

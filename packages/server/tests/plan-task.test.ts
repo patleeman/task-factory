@@ -50,7 +50,13 @@ vi.mock('../src/activity-service.js', () => ({
     timestamp: new Date().toISOString(),
     workspaceId,
   })),
-  createSystemEvent: vi.fn(async (workspaceId: string, taskId: string, event: string, message: string) => ({
+  createSystemEvent: vi.fn(async (
+    workspaceId: string,
+    taskId: string,
+    event: string,
+    message: string,
+    metadata?: Record<string, unknown>,
+  ) => ({
     type: 'system-event',
     id: crypto.randomUUID(),
     taskId,
@@ -58,6 +64,7 @@ vi.mock('../src/activity-service.js', () => ({
     message,
     timestamp: new Date().toISOString(),
     workspaceId,
+    metadata,
   })),
 }));
 
@@ -942,6 +949,240 @@ describe('planTask', () => {
         && event.entry.message.includes('Retry succeeded on attempt 2')
       )),
     ).toBe(true);
+
+    const reliabilityEntries = broadcasts.filter((event) => (
+      event.type === 'activity:entry'
+      && event.entry?.type === 'system-event'
+      && event.entry?.metadata?.kind === 'execution-reliability'
+      && String(event.entry?.metadata?.signal).startsWith('provider_retry_')
+    ));
+
+    expect(reliabilityEntries.some((event) => event.entry.metadata.signal === 'provider_retry_start')).toBe(true);
+    expect(
+      reliabilityEntries.some((event) => (
+        event.entry.metadata.signal === 'provider_retry_end'
+        && event.entry.metadata.outcome === 'success'
+      )),
+    ).toBe(true);
+  });
+
+  it('emits queryable execution reliability turn telemetry for start, first token, and turn end', async () => {
+    const workspacePath = mkdtempSync(join(tmpdir(), 'pi-factory-plan-task-'));
+    tempDirs.push(workspacePath);
+
+    const tasksDir = join(workspacePath, '.pi', 'tasks');
+    mkdirSync(tasksDir, { recursive: true });
+
+    const { createTask, discoverTasks, moveTaskToPhase } = await import('../src/task-service.js');
+    const { executeTask } = await import('../src/agent-execution-service.js');
+
+    const task = createTask(workspacePath, tasksDir, {
+      content: 'Emit reliability turn telemetry',
+      acceptanceCriteria: [],
+    });
+
+    const liveTasks = discoverTasks(tasksDir);
+    const liveTask = liveTasks.find((candidate) => candidate.id === task.id);
+    if (!liveTask) {
+      throw new Error('Live task not found for reliability telemetry test');
+    }
+
+    moveTaskToPhase(liveTask, 'executing', 'system', 'Queue manager auto-assigned', liveTasks);
+
+    let subscriber: ((event: any) => void) | undefined;
+
+    createAgentSessionMock.mockResolvedValue({
+      session: {
+        subscribe: (listener: (event: any) => void) => {
+          subscriber = listener;
+          return () => {};
+        },
+        prompt: async () => {
+          subscriber?.({ type: 'agent_start' });
+          subscriber?.({
+            type: 'message_start',
+            message: { role: 'assistant', content: [] },
+          });
+          subscriber?.({
+            type: 'message_update',
+            message: { role: 'assistant' },
+            assistantMessageEvent: { type: 'text_delta', delta: 'hello' },
+          });
+          subscriber?.({
+            type: 'message_end',
+            message: {
+              role: 'assistant',
+              stopReason: 'stop',
+              content: [{ type: 'text', text: 'hello' }],
+            },
+          });
+          subscriber?.({
+            type: 'turn_end',
+            message: { role: 'assistant', stopReason: 'stop' },
+            toolResults: [],
+          });
+        },
+        abort: async () => {},
+      },
+    });
+
+    const broadcasts: any[] = [];
+
+    await executeTask({
+      task: liveTask,
+      workspaceId: 'workspace-test',
+      workspacePath,
+      broadcastToWorkspace: (event: any) => broadcasts.push(event),
+    });
+
+    await vi.waitFor(() => {
+      expect(
+        broadcasts.some((event) => (
+          event.type === 'activity:entry'
+          && event.entry?.type === 'system-event'
+          && event.entry?.metadata?.kind === 'execution-reliability'
+          && event.entry?.metadata?.signal === 'turn_end'
+        )),
+      ).toBe(true);
+    });
+
+    const reliabilityEntries = broadcasts.filter((event) => (
+      event.type === 'activity:entry'
+      && event.entry?.type === 'system-event'
+      && event.entry?.metadata?.kind === 'execution-reliability'
+      && event.entry?.taskId === task.id
+    ));
+
+    const turnStart = reliabilityEntries.find((event) => event.entry.metadata.signal === 'turn_start');
+    const firstToken = reliabilityEntries.find((event) => event.entry.metadata.signal === 'first_token');
+    const turnEnd = reliabilityEntries.find((event) => event.entry.metadata.signal === 'turn_end');
+
+    expect(turnStart).toBeDefined();
+    expect(firstToken).toBeDefined();
+    expect(turnEnd).toBeDefined();
+
+    expect(turnStart.entry.metadata).toMatchObject({
+      kind: 'execution-reliability',
+      signal: 'turn_start',
+      eventType: 'turn',
+      outcome: 'started',
+      sessionId: expect.any(String),
+      turnId: expect.any(String),
+      turnNumber: 1,
+    });
+
+    expect(firstToken.entry.metadata).toMatchObject({
+      kind: 'execution-reliability',
+      signal: 'first_token',
+      eventType: 'turn',
+      outcome: 'observed',
+      sessionId: expect.any(String),
+      turnId: expect.any(String),
+      turnNumber: 1,
+    });
+    expect(firstToken.entry.metadata.timeToFirstTokenMs).toEqual(expect.any(Number));
+
+    expect(turnEnd.entry.metadata).toMatchObject({
+      kind: 'execution-reliability',
+      signal: 'turn_end',
+      eventType: 'turn',
+      outcome: 'success',
+      sessionId: expect.any(String),
+      turnId: expect.any(String),
+      turnNumber: 1,
+    });
+    expect(turnEnd.entry.metadata.durationMs).toEqual(expect.any(Number));
+  });
+
+  it('emits queryable compaction reliability outcomes in task activity telemetry', async () => {
+    const workspacePath = mkdtempSync(join(tmpdir(), 'pi-factory-plan-task-'));
+    tempDirs.push(workspacePath);
+
+    const tasksDir = join(workspacePath, '.pi', 'tasks');
+    mkdirSync(tasksDir, { recursive: true });
+
+    const { createTask, discoverTasks, moveTaskToPhase } = await import('../src/task-service.js');
+    const { executeTask } = await import('../src/agent-execution-service.js');
+
+    const task = createTask(workspacePath, tasksDir, {
+      content: 'Emit compaction telemetry outcomes',
+      acceptanceCriteria: [],
+    });
+
+    const liveTasks = discoverTasks(tasksDir);
+    const liveTask = liveTasks.find((candidate) => candidate.id === task.id);
+    if (!liveTask) {
+      throw new Error('Live task not found for compaction telemetry test');
+    }
+
+    moveTaskToPhase(liveTask, 'executing', 'system', 'Queue manager auto-assigned', liveTasks);
+
+    let subscriber: ((event: any) => void) | undefined;
+
+    createAgentSessionMock.mockResolvedValue({
+      session: {
+        subscribe: (listener: (event: any) => void) => {
+          subscriber = listener;
+          return () => {};
+        },
+        prompt: async () => {
+          subscriber?.({
+            type: 'auto_compaction_end',
+            aborted: true,
+            willRetry: false,
+            errorMessage: 'context overflow',
+          });
+
+          subscriber?.({
+            type: 'message_end',
+            message: {
+              role: 'assistant',
+              stopReason: 'stop',
+              content: [{ type: 'text', text: 'done' }],
+            },
+          });
+        },
+        abort: async () => {},
+      },
+    });
+
+    const broadcasts: any[] = [];
+
+    await executeTask({
+      task: liveTask,
+      workspaceId: 'workspace-test',
+      workspacePath,
+      broadcastToWorkspace: (event: any) => broadcasts.push(event),
+    });
+
+    await vi.waitFor(() => {
+      expect(
+        broadcasts.some((event) => (
+          event.type === 'activity:entry'
+          && event.entry?.type === 'system-event'
+          && event.entry?.metadata?.kind === 'execution-reliability'
+          && event.entry?.metadata?.signal === 'compaction_end'
+        )),
+      ).toBe(true);
+    });
+
+    const compactionTelemetry = broadcasts.find((event) => (
+      event.type === 'activity:entry'
+      && event.entry?.type === 'system-event'
+      && event.entry?.metadata?.kind === 'execution-reliability'
+      && event.entry?.metadata?.signal === 'compaction_end'
+    ));
+
+    expect(compactionTelemetry?.entry?.metadata).toMatchObject({
+      kind: 'execution-reliability',
+      signal: 'compaction_end',
+      eventType: 'compaction',
+      outcome: 'failed',
+      aborted: true,
+      willRetry: false,
+      sessionId: expect.any(String),
+    });
+    expect(compactionTelemetry?.entry?.metadata?.errorMessage).toContain('context overflow');
   });
 
   it('surfaces a stall notice and clears the active session when no follow-up arrives after a tool result', async () => {
@@ -1043,6 +1284,30 @@ describe('planTask', () => {
           && event.status === 'idle'
         )),
       ).toBe(true);
+
+      const stallTelemetry = broadcasts.find((event) => (
+        event.type === 'activity:entry'
+        && event.entry?.type === 'system-event'
+        && event.entry?.metadata?.kind === 'execution-reliability'
+        && event.entry?.metadata?.signal === 'turn_stall_recovered'
+      ));
+
+      expect(stallTelemetry?.entry?.metadata).toMatchObject({
+        kind: 'execution-reliability',
+        signal: 'turn_stall_recovered',
+        eventType: 'turn',
+        outcome: 'recovered',
+        stallPhase: 'post-tool',
+      });
+
+      const stallTurnEnds = broadcasts.filter((event) => (
+        event.type === 'activity:entry'
+        && event.entry?.type === 'system-event'
+        && event.entry?.metadata?.kind === 'execution-reliability'
+        && event.entry?.metadata?.signal === 'turn_end'
+        && event.entry?.metadata?.outcome === 'watchdog_recovered'
+      ));
+      expect(stallTurnEnds.length).toBe(1);
     } finally {
       vi.useRealTimers();
     }

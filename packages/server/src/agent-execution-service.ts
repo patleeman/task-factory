@@ -1693,6 +1693,13 @@ async function handleAgentTurnEnd(
   // Agent explicitly signaled done — run post-execution skills then complete.
   session.awaitingUserInput = false;
   const summary = session.completionSummary;
+
+  closeExecutionTurnTelemetryIfNeeded(session, workspaceId, task.id, {
+    outcome: session.activeTurnErrorMessage ? 'error' : 'success',
+    source: 'handleAgentTurnEnd:task-complete',
+    errorMessage: session.activeTurnErrorMessage,
+  });
+
   cleanupCompletionCallback(task.id);
 
   const postSkillIds = task.frontmatter.postExecutionSkills;
@@ -1779,12 +1786,6 @@ async function handleAgentTurnEnd(
   if (session.status !== 'error') {
     session.status = 'completed';
   }
-
-  closeExecutionTurnTelemetryIfNeeded(session, workspaceId, task.id, {
-    outcome: 'success',
-    source: 'handleAgentTurnEnd:task-complete',
-    errorMessage: session.activeTurnErrorMessage,
-  });
 
   session.endTime = new Date().toISOString();
 
@@ -2364,7 +2365,6 @@ function handlePiEvent(
           source: 'event:auto_retry_end',
           outcome: notice.outcome,
           attempt: event.attempt,
-          maxAttempts: event.attempt,
           errorMessage: notice.errorMessage,
         },
       );

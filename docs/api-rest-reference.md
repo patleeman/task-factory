@@ -67,6 +67,9 @@ Conventions:
 | GET | `/api/workspaces/:workspaceId/tasks/:taskId/activity?limit=50` | Task timeline |
 | POST | `/api/workspaces/:workspaceId/activity` | Add timeline/chat entry |
 
+Execution reliability telemetry is exposed through these same activity endpoints as `system-event` entries with `metadata.kind = "execution-reliability"`.
+Use `metadata.signal` + `metadata.outcome` + `metadata.sessionId`/`turnId` to build reliability dashboards and alerts.
+
 ### Planning + QA endpoints
 
 | Method | Path | Purpose |

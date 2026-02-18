@@ -47,7 +47,7 @@ On connect, server sends:
 | `task:moved` | `{ task, from, to }` |
 | `task:reordered` | `{ phase, taskIds }` |
 | `task:plan_generated` | `{ taskId, plan }` |
-| `activity:entry` | `{ entry }` |
+| `activity:entry` | `{ entry }` (includes execution reliability system-events when `entry.metadata.kind === "execution-reliability"`) |
 | `queue:status` | `{ status }` |
 | `workspace:automation_updated` | `{ workspaceId, settings, overrides, globalDefaults }` |
 | `idea_backlog:updated` | `{ workspaceId, backlog }` |

@@ -9,10 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Starter post-execution skill `update-docs` to keep `README.md`, `docs/**`, and `CHANGELOG.md` aligned with implementation changes.
+- Execution reliability telemetry signals in task activity metadata for turn lifecycle timing, stall recovery, provider retry outcomes, and compaction outcomes.
+- Regression coverage for execution reliability telemetry and failure-path watchdog recovery behavior.
 
 ### Changed
 - Added pre-planning hook support (`prePlanningSkills` / `pre-planning`) across task defaults, task forms, and planning lifecycle execution.
 - Default post-execution skill order now includes `update-docs` for new tasks.
+- Runtime/API docs now define reliability query patterns and alert thresholds for stall ratio and repeated provider failures.
 
 ## [0.2.0] - 2026-02-17
 
