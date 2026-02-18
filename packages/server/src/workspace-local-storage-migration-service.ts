@@ -184,7 +184,7 @@ export async function moveWorkspaceLocalStorage(
     { from: join(localRoot, 'shelf.json'), to: join(targetRoot, 'shelf.json') },
     { from: join(localRoot, 'idea-backlog.json'), to: join(targetRoot, 'idea-backlog.json') },
     { from: join(localRoot, 'workspace-context.md'), to: join(targetRoot, 'workspace-context.md') },
-    { from: join(localRoot, 'factory', 'activity.jsonl'), to: join(targetRoot, 'factory', 'activity.jsonl') },
+    { from: join(localRoot, 'factory'), to: join(targetRoot, 'factory') },
     { from: join(localRoot, 'skills'), to: join(targetRoot, 'skills') },
     { from: join(localRoot, 'extensions'), to: join(targetRoot, 'extensions') },
   ];
