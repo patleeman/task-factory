@@ -12,19 +12,43 @@ function getHandleCreateTaskBlock(): string {
   return match?.[0] ?? '';
 }
 
+function getHandleCreateDraftTaskDirectBlock(): string {
+  const match = workspacePageSource.match(/const handleCreateDraftTaskDirect = useCallback\(async \(draftTask: DraftTask\) => \{[\s\S]*?\n\s{2}\}, \[workspaceId, creatingDraftTaskIds, showToast\]\)/);
+  return match?.[0] ?? '';
+}
+
 describe('create-task backlog routing regression checks', () => {
-  it('returns to foreman after successful task creation instead of auto-opening task detail', () => {
+  it('does not redirect after successful task creation and keeps task-detail navigation explicit', () => {
     const handleCreateTaskBlock = getHandleCreateTaskBlock();
 
-    expect(handleCreateTaskBlock).toContain('const task = await api.createTask(workspaceId, taskData)');
-    expect(handleCreateTaskBlock).toContain('navigate(workspaceRootPath)');
+    expect(handleCreateTaskBlock).toContain('const task = await api.createTask(createWorkspaceId, taskData)');
+    expect(handleCreateTaskBlock).not.toContain('navigate(workspaceRootPath)');
     expect(handleCreateTaskBlock).not.toContain('navigate(`${workspaceRootPath}/tasks/${task.id}`)');
+  });
+
+  it('ignores stale create completions after workspace navigation to avoid cross-workspace UI mutations', () => {
+    const handleCreateTaskBlock = getHandleCreateTaskBlock();
+
+    expect(workspacePageSource).toContain('const activeWorkspaceIdRef = useRef<string | null>(workspaceId ?? null)');
+    expect(workspacePageSource).toContain('activeWorkspaceIdRef.current = workspaceId ?? null');
+    expect(handleCreateTaskBlock).toContain('if (activeWorkspaceIdRef.current !== createWorkspaceId) {');
+    expect(handleCreateTaskBlock).toContain('return');
+  });
+
+  it('applies the same stale-workspace guard for direct draft-task creation side effects', () => {
+    const handleCreateDraftTaskDirectBlock = getHandleCreateDraftTaskDirectBlock();
+
+    expect(handleCreateDraftTaskDirectBlock).toContain('const task = await api.createTask(createWorkspaceId, {');
+    expect(handleCreateDraftTaskDirectBlock).toContain('if (activeWorkspaceIdRef.current !== createWorkspaceId) {');
+    expect(handleCreateDraftTaskDirectBlock).toContain('showToast(`Added ${task.id} to backlog`)');
+    expect(handleCreateDraftTaskDirectBlock).toContain('if (activeWorkspaceIdRef.current === createWorkspaceId) {');
+    expect(handleCreateDraftTaskDirectBlock).toContain("showToast('Failed to create task from draft')");
   });
 
   it('preserves attachment upload behavior on create and keeps failures non-blocking', () => {
     const handleCreateTaskBlock = getHandleCreateTaskBlock();
 
-    expect(handleCreateTaskBlock).toContain('await api.uploadAttachments(workspaceId, task.id, pendingFiles)');
+    expect(handleCreateTaskBlock).toContain('await api.uploadAttachments(createWorkspaceId, task.id, pendingFiles)');
     expect(handleCreateTaskBlock).toContain("console.error('Failed to upload attachments:', uploadErr)");
   });
 

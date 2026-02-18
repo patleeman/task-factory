@@ -174,6 +174,7 @@ export function WorkspacePage() {
   const toastTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
   const archivedLoadPromiseRef = useRef<Promise<void> | null>(null)
   const openingArchiveExplorerRef = useRef(false)
+  const activeWorkspaceIdRef = useRef<string | null>(workspaceId ?? null)
 
   const [selectedArtifact, setSelectedArtifact] = useState<Artifact | null>(null)
   const [ideaBacklog, setIdeaBacklog] = useState<IdeaBacklog | null>(null)
@@ -240,6 +241,10 @@ export function WorkspacePage() {
     setIsVoiceHotkeyPressed(false)
     setIsVoiceDictating(false)
   }, [taskId])
+
+  useEffect(() => {
+    activeWorkspaceIdRef.current = workspaceId ?? null
+  }, [workspaceId])
 
   // Derived data
   const archivedTasks = tasks
@@ -804,15 +809,22 @@ export function WorkspacePage() {
   // Create task
   const handleCreateTask = async (data: CreateTaskData) => {
     if (!workspaceId) return
+
+    const createWorkspaceId = workspaceId
+
     try {
       const { pendingFiles, sourceDraftId, ...taskData } = data
-      const task = await api.createTask(workspaceId, taskData)
+      const task = await api.createTask(createWorkspaceId, taskData)
       if (pendingFiles && pendingFiles.length > 0) {
         try {
-          await api.uploadAttachments(workspaceId, task.id, pendingFiles)
+          await api.uploadAttachments(createWorkspaceId, task.id, pendingFiles)
         } catch (uploadErr) {
           console.error('Failed to upload attachments:', uploadErr)
         }
+      }
+
+      if (activeWorkspaceIdRef.current !== createWorkspaceId) {
+        return
       }
 
       if (sourceDraftId) {
@@ -831,10 +843,11 @@ export function WorkspacePage() {
 
       setNewTaskPrefill(null)
       setAgentTaskFormUpdates(null)
-      navigate(workspaceRootPath)
     } catch (err) {
       console.error('Failed to create task:', err)
-      alert('Failed to create task: ' + String(err))
+      if (activeWorkspaceIdRef.current === createWorkspaceId) {
+        alert('Failed to create task: ' + String(err))
+      }
     }
   }
 
@@ -1210,6 +1223,8 @@ export function WorkspacePage() {
     if (!workspaceId) return
     if (creatingDraftTaskIds.has(draftTask.id)) return
 
+    const createWorkspaceId = workspaceId
+
     setCreatingDraftTaskIds((prev) => {
       const next = new Set(prev)
       next.add(draftTask.id)
@@ -1217,12 +1232,16 @@ export function WorkspacePage() {
     })
 
     try {
-      const task = await api.createTask(workspaceId, {
+      const task = await api.createTask(createWorkspaceId, {
         title: draftTask.title,
         content: draftTask.content,
         acceptanceCriteria: draftTask.acceptanceCriteria,
         plan: draftTask.plan,
       })
+
+      if (activeWorkspaceIdRef.current !== createWorkspaceId) {
+        return
+      }
 
       setDraftTaskStates((prev) => ({
         ...prev,
@@ -1231,7 +1250,9 @@ export function WorkspacePage() {
       showToast(`Added ${task.id} to backlog`)
     } catch (err) {
       console.error('Failed to create task from draft:', err)
-      showToast('Failed to create task from draft')
+      if (activeWorkspaceIdRef.current === createWorkspaceId) {
+        showToast('Failed to create task from draft')
+      }
     } finally {
       setCreatingDraftTaskIds((prev) => {
         const next = new Set(prev)

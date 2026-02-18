@@ -48,12 +48,28 @@ How tasks move through pipeline phases and how queue automation dispatches work.
 | `readyLimit` | Maximum ready tasks allowed |
 | `executingLimit` | Maximum concurrent executing tasks |
 
+### Execution circuit breaker
+
+Queue automation includes a provider/model-aware breaker for repeated execution failures (`rate_limit`, `quota`, `auth`):
+
+- Failure bursts are tracked per workspace + provider + model.
+- When threshold is exceeded inside the burst window, dispatch for matching ready tasks is paused until cooldown expires.
+- `queue/status` exposes open breakers with retry timing (`executionBreakers`).
+- `/queue/start` acts as a manual resume override and clears open breakers immediately.
+- Open, blocked, auto-close, and manual-resume transitions are surfaced as `system-event` activity entries.
+
 ### Queue kick sources
 
 - Manual move to `ready`
 - Execution completion
 - Planning auto-promotion
 - Queue poll safety tick
+
+### Task creation routing behavior
+
+- Creating a task from the New Task form adds it to `backlog` without automatic route changes.
+- Opening task detail remains an explicit user action (for example, selecting a task card).
+- If task creation finishes after you switched workspaces, the stale completion is ignored for the active workspace UI.
 
 ## Examples
 
