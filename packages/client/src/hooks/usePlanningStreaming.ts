@@ -18,6 +18,11 @@ export interface PlanningStreamState {
   shelf: Shelf | null
   /** Active QA request (if agent is awaiting user answers) */
   activeQARequest: QARequest | null
+  /**
+   * Client-side fallback: mark a QA request as resolved immediately after a
+   * successful submit response, even if WS lifecycle events arrive late.
+   */
+  resolveQARequestLocally: (requestId: string) => void
 }
 
 const INITIAL_AGENT_STREAM: AgentStreamState = {
@@ -154,6 +159,30 @@ export function usePlanningStreaming(
 
     return nextState
   }, [])
+
+  const resolveQARequestLocally = useCallback((requestId: string) => {
+    if (!requestId) return
+
+    const nextState = applyQALifecycleEvent({
+      type: 'message',
+      message: {
+        id: `local-qa-response-${requestId}`,
+        role: 'qa',
+        content: '',
+        timestamp: new Date().toISOString(),
+        metadata: {
+          qaResponse: {
+            requestId,
+            answers: [],
+          },
+        },
+      },
+    })
+
+    if (nextState.resolvedRequestIds.has(requestId)) {
+      stopQAPoll()
+    }
+  }, [applyQALifecycleEvent, stopQAPoll])
 
   // Poll for pending QA request via HTTP (reliable fallback for WebSocket broadcasts)
   const startQAPoll = useCallback((wsId: string) => {
@@ -407,7 +436,7 @@ export function usePlanningStreaming(
   // Convert messages to entries for TaskChat
   const entries = messagesToEntries(messages)
 
-  return { agentStream, entries, shelf, activeQARequest }
+  return { agentStream, entries, shelf, activeQARequest, resolveQARequestLocally }
 }
 
 export const PLANNING_TASK_ID = '__planning__'

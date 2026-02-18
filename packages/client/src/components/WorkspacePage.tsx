@@ -1236,9 +1236,12 @@ export function WorkspacePage() {
 
   // Q&A disambiguation handlers
   const handleQASubmit = async (answers: QAAnswer[]): Promise<boolean> => {
-    if (!workspaceId || !planningStream.activeQARequest) return false
+    const activeRequest = planningStream.activeQARequest
+    if (!workspaceId || !activeRequest) return false
+
     try {
-      await api.submitQAResponse(workspaceId, planningStream.activeQARequest.requestId, answers)
+      await api.submitQAResponse(workspaceId, activeRequest.requestId, answers)
+      planningStream.resolveQARequestLocally(activeRequest.requestId)
       return true
     } catch (err) {
       console.error('Failed to submit Q&A response:', err)
