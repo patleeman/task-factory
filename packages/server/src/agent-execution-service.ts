@@ -2554,7 +2554,12 @@ export async function followUpTask(taskId: string, content: string, images?: Ima
 
     const savePlanCallbackCleanup =
       session.task && !isForbidden(buildTaskStateSnapshot(session.task.frontmatter).mode, 'save_plan')
-        ? registerSavePlanCallbackForChatTurn(session.task, session.workspaceId, session.broadcastToWorkspace)
+        ? registerSavePlanCallbackForChatTurn(
+          session.task,
+          session.workspaceId,
+          session.workspacePath,
+          session.broadcastToWorkspace,
+        )
         : undefined;
 
     try {
@@ -2668,7 +2673,7 @@ export async function resumeChat(
 
     const savePlanCallbackCleanup =
       !isForbidden(buildTaskStateSnapshot(task.frontmatter).mode, 'save_plan')
-        ? registerSavePlanCallbackForChatTurn(task, workspaceId, broadcastToWorkspace)
+        ? registerSavePlanCallbackForChatTurn(task, workspaceId, workspacePath, broadcastToWorkspace)
         : undefined;
 
     try {
@@ -2781,7 +2786,7 @@ export async function startChat(
 
     const savePlanCallbackCleanup =
       !isForbidden(buildTaskStateSnapshot(task.frontmatter).mode, 'save_plan')
-        ? registerSavePlanCallbackForChatTurn(task, workspaceId, broadcastToWorkspace)
+        ? registerSavePlanCallbackForChatTurn(task, workspaceId, workspacePath, broadcastToWorkspace)
         : undefined;
 
     try {
@@ -3116,6 +3121,7 @@ function savePlanForTask(
   acceptanceCriteria: string[],
   plan: TaskPlan,
   workspaceId: string,
+  workspacePath?: string,
   broadcastToWorkspace?: (event: any) => void,
 ): void {
   const latestTask = existsSync(task.filePath) ? parseTaskFile(task.filePath) : task;
@@ -3127,17 +3133,18 @@ function savePlanForTask(
     );
   }
 
-  finalizePlan(task, acceptanceCriteria, plan, workspaceId, broadcastToWorkspace);
+  finalizePlan(task, acceptanceCriteria, plan, workspaceId, workspacePath, broadcastToWorkspace);
 }
 
 function registerSavePlanCallbackForChatTurn(
   task: Task,
   workspaceId: string,
+  workspacePath?: string,
   broadcastToWorkspace?: (event: any) => void,
 ): () => void {
   const registry = ensurePlanCallbackRegistry();
   const callback = ({ acceptanceCriteria, plan }: SavedPlanningData) => {
-    savePlanForTask(task, acceptanceCriteria, plan, workspaceId, broadcastToWorkspace);
+    savePlanForTask(task, acceptanceCriteria, plan, workspaceId, workspacePath, broadcastToWorkspace);
   };
 
   const previous = registry.get(task.id);
@@ -3285,7 +3292,7 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
       if (hasPersistedPlan) return;
       hasPersistedPlan = true;
       savedPlan = plan;
-      finalizePlan(task, acceptanceCriteria, plan, workspaceId, broadcastToWorkspace);
+      finalizePlan(task, acceptanceCriteria, plan, workspaceId, workspacePath, broadcastToWorkspace);
 
       void session.piSession?.abort().catch((abortErr) => {
         console.error(`[planTask] Failed to abort planning session after save_plan for ${task.id}:`, abortErr);
@@ -3634,25 +3641,39 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
 /**
  * Save acceptance criteria + a generated plan to the task and broadcast updates.
  */
-function readWorkspaceConfigForTask(task: Task): WorkspaceConfig | null {
-  const workspacePath = task.frontmatter.workspace?.trim();
-  if (!workspacePath) return null;
-  return loadWorkspaceConfigFromDiskSync(workspacePath);
+function readWorkspaceConfigForTask(task: Task, workspacePath?: string): WorkspaceConfig | null {
+  const candidatePaths = [workspacePath, task.frontmatter.workspace]
+    .map((candidate) => candidate?.trim())
+    .filter((candidate): candidate is string => Boolean(candidate));
+
+  for (const candidatePath of candidatePaths) {
+    const config = loadWorkspaceConfigFromDiskSync(candidatePath);
+    if (config) {
+      return config;
+    }
+  }
+
+  return null;
 }
 
-function resolveTasksDirForTask(task: Task, workspaceConfig: WorkspaceConfig | null): string {
-  const workspacePath = task.frontmatter.workspace?.trim();
-  if (!workspacePath) {
+function resolveTasksDirForTask(
+  task: Task,
+  workspaceConfig: WorkspaceConfig | null,
+  workspacePath?: string,
+): string {
+  const effectiveWorkspacePath = workspacePath?.trim() || task.frontmatter.workspace?.trim();
+  if (!effectiveWorkspacePath) {
     return workspaceConfig?.defaultTaskLocation || DEFAULT_WORKSPACE_TASK_LOCATION;
   }
 
-  return resolveExistingTasksDirFromWorkspacePath(workspacePath, workspaceConfig);
+  return resolveExistingTasksDirFromWorkspacePath(effectiveWorkspacePath, workspaceConfig);
 }
 
 function maybeAutoPromoteBacklogTaskAfterPlanning(
   task: Task,
   workspaceId: string,
   normalizedCriteria: string[],
+  workspacePath?: string,
   broadcastToWorkspace?: (event: any) => void,
 ): Task {
   if (task.frontmatter.phase !== 'backlog') {
@@ -3663,7 +3684,7 @@ function maybeAutoPromoteBacklogTaskAfterPlanning(
     return task;
   }
 
-  const workspaceConfig = readWorkspaceConfigForTask(task);
+  const workspaceConfig = readWorkspaceConfigForTask(task, workspacePath);
   const globalWorkflowDefaults = resolveGlobalWorkflowSettings(loadPiFactorySettings()?.workflowDefaults);
   const workflowSettings = workspaceConfig
     ? resolveWorkspaceWorkflowSettings(workspaceConfig, globalWorkflowDefaults)
@@ -3673,7 +3694,7 @@ function maybeAutoPromoteBacklogTaskAfterPlanning(
     return task;
   }
 
-  const tasksDir = resolveTasksDirForTask(task, workspaceConfig);
+  const tasksDir = resolveTasksDirForTask(task, workspaceConfig, workspacePath);
   const tasks = discoverTasks(tasksDir);
   const latestTask = tasks.find((candidate) => candidate.id === task.id) || task;
 
@@ -3735,6 +3756,7 @@ function finalizePlan(
   acceptanceCriteria: string[],
   plan: TaskPlan,
   workspaceId: string,
+  workspacePath?: string,
   broadcastToWorkspace?: (event: any) => void,
 ): void {
   const normalizedCriteria = acceptanceCriteria
@@ -3769,6 +3791,7 @@ function finalizePlan(
     updatedTask,
     workspaceId,
     normalizedCriteria,
+    workspacePath,
     broadcastToWorkspace,
   );
 

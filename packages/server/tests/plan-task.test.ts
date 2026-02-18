@@ -1773,6 +1773,186 @@ describe('planTask', () => {
     expect(requestQueueKickMock).toHaveBeenCalledWith('workspace-test');
   });
 
+  it('auto-promotes when backlog automation is enabled while planning is already running', async () => {
+    const workspacePath = mkdtempSync(join(tmpdir(), 'pi-factory-plan-task-'));
+    tempDirs.push(workspacePath);
+
+    const piDir = join(workspacePath, '.pi');
+    const tasksDir = join(piDir, 'tasks');
+    mkdirSync(tasksDir, { recursive: true });
+
+    const factoryConfigPath = join(piDir, 'factory.json');
+
+    writeFileSync(
+      factoryConfigPath,
+      JSON.stringify({
+        taskLocations: ['.pi/tasks'],
+        defaultTaskLocation: '.pi/tasks',
+        wipLimits: {},
+        queueProcessing: { enabled: false },
+        workflowAutomation: {
+          backlogToReady: false,
+          readyToExecuting: false,
+        },
+      }),
+      'utf-8',
+    );
+
+    const { createTask, parseTaskFile } = await import('../src/task-service.js');
+    const { planTask } = await import('../src/agent-execution-service.js');
+
+    const task = createTask(workspacePath, tasksDir, {
+      content: 'Enable backlog automation while planning is in progress',
+      acceptanceCriteria: [],
+    });
+
+    createAgentSessionMock.mockResolvedValue({
+      session: {
+        subscribe: () => () => {},
+        prompt: async () => {
+          const runningTask = parseTaskFile(task.filePath);
+          expect(runningTask.frontmatter.planningStatus).toBe('running');
+
+          writeFileSync(
+            factoryConfigPath,
+            JSON.stringify({
+              taskLocations: ['.pi/tasks'],
+              defaultTaskLocation: '.pi/tasks',
+              wipLimits: {},
+              queueProcessing: { enabled: false },
+              workflowAutomation: {
+                backlogToReady: true,
+                readyToExecuting: false,
+              },
+            }),
+            'utf-8',
+          );
+
+          const callback = (globalThis as any).__piFactoryPlanCallbacks?.get(task.id);
+          if (!callback) {
+            throw new Error('save_plan callback not registered');
+          }
+
+          callback({
+            acceptanceCriteria: ['Task is planned after toggle'],
+            plan: {
+              goal: 'Goal',
+              steps: ['Step one'],
+              validation: ['Validate one'],
+              cleanup: [],
+              generatedAt: new Date().toISOString(),
+            },
+          });
+        },
+        abort: async () => {},
+      },
+    });
+
+    const broadcasts: any[] = [];
+
+    const result = await planTask({
+      task,
+      workspaceId: 'workspace-test',
+      workspacePath,
+      broadcastToWorkspace: (event: any) => broadcasts.push(event),
+    });
+
+    expect(result).not.toBeNull();
+
+    const persistedTask = parseTaskFile(task.filePath);
+    expect(persistedTask.frontmatter.phase).toBe('ready');
+
+    expect(
+      broadcasts.some((event) => (
+        event.type === 'task:moved'
+        && event.task?.id === task.id
+        && event.from === 'backlog'
+        && event.to === 'ready'
+      )),
+    ).toBe(true);
+  });
+
+  it('auto-promotes backlog tasks using active workspace settings even when task workspace metadata is empty', async () => {
+    const workspacePath = mkdtempSync(join(tmpdir(), 'pi-factory-plan-task-'));
+    tempDirs.push(workspacePath);
+
+    const piDir = join(workspacePath, '.pi');
+    const tasksDir = join(piDir, 'tasks');
+    mkdirSync(tasksDir, { recursive: true });
+
+    writeFileSync(
+      join(piDir, 'factory.json'),
+      JSON.stringify({
+        taskLocations: ['.pi/tasks'],
+        defaultTaskLocation: '.pi/tasks',
+        wipLimits: {},
+        queueProcessing: { enabled: false },
+        workflowAutomation: {
+          backlogToReady: true,
+          readyToExecuting: false,
+        },
+      }),
+      'utf-8',
+    );
+
+    const { createTask, parseTaskFile, saveTaskFile } = await import('../src/task-service.js');
+    const { planTask } = await import('../src/agent-execution-service.js');
+
+    const task = createTask(workspacePath, tasksDir, {
+      content: 'Legacy task missing workspace metadata should still auto-promote',
+      acceptanceCriteria: [],
+    });
+
+    task.frontmatter.workspace = '';
+    saveTaskFile(task);
+
+    createAgentSessionMock.mockResolvedValue({
+      session: {
+        subscribe: () => () => {},
+        prompt: async () => {
+          const callback = (globalThis as any).__piFactoryPlanCallbacks?.get(task.id);
+          if (!callback) {
+            throw new Error('save_plan callback not registered');
+          }
+
+          callback({
+            acceptanceCriteria: ['Task is planned'],
+            plan: {
+              goal: 'Goal',
+              steps: ['Step one'],
+              validation: ['Validate one'],
+              cleanup: [],
+              generatedAt: new Date().toISOString(),
+            },
+          });
+        },
+        abort: async () => {},
+      },
+    });
+
+    const broadcasts: any[] = [];
+    const result = await planTask({
+      task,
+      workspaceId: 'workspace-test',
+      workspacePath,
+      broadcastToWorkspace: (event: any) => broadcasts.push(event),
+    });
+
+    expect(result).not.toBeNull();
+
+    const persistedTask = parseTaskFile(task.filePath);
+    expect(persistedTask.frontmatter.phase).toBe('ready');
+
+    expect(
+      broadcasts.some((event) => (
+        event.type === 'task:moved'
+        && event.task?.id === task.id
+        && event.from === 'backlog'
+        && event.to === 'ready'
+      )),
+    ).toBe(true);
+  });
+
   it('auto-promotes backlog tasks using global workflow defaults when workspace overrides are unset', async () => {
     mockedFactorySettings = {
       workflowDefaults: {
