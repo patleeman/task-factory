@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Reusable model profiles in Settings (named planning+execution model/thinking presets), with New Task profile dropdown that applies and locks model selectors when selected.
 
 ### Changed
+- Browser tab title now reflects the active workspace name (e.g. `my-project | Task Factory`), reverting to `Task Factory` when no workspace is open.
 - Added pre-planning hook support (`prePlanningSkills` / `pre-planning`) across task defaults, task forms, and planning lifecycle execution.
 - Skill lane assignment is now universal: any discovered skill can be used in pre-planning, pre-execution, or post-execution lanes without hook-compatibility filtering.
 - Default post-execution skill order now includes `update-docs` for new tasks.

@@ -206,6 +206,19 @@ export function WorkspacePage() {
   const planningStream = usePlanningStreaming(workspaceId || null, subscribe, planningMessages)
   const { modelConfig: foremanModelConfig, setModelConfig: setForemanModelConfig } = useForemanModel(workspaceId || null)
 
+  // Update browser tab title to include the workspace name.
+  useEffect(() => {
+    if (workspace) {
+      const name = workspace.path.split('/').filter(Boolean).pop() || workspace.name
+      document.title = `${name} | Task Factory`
+    } else {
+      document.title = 'Task Factory'
+    }
+    return () => {
+      document.title = 'Task Factory'
+    }
+  }, [workspace])
+
   useEffect(() => {
     let cancelled = false
 
