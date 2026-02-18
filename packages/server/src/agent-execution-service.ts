@@ -401,6 +401,20 @@ interface TaskSession {
   activeToolName?: string;
   /** Prevent duplicate watchdog recovery terminal events */
   watchdogRecovered?: boolean;
+  /** Monotonic execution turn counter for reliability telemetry */
+  activeTurnNumber?: number;
+  /** Stable identifier for the currently running execution turn */
+  activeTurnId?: string;
+  /** Turn start timestamp in ms since epoch */
+  activeTurnStartedAtMs?: number;
+  /** First assistant token timestamp in ms since epoch */
+  activeTurnFirstTokenAtMs?: number;
+  /** Prevent duplicate first-token telemetry per turn */
+  activeTurnFirstTokenEmitted?: boolean;
+  /** Prevent duplicate turn-end telemetry per turn */
+  activeTurnTelemetryClosed?: boolean;
+  /** Captures assistant stopReason=error for turn-end telemetry */
+  activeTurnErrorMessage?: string;
 }
 
 const activeSessions = new Map<string, TaskSession>();
@@ -623,6 +637,190 @@ interface ExecutionWatchdogNotice {
   toolCallId?: string;
 }
 
+type ExecutionReliabilitySignal =
+  | 'turn_start'
+  | 'first_token'
+  | 'turn_end'
+  | 'turn_stall_recovered'
+  | 'provider_retry_start'
+  | 'provider_retry_end'
+  | 'compaction_end';
+
+interface ExecutionReliabilityMetadata {
+  [key: string]: unknown;
+  kind: 'execution-reliability';
+  signal: ExecutionReliabilitySignal;
+  eventType: 'turn' | 'provider_retry' | 'compaction';
+  sessionId: string;
+  turnId?: string;
+  turnNumber?: number;
+  source?: string;
+  outcome?: string;
+  durationMs?: number;
+  timeToFirstTokenMs?: number | null;
+  stallPhase?: ExecutionWatchdogPhase;
+  timeoutMs?: number;
+  toolName?: string;
+  toolCallId?: string;
+  attempt?: number;
+  maxAttempts?: number;
+  delayMs?: number;
+  aborted?: boolean;
+  willRetry?: boolean;
+  errorMessage?: string;
+}
+
+interface ExecutionTurnEndTelemetryOptions {
+  outcome: 'success' | 'error' | 'watchdog_recovered';
+  source: string;
+  errorMessage?: string;
+  stallPhase?: ExecutionWatchdogPhase;
+  timeoutMs?: number;
+  toolName?: string;
+  toolCallId?: string;
+}
+
+function createExecutionReliabilityMetadata(
+  session: TaskSession,
+  signal: ExecutionReliabilitySignal,
+  eventType: ExecutionReliabilityMetadata['eventType'],
+  details: Partial<Omit<ExecutionReliabilityMetadata, 'kind' | 'signal' | 'eventType' | 'sessionId' | 'turnId' | 'turnNumber'>> = {},
+): ExecutionReliabilityMetadata {
+  return {
+    kind: 'execution-reliability',
+    signal,
+    eventType,
+    sessionId: session.id,
+    turnId: session.activeTurnId,
+    turnNumber: session.activeTurnNumber,
+    ...details,
+  };
+}
+
+function emitExecutionReliabilitySignal(
+  session: TaskSession,
+  workspaceId: string,
+  taskId: string,
+  signal: ExecutionReliabilitySignal,
+  eventType: ExecutionReliabilityMetadata['eventType'],
+  message: string,
+  details: Partial<Omit<ExecutionReliabilityMetadata, 'kind' | 'signal' | 'eventType' | 'sessionId' | 'turnId' | 'turnNumber'>> = {},
+): void {
+  const metadata = createExecutionReliabilityMetadata(session, signal, eventType, details);
+
+  broadcastActivityEntry(
+    session.broadcastToWorkspace,
+    createSystemEvent(workspaceId, taskId, 'phase-change', message, metadata),
+    `execution reliability ${signal}`,
+  );
+}
+
+function startExecutionTurnTelemetry(
+  session: TaskSession,
+  workspaceId: string,
+  taskId: string,
+): void {
+  const turnNumber = (session.activeTurnNumber ?? 0) + 1;
+  session.activeTurnNumber = turnNumber;
+  session.activeTurnId = crypto.randomUUID();
+  session.activeTurnStartedAtMs = Date.now();
+  session.activeTurnFirstTokenAtMs = undefined;
+  session.activeTurnFirstTokenEmitted = false;
+  session.activeTurnTelemetryClosed = false;
+  session.activeTurnErrorMessage = undefined;
+
+  emitExecutionReliabilitySignal(
+    session,
+    workspaceId,
+    taskId,
+    'turn_start',
+    'turn',
+    `Execution reliability: turn ${turnNumber} started`,
+    {
+      source: 'watchdog:start',
+      outcome: 'started',
+    },
+  );
+}
+
+function emitExecutionFirstTokenTelemetryIfNeeded(
+  session: TaskSession,
+  workspaceId: string,
+  taskId: string,
+  source: string,
+): void {
+  if (!session.activeTurnId || session.activeTurnFirstTokenEmitted) {
+    return;
+  }
+
+  if (typeof session.activeTurnStartedAtMs !== 'number') {
+    return;
+  }
+
+  const firstTokenAtMs = Date.now();
+  const latencyMs = Math.max(0, firstTokenAtMs - session.activeTurnStartedAtMs);
+
+  session.activeTurnFirstTokenAtMs = firstTokenAtMs;
+  session.activeTurnFirstTokenEmitted = true;
+
+  emitExecutionReliabilitySignal(
+    session,
+    workspaceId,
+    taskId,
+    'first_token',
+    'turn',
+    `Execution reliability: first token observed for turn ${session.activeTurnNumber ?? '?'} after ${latencyMs}ms`,
+    {
+      source,
+      outcome: 'observed',
+      timeToFirstTokenMs: latencyMs,
+    },
+  );
+}
+
+function closeExecutionTurnTelemetryIfNeeded(
+  session: TaskSession,
+  workspaceId: string,
+  taskId: string,
+  options: ExecutionTurnEndTelemetryOptions,
+): void {
+  if (!session.activeTurnId || session.activeTurnTelemetryClosed) {
+    return;
+  }
+
+  if (typeof session.activeTurnStartedAtMs !== 'number') {
+    return;
+  }
+
+  const endedAtMs = Date.now();
+  const durationMs = Math.max(0, endedAtMs - session.activeTurnStartedAtMs);
+  const firstTokenMs = typeof session.activeTurnFirstTokenAtMs === 'number'
+    ? Math.max(0, session.activeTurnFirstTokenAtMs - session.activeTurnStartedAtMs)
+    : null;
+
+  emitExecutionReliabilitySignal(
+    session,
+    workspaceId,
+    taskId,
+    'turn_end',
+    'turn',
+    `Execution reliability: turn ${session.activeTurnNumber ?? '?'} ended (${options.outcome}) in ${durationMs}ms`,
+    {
+      source: options.source,
+      outcome: options.outcome,
+      durationMs,
+      timeToFirstTokenMs: firstTokenMs,
+      errorMessage: options.errorMessage,
+      stallPhase: options.stallPhase,
+      timeoutMs: options.timeoutMs,
+      toolName: options.toolName,
+      toolCallId: options.toolCallId,
+    },
+  );
+
+  session.activeTurnTelemetryClosed = true;
+}
+
 function isExecutionWatchdogEnabled(session: TaskSession): boolean {
   return session.watchdogsEnabled === true;
 }
@@ -690,6 +888,14 @@ function markExecutionTurnEventReceived(session: TaskSession): void {
   clearNoFirstEventWatchdog(session);
 }
 
+function isAssistantMessageEvent(event: AgentSessionEvent): boolean {
+  if (event.type !== 'message_start' && event.type !== 'message_update' && event.type !== 'message_end') {
+    return false;
+  }
+
+  return (event.message as any)?.role === 'assistant';
+}
+
 async function recoverFromExecutionWatchdogTimeout(
   session: TaskSession,
   workspaceId: string,
@@ -716,6 +922,32 @@ async function recoverFromExecutionWatchdogTimeout(
   session.currentThinkingText = '';
   session.toolCallArgs.clear();
   session.toolCallOutput.clear();
+
+  emitExecutionReliabilitySignal(
+    session,
+    workspaceId,
+    taskId,
+    'turn_stall_recovered',
+    'turn',
+    `Execution reliability: watchdog recovered stalled turn ${session.activeTurnNumber ?? '?'} (${notice.phase})`,
+    {
+      source: `watchdog:${notice.phase}`,
+      outcome: 'recovered',
+      stallPhase: notice.phase,
+      timeoutMs: notice.timeoutMs,
+      toolName: notice.toolName,
+      toolCallId: notice.toolCallId,
+    },
+  );
+
+  closeExecutionTurnTelemetryIfNeeded(session, workspaceId, taskId, {
+    outcome: 'watchdog_recovered',
+    source: `watchdog:${notice.phase}`,
+    stallPhase: notice.phase,
+    timeoutMs: notice.timeoutMs,
+    toolName: notice.toolName,
+    toolCallId: notice.toolCallId,
+  });
 
   broadcastActivityEntry(
     session.broadcastToWorkspace,
@@ -928,6 +1160,7 @@ function startExecutionTurnWatchdogs(
   clearExecutionTurnWatchdogs(session);
   session.watchdogRecovered = false;
   session.sawTurnEvent = false;
+  startExecutionTurnTelemetry(session, workspaceId, taskId);
   armNoFirstEventWatchdog(session, workspaceId, taskId);
   armMaxTurnDurationWatchdog(session, workspaceId, taskId);
 }
@@ -1437,6 +1670,12 @@ async function handleAgentTurnEnd(
       `[AgentExecution] Agent finished without signaling completion for task ${task.id} — ${isExecutingTask ? 'awaiting user input' : 'idle chat turn'}`,
     );
 
+    closeExecutionTurnTelemetryIfNeeded(session, workspaceId, task.id, {
+      outcome: session.activeTurnErrorMessage ? 'error' : 'success',
+      source: 'handleAgentTurnEnd:awaiting-input',
+      errorMessage: session.activeTurnErrorMessage,
+    });
+
     session.status = 'idle';
     session.awaitingUserInput = isExecutingTask;
 
@@ -1541,6 +1780,12 @@ async function handleAgentTurnEnd(
     session.status = 'completed';
   }
 
+  closeExecutionTurnTelemetryIfNeeded(session, workspaceId, task.id, {
+    outcome: 'success',
+    source: 'handleAgentTurnEnd:task-complete',
+    errorMessage: session.activeTurnErrorMessage,
+  });
+
   session.endTime = new Date().toISOString();
 
   broadcastActivityEntry(
@@ -1589,6 +1834,15 @@ function handleAgentError(
     console.warn(`[AgentExecution] Ignoring error for stale session on task ${task.id}:`, err);
     return;
   }
+
+  const normalizedError = normalizeOptionalErrorMessage(err) ?? String(err);
+  session.activeTurnErrorMessage = normalizedError;
+
+  closeExecutionTurnTelemetryIfNeeded(session, workspaceId, task.id, {
+    outcome: 'error',
+    source: 'handleAgentError',
+    errorMessage: normalizedError,
+  });
 
   cleanupCompletionCallback(task.id);
   cleanupAttachFileCallback(task.id);
@@ -1730,6 +1984,10 @@ function handlePiEvent(
     if (event.type !== 'tool_execution_end') {
       clearPostToolStallWatchdog(session);
     }
+
+    if (isAssistantMessageEvent(event)) {
+      emitExecutionFirstTokenTelemetryIfNeeded(session, workspaceId, taskId, `event:${event.type}`);
+    }
   }
 
   switch (event.type) {
@@ -1844,6 +2102,8 @@ function handlePiEvent(
 
       const assistantTurnError = getAssistantTurnErrorMessage(message);
       if (assistantTurnError) {
+        session.activeTurnErrorMessage = assistantTurnError;
+
         broadcastActivityEntry(
           broadcast,
           createSystemEvent(
@@ -2012,6 +2272,22 @@ function handlePiEvent(
 
     case 'auto_compaction_end': {
       const notice = buildCompactionEndNotice(event);
+      emitExecutionReliabilitySignal(
+        session,
+        workspaceId,
+        taskId,
+        'compaction_end',
+        'compaction',
+        `Execution reliability: compaction ${notice.outcome}`,
+        {
+          source: 'event:auto_compaction_end',
+          outcome: notice.outcome,
+          aborted: event.aborted,
+          willRetry: event.willRetry,
+          errorMessage: typeof event.errorMessage === 'string' ? event.errorMessage : undefined,
+        },
+      );
+
       broadcastActivityEntry(
         broadcast,
         createSystemEvent(
@@ -2036,6 +2312,23 @@ function handlePiEvent(
 
     case 'auto_retry_start': {
       const notice = buildAutoRetryStartNotice(event);
+      emitExecutionReliabilitySignal(
+        session,
+        workspaceId,
+        taskId,
+        'provider_retry_start',
+        'provider_retry',
+        `Execution reliability: provider retry attempt ${event.attempt}/${event.maxAttempts} started`,
+        {
+          source: 'event:auto_retry_start',
+          outcome: 'started',
+          attempt: event.attempt,
+          maxAttempts: event.maxAttempts,
+          delayMs: event.delayMs,
+          errorMessage: notice.errorMessage,
+        },
+      );
+
       broadcastActivityEntry(
         broadcast,
         createSystemEvent(
@@ -2060,6 +2353,22 @@ function handlePiEvent(
 
     case 'auto_retry_end': {
       const notice = buildAutoRetryEndNotice(event);
+      emitExecutionReliabilitySignal(
+        session,
+        workspaceId,
+        taskId,
+        'provider_retry_end',
+        'provider_retry',
+        `Execution reliability: provider retry attempt ${event.attempt} ${notice.outcome}`,
+        {
+          source: 'event:auto_retry_end',
+          outcome: notice.outcome,
+          attempt: event.attempt,
+          maxAttempts: event.attempt,
+          errorMessage: notice.errorMessage,
+        },
+      );
+
       broadcastActivityEntry(
         broadcast,
         createSystemEvent(
