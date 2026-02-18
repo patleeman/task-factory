@@ -382,6 +382,8 @@ interface TaskSession {
   task?: Task;
   /** True when an executing turn has ended and the agent is waiting for user input */
   awaitingUserInput?: boolean;
+  /** Watchdog timer for post-tool stalls (cleared on follow-up events) */
+  postToolStallTimer?: ReturnType<typeof setTimeout>;
 }
 
 const activeSessions = new Map<string, TaskSession>();
@@ -581,6 +583,100 @@ function broadcastTaskContextUsage(session: TaskSession, taskId: string): void {
     taskId,
     usage,
   });
+}
+
+const POST_TOOL_STALL_TIMEOUT_MS = 2 * 60 * 1000;
+
+function clearPostToolStallWatchdog(session: TaskSession): void {
+  if (!session.postToolStallTimer) {
+    return;
+  }
+
+  clearTimeout(session.postToolStallTimer);
+  session.postToolStallTimer = undefined;
+}
+
+async function handlePostToolStallTimeout(
+  session: TaskSession,
+  workspaceId: string,
+  taskId: string,
+  toolName: string,
+  toolCallId: string,
+): Promise<void> {
+  clearPostToolStallWatchdog(session);
+
+  if (getActiveSession(taskId) !== session) {
+    return;
+  }
+
+  if (session.status !== 'running') {
+    return;
+  }
+
+  const timeoutSeconds = Math.max(1, Math.round(POST_TOOL_STALL_TIMEOUT_MS / 1000));
+
+  broadcastActivityEntry(
+    session.broadcastToWorkspace,
+    createSystemEvent(
+      workspaceId,
+      taskId,
+      'phase-change',
+      `Agent appears stuck after tool "${toolName}" (${timeoutSeconds}s without follow-up). Marking session idle so you can continue.`,
+      {
+        kind: 'agent-turn-stall',
+        phase: 'post-tool',
+        timeoutMs: POST_TOOL_STALL_TIMEOUT_MS,
+        toolName,
+        toolCallId,
+      },
+    ),
+    'post-tool stall timeout event',
+  );
+
+  session.status = 'idle';
+  session.awaitingUserInput = false;
+  session.endTime = new Date().toISOString();
+
+  session.broadcastToWorkspace?.({
+    type: 'agent:execution_status',
+    taskId,
+    status: 'idle',
+  });
+
+  broadcastTaskContextUsage(session, taskId);
+
+  cleanupCompletionCallback(taskId);
+  cleanupAttachFileCallback(taskId);
+
+  session.unsubscribe?.();
+  session.unsubscribe = undefined;
+
+  const piSession = session.piSession;
+  session.piSession = null;
+  try {
+    await piSession?.abort?.();
+  } catch (err) {
+    console.warn(`[AgentExecution] Failed to abort stalled session for ${taskId}:`, err);
+  }
+
+  clearActiveSessionIfOwned(taskId, session);
+}
+
+function armPostToolStallWatchdog(
+  session: TaskSession,
+  workspaceId: string,
+  taskId: string,
+  toolName: string,
+  toolCallId: string,
+): void {
+  clearPostToolStallWatchdog(session);
+
+  const timeout = setTimeout(() => {
+    void handlePostToolStallTimeout(session, workspaceId, taskId, toolName, toolCallId);
+  }, POST_TOOL_STALL_TIMEOUT_MS);
+
+  (timeout as { unref?: () => void }).unref?.();
+  session.postToolStallTimer = timeout;
 }
 
 type AutoCompactionEndEvent = Extract<AgentSessionEvent, { type: 'auto_compaction_end' }>;
@@ -1044,6 +1140,11 @@ async function runAgentExecution(
     // Must await so post-execution skills actually run (and errors are caught).
     await handleAgentTurnEnd(session, workspaceId, task);
   } catch (err) {
+    if (getActiveSession(task.id) !== session) {
+      console.warn(`[AgentExecution] Ignoring execution error for stale session on task ${task.id}:`, err);
+      return;
+    }
+
     console.error('Agent execution error:', err);
     handleAgentError(session, workspaceId, task, err);
   }
@@ -1058,6 +1159,8 @@ async function handleAgentTurnEnd(
   workspaceId: string,
   task: Task,
 ): Promise<void> {
+  clearPostToolStallWatchdog(session);
+
   if (getActiveSession(task.id) !== session) {
     console.warn(`[AgentExecution] Ignoring turn-end for stale session on task ${task.id}`);
     return;
@@ -1220,6 +1323,13 @@ function handleAgentError(
   task: Task,
   err: unknown,
 ): void {
+  clearPostToolStallWatchdog(session);
+
+  if (getActiveSession(task.id) !== session) {
+    console.warn(`[AgentExecution] Ignoring error for stale session on task ${task.id}:`, err);
+    return;
+  }
+
   cleanupCompletionCallback(task.id);
   cleanupAttachFileCallback(task.id);
   session.awaitingUserInput = false;
@@ -1345,6 +1455,10 @@ function handlePiEvent(
   onOutput?: (output: string) => void
 ): void {
   const broadcast = session.broadcastToWorkspace;
+
+  if (event.type !== 'tool_execution_end') {
+    clearPostToolStallWatchdog(session);
+  }
 
   switch (event.type) {
     case 'agent_start': {
@@ -1565,6 +1679,8 @@ function handlePiEvent(
       session.lastToolResultAt = Date.now();
       session.toolCallArgs.delete(event.toolCallId);
       session.toolCallOutput.delete(event.toolCallId);
+
+      armPostToolStallWatchdog(session, workspaceId, taskId, event.toolName, event.toolCallId);
       break;
     }
 
@@ -2009,6 +2125,8 @@ export async function stopTaskExecution(taskId: string): Promise<boolean> {
   if (!session || !session.piSession) {
     return false;
   }
+
+  clearPostToolStallWatchdog(session);
 
   // Abort the agent session via Pi SDK (interrupts current operation)
   try {

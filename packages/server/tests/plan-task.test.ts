@@ -940,6 +940,110 @@ describe('planTask', () => {
     ).toBe(true);
   });
 
+  it('surfaces a stall notice and clears the active session when no follow-up arrives after a tool result', async () => {
+    vi.useFakeTimers();
+
+    try {
+      const workspacePath = mkdtempSync(join(tmpdir(), 'pi-factory-plan-task-'));
+      tempDirs.push(workspacePath);
+
+      const tasksDir = join(workspacePath, '.pi', 'tasks');
+      mkdirSync(tasksDir, { recursive: true });
+
+      const { createTask, discoverTasks, moveTaskToPhase } = await import('../src/task-service.js');
+      const { executeTask, getActiveSession } = await import('../src/agent-execution-service.js');
+
+      const task = createTask(workspacePath, tasksDir, {
+        content: 'Detect and recover from post-tool stalls',
+        acceptanceCriteria: [],
+      });
+
+      const liveTasks = discoverTasks(tasksDir);
+      const liveTask = liveTasks.find((candidate) => candidate.id === task.id);
+      if (!liveTask) {
+        throw new Error('Live task not found for stall watchdog test');
+      }
+
+      moveTaskToPhase(liveTask, 'executing', 'system', 'Queue manager auto-assigned', liveTasks);
+
+      let subscriber: ((event: any) => void) | undefined;
+      let rejectPrompt: ((err: unknown) => void) | undefined;
+
+      createAgentSessionMock.mockResolvedValue({
+        session: {
+          subscribe: (listener: (event: any) => void) => {
+            subscriber = listener;
+            return () => {};
+          },
+          prompt: async () => {
+            subscriber?.({
+              type: 'tool_execution_start',
+              toolName: 'read',
+              toolCallId: 'call-stall',
+              args: { path: 'README.md' },
+            });
+
+            subscriber?.({
+              type: 'tool_execution_end',
+              toolName: 'read',
+              toolCallId: 'call-stall',
+              isError: false,
+              result: {
+                content: [{ type: 'text', text: 'done' }],
+              },
+            });
+
+            await new Promise<void>((_resolve, reject) => {
+              rejectPrompt = reject;
+            });
+          },
+          abort: async () => {
+            if (rejectPrompt) {
+              rejectPrompt(new Error('aborted'));
+              rejectPrompt = undefined;
+            }
+          },
+        },
+      });
+
+      const broadcasts: any[] = [];
+
+      await executeTask({
+        task: liveTask,
+        workspaceId: 'workspace-test',
+        workspacePath,
+        broadcastToWorkspace: (event: any) => broadcasts.push(event),
+      });
+
+      expect(getActiveSession(task.id)).toBeDefined();
+
+      await vi.advanceTimersByTimeAsync(125_000);
+
+      await vi.waitFor(() => {
+        expect(getActiveSession(task.id)).toBeUndefined();
+      });
+
+      expect(
+        broadcasts.some((event) => (
+          event.type === 'activity:entry'
+          && event.entry?.type === 'system-event'
+          && typeof event.entry?.message === 'string'
+          && event.entry.message.includes('Agent appears stuck after tool "read"')
+        )),
+      ).toBe(true);
+
+      expect(
+        broadcasts.some((event) => (
+          event.type === 'agent:execution_status'
+          && event.taskId === task.id
+          && event.status === 'idle'
+        )),
+      ).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('auto-promotes backlog tasks to ready when backlog automation is enabled', async () => {
     const workspacePath = mkdtempSync(join(tmpdir(), 'pi-factory-plan-task-'));
     tempDirs.push(workspacePath);
