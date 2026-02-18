@@ -304,8 +304,10 @@ describe('moveWorkspaceLocalStorage', () => {
     const { moveWorkspaceLocalStorage } = await import('../src/workspace-local-storage-migration-service.js');
     const result = await moveWorkspaceLocalStorage(id);
 
+    // factory.json must now be at the global artifact root — local .taskfactory is deleted.
+    expect(existsSync(join(workspacePath, '.taskfactory'))).toBe(false);
     const configOnDisk = JSON.parse(
-      readFileSync(join(workspacePath, '.taskfactory', 'factory.json'), 'utf-8'),
+      readFileSync(join(result.targetArtifactRoot!, 'factory.json'), 'utf-8'),
     ) as { artifactRoot?: string; localStorageDecision?: string; defaultTaskLocation?: string };
 
     expect(configOnDisk.artifactRoot).toBe(result.targetArtifactRoot);

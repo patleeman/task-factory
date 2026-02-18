@@ -43,15 +43,16 @@ describe('workspace-service workspace storage roots', () => {
 
     const workspace = await createWorkspace(workspacePath, 'my-project');
 
-    // factory.json (the config file) must stay in the workspace-local .taskfactory dir.
-    const configPath = join(workspacePath, '.taskfactory', 'factory.json');
-    expect(existsSync(configPath)).toBe(true);
-    expect(existsSync(join(workspacePath, '.pi', 'factory.json'))).toBe(false);
-
-    // The artifact root and task location must point into the global dir, not the workspace dir.
     const expectedArtifactRoot = join(homePath, '.taskfactory', 'workspaces', 'my-project');
     const expectedTasksDir = join(expectedArtifactRoot, 'tasks');
 
+    // factory.json must live in the global artifact root, not the workspace dir.
+    const configPath = join(expectedArtifactRoot, 'factory.json');
+    expect(existsSync(configPath)).toBe(true);
+    expect(existsSync(join(workspacePath, '.taskfactory', 'factory.json'))).toBe(false);
+    expect(existsSync(join(workspacePath, '.pi', 'factory.json'))).toBe(false);
+
+    // The artifact root and task location must point into the global dir.
     expect(workspace.config.artifactRoot).toBe(expectedArtifactRoot);
     expect(workspace.config.defaultTaskLocation).toBe(expectedTasksDir);
     expect(workspace.config.taskLocations).toContain(expectedTasksDir);

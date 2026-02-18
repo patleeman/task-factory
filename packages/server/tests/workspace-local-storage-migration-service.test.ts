@@ -136,8 +136,10 @@ describe('workspace local storage migration — status detection', () => {
   it('returns moved when workspace has localStorageDecision="moved"', async () => {
     setTempHome();
     const workspacePath = createTempDir('ws-moved-');
+    // Use a real temp path — artifactRoot is now created on disk by createWorkspace/updateWorkspaceConfig.
+    const fakeGlobalRoot = createTempDir('ws-moved-global-root-');
 
-    writeLocalWorkspaceConfig(workspacePath, { localStorageDecision: 'moved', artifactRoot: '/some/global/root' });
+    writeLocalWorkspaceConfig(workspacePath, { localStorageDecision: 'moved', artifactRoot: fakeGlobalRoot });
     mkdirSync(join(workspacePath, '.taskfactory', 'tasks'), { recursive: true });
 
     const { loadWorkspace } = await import('../src/workspace-service.js');
@@ -189,14 +191,15 @@ describe('workspace local storage migration — move', () => {
     expect(existsSync(join(globalRoot, 'tasks', 'PIFA-1', 'task.md'))).toBe(true);
     expect(existsSync(join(globalRoot, 'planning-messages.json'))).toBe(true);
 
-    // factory.json should still be in local .taskfactory
-    const localConfig = JSON.parse(
-      readFileSync(join(workspacePath, '.taskfactory', 'factory.json'), 'utf-8'),
+    // factory.json must now be in the global artifact root, not the local workspace dir.
+    expect(existsSync(join(workspacePath, '.taskfactory'))).toBe(false);
+    const globalConfig = JSON.parse(
+      readFileSync(join(globalRoot, 'factory.json'), 'utf-8'),
     ) as { artifactRoot: string; localStorageDecision: string; defaultTaskLocation: string };
 
-    expect(localConfig.artifactRoot).toBe(globalRoot);
-    expect(localConfig.localStorageDecision).toBe('moved');
-    expect(localConfig.defaultTaskLocation).toBe(join(globalRoot, 'tasks'));
+    expect(globalConfig.artifactRoot).toBe(globalRoot);
+    expect(globalConfig.localStorageDecision).toBe('moved');
+    expect(globalConfig.defaultTaskLocation).toBe(join(globalRoot, 'tasks'));
 
     // Status must now show 'moved', not 'pending'
     const statusAfter = await getWorkspaceStorageMigrationStatus(workspace!.id);

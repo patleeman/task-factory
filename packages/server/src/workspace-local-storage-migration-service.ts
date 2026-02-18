@@ -174,7 +174,8 @@ export async function moveWorkspaceLocalStorage(
 
   await mkdir(targetRoot, { recursive: true });
 
-  // Artifact paths to migrate (everything except factory.json which stays local).
+  // Artifact paths to migrate — factory.json is handled separately via
+  // updateWorkspaceConfig which writes the updated config to the new root.
   const artifacts: Array<{ from: string; to: string }> = [
     { from: join(localRoot, 'tasks'), to: join(targetRoot, 'tasks') },
     { from: join(localRoot, 'planning-attachments'), to: join(targetRoot, 'planning-attachments') },
@@ -204,7 +205,8 @@ export async function moveWorkspaceLocalStorage(
     }
   }
 
-  // Update tasks location to point into the new global root.
+  // Write the updated config (including new artifactRoot) to the global root,
+  // and sync the registry. updateWorkspaceConfig handles both.
   const newTasksDir = join(targetRoot, 'tasks');
   await updateWorkspaceConfig(workspace, {
     artifactRoot: targetRoot,
@@ -212,6 +214,15 @@ export async function moveWorkspaceLocalStorage(
     taskLocations: [newTasksDir],
     defaultTaskLocation: newTasksDir,
   });
+
+  // Remove the old local .taskfactory directory entirely — factory.json has been
+  // written to the new global root by updateWorkspaceConfig, so nothing important
+  // remains here.
+  try {
+    await rm(localRoot, { recursive: true, force: true });
+  } catch (err) {
+    console.warn(`[WorkspaceStorageMigration] Failed to remove legacy local storage dir ${localRoot}:`, err);
+  }
 
   return {
     state: 'moved',

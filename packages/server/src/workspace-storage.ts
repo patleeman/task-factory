@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'fs';
 import { isAbsolute, join } from 'path';
 import type { WorkspaceConfig } from '@task-factory/shared';
+import { getWorkspaceRegistryPath } from './taskfactory-home.js';
 
 export const WORKSPACE_STORAGE_DIRNAME = '.taskfactory';
 export const LEGACY_WORKSPACE_STORAGE_DIRNAME = '.pi';
@@ -75,10 +76,28 @@ export function resolveExistingTasksDirFromWorkspacePath(
 }
 
 export function loadWorkspaceConfigFromDiskSync(workspacePath: string): WorkspaceConfig | null {
-  const preferredPath = getWorkspaceStoragePath(workspacePath, 'factory.json');
-  const legacyPath = getLegacyWorkspaceStoragePath(workspacePath, 'factory.json');
+  // Check the registry for an artifact root so we find factory.json in the right place.
+  let registryArtifactRoot: string | undefined;
+  try {
+    const registry = JSON.parse(readFileSync(getWorkspaceRegistryPath(), 'utf-8')) as Array<{
+      path: string;
+      artifactRoot?: string;
+    }>;
+    registryArtifactRoot = registry.find((e) => e.path === workspacePath)?.artifactRoot;
+  } catch {
+    // Registry unreadable — proceed with local fallbacks.
+  }
 
-  for (const candidatePath of [preferredPath, legacyPath]) {
+  const candidatePaths: string[] = [];
+  if (registryArtifactRoot) {
+    candidatePaths.push(join(registryArtifactRoot, 'factory.json'));
+  }
+  candidatePaths.push(
+    getWorkspaceStoragePath(workspacePath, 'factory.json'),
+    getLegacyWorkspaceStoragePath(workspacePath, 'factory.json'),
+  );
+
+  for (const candidatePath of candidatePaths) {
     try {
       const content = readFileSync(candidatePath, 'utf-8');
       return JSON.parse(content) as WorkspaceConfig;

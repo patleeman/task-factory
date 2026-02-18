@@ -49,6 +49,11 @@ export function getTaskFactoryHomeDir(): string {
   return TASK_FACTORY_HOME_DIR;
 }
 
+/** Path to the workspace registry file: `~/.taskfactory/workspaces.json`. */
+export function getWorkspaceRegistryPath(): string {
+  return join(TASK_FACTORY_HOME_DIR, 'workspaces.json');
+}
+
 export function resolveTaskFactoryHomePath(...segments: string[]): string {
   return join(getTaskFactoryHomeDir(), ...segments);
 }

@@ -2,14 +2,16 @@
 // Workspace Service
 // =============================================================================
 // Manages workspace configuration and discovery.
-// Workspace metadata lives in <workspace>/.taskfactory/factory.json.
-// A registry at ~/.taskfactory/workspaces.json tracks known workspace paths.
+// Workspace metadata lives in <artifactRoot>/factory.json (new) or
+// <workspace>/.taskfactory/factory.json (legacy fallback).
+// A registry at ~/.taskfactory/workspaces.json tracks known workspace paths
+// and artifact roots.
 
-import { existsSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { mkdir, readFile, writeFile, rm, rename, copyFile, cp, stat } from 'fs/promises';
 import { basename, dirname, join } from 'path';
 import type { Workspace, WorkspaceConfig } from '@task-factory/shared';
-import { getTaskFactoryHomeDir, getGlobalWorkspaceArtifactDir } from './taskfactory-home.js';
+import { getTaskFactoryHomeDir, getGlobalWorkspaceArtifactDir, getWorkspaceRegistryPath } from './taskfactory-home.js';
 import {
   DEFAULT_WORKSPACE_TASK_LOCATION,
   LEGACY_WORKSPACE_TASK_LOCATION,
@@ -24,7 +26,7 @@ import {
 // =============================================================================
 
 const REGISTRY_DIR = getTaskFactoryHomeDir();
-const REGISTRY_PATH = join(REGISTRY_DIR, 'workspaces.json');
+const REGISTRY_PATH = getWorkspaceRegistryPath();
 
 const DEFAULT_CONFIG: WorkspaceConfig = {
   taskLocations: [DEFAULT_WORKSPACE_TASK_LOCATION],
@@ -45,6 +47,8 @@ interface WorkspaceEntry {
   id: string;
   path: string;
   name: string;
+  /** Absolute path to the artifact root directory for this workspace. */
+  artifactRoot?: string;
 }
 
 async function loadRegistry(): Promise<WorkspaceEntry[]> {
@@ -59,6 +63,15 @@ async function loadRegistry(): Promise<WorkspaceEntry[]> {
 async function saveRegistry(entries: WorkspaceEntry[]): Promise<void> {
   await mkdir(REGISTRY_DIR, { recursive: true });
   await writeFile(REGISTRY_PATH, JSON.stringify(entries, null, 2), 'utf-8');
+}
+
+/** Synchronous registry read — used by code that cannot go async (e.g. sync config loaders). */
+export function loadRegistrySync(): WorkspaceEntry[] {
+  try {
+    return JSON.parse(readFileSync(REGISTRY_PATH, 'utf-8')) as WorkspaceEntry[];
+  } catch {
+    return [];
+  }
 }
 
 async function addToRegistry(entry: WorkspaceEntry): Promise<void> {
@@ -239,16 +252,33 @@ async function tryReadWorkspaceConfig(configPath: string): Promise<WorkspaceConf
 }
 
 // =============================================================================
-// Read workspace config from disk
+// Read/write workspace config from disk
 // =============================================================================
 
-async function readWorkspaceConfig(workspacePath: string): Promise<WorkspaceConfig | null> {
+/**
+ * Read factory.json from:
+ *  1. `<artifactRoot>/factory.json` (when artifactRoot is known from the registry)
+ *  2. `<workspace>/.taskfactory/factory.json` (legacy local fallback)
+ *  3. `<workspace>/.pi/factory.json` (oldest legacy fallback)
+ */
+async function readWorkspaceConfig(
+  workspacePath: string,
+  artifactRoot?: string,
+): Promise<WorkspaceConfig | null> {
+  // Try the artifact root first (new: factory.json lives with the other artifacts).
+  if (artifactRoot) {
+    const config = await tryReadWorkspaceConfig(join(artifactRoot, 'factory.json'));
+    if (config) return config;
+  }
+
+  // Legacy: factory.json in workspace-local .taskfactory.
   const primaryConfigPath = getWorkspaceStoragePath(workspacePath, 'factory.json');
   const primaryConfig = await tryReadWorkspaceConfig(primaryConfigPath);
   if (primaryConfig) {
     return primaryConfig;
   }
 
+  // Oldest legacy: factory.json in workspace-local .pi.
   const legacyConfigPath = getLegacyWorkspaceStoragePath(workspacePath, 'factory.json');
   const legacyConfig = await tryReadWorkspaceConfig(legacyConfigPath);
   if (!legacyConfig) {
@@ -256,18 +286,25 @@ async function readWorkspaceConfig(workspacePath: string): Promise<WorkspaceConf
   }
 
   const migratedLegacyConfig = migrateLegacyTaskLocations(legacyConfig);
-
   await migrateLegacyWorkspaceStorage(workspacePath);
   await writeWorkspaceConfig(workspacePath, migratedLegacyConfig);
 
   return migratedLegacyConfig;
 }
 
-async function writeWorkspaceConfig(workspacePath: string, config: WorkspaceConfig): Promise<void> {
-  const storageDir = getWorkspaceStoragePath(workspacePath);
+/**
+ * Write factory.json to `<artifactRoot>/factory.json` when an artifact root is
+ * available, otherwise fall back to the workspace-local `.taskfactory/` dir.
+ */
+async function writeWorkspaceConfig(
+  workspacePath: string,
+  config: WorkspaceConfig,
+  artifactRoot?: string,
+): Promise<void> {
+  const storageDir = artifactRoot ?? getWorkspaceStoragePath(workspacePath);
   await mkdir(storageDir, { recursive: true });
   await writeFile(
-    getWorkspaceStoragePath(workspacePath, 'factory.json'),
+    join(storageDir, 'factory.json'),
     JSON.stringify(normalizeWorkspaceConfig(config), null, 2),
     'utf-8',
   );
@@ -332,15 +369,16 @@ export async function createWorkspace(
     updatedAt: now,
   };
 
-  // Write config to workspace directory (factory.json always stays local).
-  await writeWorkspaceConfig(path, mergedConfig);
+  // Write factory.json to the artifact root (global) when one is set,
+  // otherwise fall back to the workspace-local .taskfactory directory.
+  await writeWorkspaceConfig(path, mergedConfig, mergedConfig.artifactRoot);
 
   // Ensure tasks directory exists in the artifact root.
   const tasksDir = getTasksDir(workspace);
   await mkdir(tasksDir, { recursive: true });
 
-  // Track in registry
-  await addToRegistry({ id, path, name: workspace.name });
+  // Track in registry — include artifactRoot so the server can find factory.json on startup.
+  await addToRegistry({ id, path, name: workspace.name, artifactRoot: mergedConfig.artifactRoot });
 
   return workspace;
 }
@@ -350,9 +388,14 @@ export async function loadWorkspace(path: string): Promise<Workspace | null> {
   const entries = await loadRegistry();
   const entry = entries.find((e) => e.path === path);
 
-  const config = await readWorkspaceConfig(path);
+  const config = await readWorkspaceConfig(path, entry?.artifactRoot);
 
   if (entry && config) {
+    // Backfill registry if config has an artifactRoot the registry doesn't know about yet
+    // (handles workspaces migrated before the registry stored artifactRoot).
+    if (config.artifactRoot && entry.artifactRoot !== config.artifactRoot) {
+      await addToRegistry({ ...entry, artifactRoot: config.artifactRoot });
+    }
     return {
       id: entry.id,
       path: entry.path,
@@ -376,8 +419,13 @@ export async function getWorkspaceById(id: string): Promise<Workspace | null> {
   const entry = entries.find((e) => e.id === id);
   if (!entry) return null;
 
-  const config = await readWorkspaceConfig(entry.path);
+  const config = await readWorkspaceConfig(entry.path, entry.artifactRoot);
   if (!config) return null;
+
+  // Backfill registry if config has an artifactRoot the registry doesn't know about yet.
+  if (config.artifactRoot && entry.artifactRoot !== config.artifactRoot) {
+    await addToRegistry({ ...entry, artifactRoot: config.artifactRoot });
+  }
 
   return {
     id: entry.id,
@@ -394,7 +442,7 @@ export async function listWorkspaces(): Promise<Workspace[]> {
   const workspaces: Workspace[] = [];
 
   for (const entry of entries) {
-    const config = await readWorkspaceConfig(entry.path);
+    const config = await readWorkspaceConfig(entry.path, entry.artifactRoot);
     if (config) {
       workspaces.push({
         id: entry.id,
@@ -421,7 +469,18 @@ export async function updateWorkspaceConfig(
   });
   workspace.updatedAt = new Date().toISOString();
 
-  await writeWorkspaceConfig(workspace.path, workspace.config);
+  const artifactRoot = workspace.config.artifactRoot;
+
+  // Write factory.json to the artifact root (or workspace-local fallback).
+  await writeWorkspaceConfig(workspace.path, workspace.config, artifactRoot);
+
+  // Keep the registry in sync so future startups find factory.json in the right place.
+  const entries = await loadRegistry();
+  const idx = entries.findIndex((e) => e.id === workspace.id);
+  if (idx >= 0 && entries[idx].artifactRoot !== artifactRoot) {
+    entries[idx].artifactRoot = artifactRoot;
+    await saveRegistry(entries);
+  }
 
   return workspace;
 }
@@ -440,8 +499,9 @@ export async function deleteWorkspace(id: string): Promise<boolean> {
   if (!entry) return false;
 
   // Read config to discover any custom artifact root before removing anything.
-  const config = await readWorkspaceConfig(entry.path);
-  const artifactRoot = resolveWorkspaceArtifactRoot(entry.path, config);
+  // Use registry artifactRoot so we find factory.json in the right place.
+  const config = await readWorkspaceConfig(entry.path, entry.artifactRoot);
+  const artifactRoot = entry.artifactRoot ?? resolveWorkspaceArtifactRoot(entry.path, config);
   const localStorageDir = getWorkspaceStoragePath(entry.path);
 
   const cleanupTargets = [
