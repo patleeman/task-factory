@@ -1912,8 +1912,15 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/steer', async (req, res) =>
     return;
   }
 
-  // Log the user steer message in activity
   const workspace = await getWorkspaceById(req.params.workspaceId);
+  let taskForMessage: ReturnType<typeof discoverTasks>[number] | undefined;
+  if (workspace) {
+    const tasksDir = getTasksDir(workspace);
+    const tasks = discoverTasks(tasksDir);
+    taskForMessage = tasks.find((task) => task.id === req.params.taskId);
+  }
+
+  // Log the user steer message in activity
   if (workspace) {
     const metadata = attachmentIds && attachmentIds.length > 0 ? { attachmentIds } : undefined;
     const entry = await createChatMessage(workspace.id, req.params.taskId, 'user', content, undefined, metadata);
@@ -1923,17 +1930,40 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/steer', async (req, res) =>
 
   // Load image attachments if referenced
   let steerImages: { type: 'image'; data: string; mimeType: string }[] | undefined;
-  if (attachmentIds && attachmentIds.length > 0 && workspace) {
-    const tasksDir = getTasksDir(workspace);
-    const tasks = discoverTasks(tasksDir);
-    const task = tasks.find(t => t.id === req.params.taskId);
-    if (task) {
-      const images = loadAttachmentsByIds(attachmentIds, task.frontmatter.attachments || [], workspace.path, req.params.taskId);
-      if (images.length > 0) steerImages = images;
-    }
+  if (attachmentIds && attachmentIds.length > 0 && workspace && taskForMessage) {
+    const images = loadAttachmentsByIds(
+      attachmentIds,
+      taskForMessage.frontmatter.attachments || [],
+      workspace.path,
+      req.params.taskId,
+    );
+    if (images.length > 0) steerImages = images;
   }
 
-  const ok = await steerTask(req.params.taskId, content, steerImages);
+  let ok = await steerTask(req.params.taskId, content, steerImages);
+
+  // If the UI had stale streaming state and no active session exists, gracefully
+  // fall back to a normal chat turn instead of dropping the user's message.
+  if (!ok && !getActiveSession(req.params.taskId) && workspace && taskForMessage) {
+    ok = taskForMessage.frontmatter.sessionFile
+      ? await resumeChat(
+        taskForMessage,
+        workspace.id,
+        workspace.path,
+        content,
+        (event) => broadcastToWorkspace(workspace.id, event),
+        steerImages,
+      )
+      : await startChat(
+        taskForMessage,
+        workspace.id,
+        workspace.path,
+        content,
+        (event) => broadcastToWorkspace(workspace.id, event),
+        steerImages,
+      );
+  }
+
   res.json({ ok });
 });
 
@@ -1946,8 +1976,15 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/follow-up', async (req, res
     return;
   }
 
-  // Log the user follow-up message in activity
   const workspace = await getWorkspaceById(req.params.workspaceId);
+  let taskForMessage: ReturnType<typeof discoverTasks>[number] | undefined;
+  if (workspace) {
+    const tasksDir = getTasksDir(workspace);
+    const tasks = discoverTasks(tasksDir);
+    taskForMessage = tasks.find((task) => task.id === req.params.taskId);
+  }
+
+  // Log the user follow-up message in activity
   if (workspace) {
     const metadata = attachmentIds && attachmentIds.length > 0 ? { attachmentIds } : undefined;
     const entry = await createChatMessage(workspace.id, req.params.taskId, 'user', content, undefined, metadata);
@@ -1957,17 +1994,40 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/follow-up', async (req, res
 
   // Load image attachments if referenced
   let followUpImages: { type: 'image'; data: string; mimeType: string }[] | undefined;
-  if (attachmentIds && attachmentIds.length > 0 && workspace) {
-    const tasksDir = getTasksDir(workspace);
-    const tasks = discoverTasks(tasksDir);
-    const task = tasks.find(t => t.id === req.params.taskId);
-    if (task) {
-      const images = loadAttachmentsByIds(attachmentIds, task.frontmatter.attachments || [], workspace.path, req.params.taskId);
-      if (images.length > 0) followUpImages = images;
-    }
+  if (attachmentIds && attachmentIds.length > 0 && workspace && taskForMessage) {
+    const images = loadAttachmentsByIds(
+      attachmentIds,
+      taskForMessage.frontmatter.attachments || [],
+      workspace.path,
+      req.params.taskId,
+    );
+    if (images.length > 0) followUpImages = images;
   }
 
-  const ok = await followUpTask(req.params.taskId, content, followUpImages);
+  let ok = await followUpTask(req.params.taskId, content, followUpImages);
+
+  // If there is no active session, promote this queued follow-up into a normal
+  // chat turn so the user's message is not silently dropped.
+  if (!ok && !getActiveSession(req.params.taskId) && workspace && taskForMessage) {
+    ok = taskForMessage.frontmatter.sessionFile
+      ? await resumeChat(
+        taskForMessage,
+        workspace.id,
+        workspace.path,
+        content,
+        (event) => broadcastToWorkspace(workspace.id, event),
+        followUpImages,
+      )
+      : await startChat(
+        taskForMessage,
+        workspace.id,
+        workspace.path,
+        content,
+        (event) => broadcastToWorkspace(workspace.id, event),
+        followUpImages,
+      );
+  }
+
   res.json({ ok });
 });
 
