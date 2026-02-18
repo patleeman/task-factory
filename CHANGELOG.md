@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- _None yet._
+
+### Changed
+- _None yet._
+
+### Fixed
+- _None yet._
+
+## [0.3.0] - 2026-02-18
+
+### Added
 - Idea backlog items can now be edited inline: clicking an idea's text opens an editable input; Enter or blur saves, Escape cancels. Backed by a new `PATCH /api/workspaces/:workspaceId/idea-backlog/items/:ideaId` endpoint.
 - Starter post-execution skill `update-docs` to keep `README.md`, `docs/**`, and `CHANGELOG.md` aligned with implementation changes.
 - Execution reliability telemetry signals in task activity metadata for turn lifecycle timing, stall recovery, provider retry outcomes, and compaction outcomes.
@@ -64,6 +75,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Workspace management
 - Task lifecycle: backlog → ready → executing → complete/archived
 
-[Unreleased]: https://github.com/patleeman/task-factory/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/patleeman/task-factory/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/patleeman/task-factory/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/patleeman/task-factory/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/patleeman/task-factory/releases/tag/v0.1.0
