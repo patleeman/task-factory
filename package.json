@@ -4,7 +4,7 @@
   "description": "A lean manufacturing-inspired task queue system for AI agents",
   "type": "module",
   "bin": {
-    "task-factory": "./bin/task-factory.js"
+    "task-factory": "bin/task-factory.js"
   },
   "files": [
     "bin/",
