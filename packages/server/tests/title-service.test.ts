@@ -12,7 +12,11 @@ vi.mock('@mariozechner/pi-ai', () => ({
 }));
 
 vi.mock('@mariozechner/pi-coding-agent', () => ({
-  AuthStorage: class AuthStorage {},
+  AuthStorage: class AuthStorage {
+    static create(): AuthStorage {
+      return new AuthStorage();
+    }
+  },
   createAgentSession: (...args: unknown[]) => mocks.createAgentSession(...args),
   ModelRegistry: class ModelRegistry {
     getAvailable(...args: unknown[]) {

@@ -663,7 +663,7 @@ async function getOrCreateSession(
   planningSessions.set(workspaceId, session);
 
   try {
-    const authStorage = new AuthStorage(getTaskFactoryAuthPath());
+    const authStorage = AuthStorage.create(getTaskFactoryAuthPath());
     const modelRegistry = new ModelRegistry(authStorage);
     const loader = new DefaultResourceLoader({
       cwd: workspace.path,
@@ -1805,7 +1805,7 @@ async function sendToAgent(
 
           session.workspacePath = workspace.path;
 
-          const authStorage = new AuthStorage(getTaskFactoryAuthPath());
+          const authStorage = AuthStorage.create(getTaskFactoryAuthPath());
           const modelRegistry = new ModelRegistry(authStorage);
           const loader = new DefaultResourceLoader({
             cwd: workspace.path,

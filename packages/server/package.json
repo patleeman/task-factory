@@ -13,8 +13,8 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "@mariozechner/pi-ai": "^0.52.12",
-    "@mariozechner/pi-coding-agent": "^0.52.10",
+    "@mariozechner/pi-ai": "^0.53.0",
+    "@mariozechner/pi-coding-agent": "^0.53.0",
     "@task-factory/shared": "file:../shared",
     "cors": "^2.8.5",
     "express": "^4.21.2",

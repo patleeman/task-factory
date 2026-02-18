@@ -1004,7 +1004,7 @@ import {
 app.get('/api/pi/available-models', async (_req, res) => {
   try {
     const { AuthStorage, ModelRegistry } = await import('@mariozechner/pi-coding-agent');
-    const authStorage = new AuthStorage(getTaskFactoryAuthPath());
+    const authStorage = AuthStorage.create(getTaskFactoryAuthPath());
     const modelRegistry = new ModelRegistry(authStorage);
     const available = modelRegistry.getAvailable();
     const models = available.map((m: any) => ({
@@ -2837,7 +2837,7 @@ app.post('/api/workspaces/:workspaceId/task-form/open', async (req, res) => {
     },
     getAvailableModels: async () => {
       const { AuthStorage, ModelRegistry } = await import('@mariozechner/pi-coding-agent');
-      const auth = new AuthStorage(getTaskFactoryAuthPath());
+      const auth = AuthStorage.create(getTaskFactoryAuthPath());
       const registry = new ModelRegistry(auth);
       return registry.getAvailable();
     },

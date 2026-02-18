@@ -34,7 +34,7 @@
   },
   "dependencies": {
     "@clack/prompts": "^0.10.0",
-    "@mariozechner/pi-coding-agent": "^0.52.10",
+    "@mariozechner/pi-coding-agent": "^0.53.0",
     "@sinclair/typebox": "^0.34.48",
     "chalk": "^5.4.1",
     "cli-table3": "^0.6.5",

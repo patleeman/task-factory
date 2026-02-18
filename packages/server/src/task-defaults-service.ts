@@ -768,7 +768,7 @@ export function validateTaskDefaults(
 
 export async function loadAvailableModelsForDefaults(): Promise<AvailableModelForDefaults[]> {
   const { AuthStorage, ModelRegistry } = await import('@mariozechner/pi-coding-agent');
-  const authStorage = new AuthStorage(getTaskFactoryAuthPath());
+  const authStorage = AuthStorage.create(getTaskFactoryAuthPath());
   const modelRegistry = new ModelRegistry(authStorage);
   const available = modelRegistry.getAvailable();
 

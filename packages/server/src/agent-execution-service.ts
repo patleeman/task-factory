@@ -493,7 +493,7 @@ export async function createTaskConversationSession(
     defaultThinkingLevel,
   } = options;
 
-  const authStorage = new AuthStorage(getTaskFactoryAuthPath());
+  const authStorage = AuthStorage.create(getTaskFactoryAuthPath());
   const modelRegistry = new ModelRegistry(authStorage);
   const loader = new DefaultResourceLoader({
     cwd: workspacePath,

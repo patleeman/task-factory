@@ -42,7 +42,7 @@ Task Description:
 ${description}${planContext}`;
 
   try {
-    const authStorage = new AuthStorage(getTaskFactoryAuthPath());
+    const authStorage = AuthStorage.create(getTaskFactoryAuthPath());
     const modelRegistry = new ModelRegistry(authStorage);
 
     // Use a fast cheap model for criteria generation

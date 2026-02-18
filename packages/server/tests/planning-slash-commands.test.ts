@@ -8,7 +8,11 @@ const createAgentSessionMock = vi.fn();
 
 vi.mock('@mariozechner/pi-coding-agent', () => ({
   createAgentSession: (...args: any[]) => createAgentSessionMock(...args),
-  AuthStorage: class AuthStorage {},
+  AuthStorage: class AuthStorage {
+    static create(): AuthStorage {
+      return new AuthStorage();
+    }
+  },
   DefaultResourceLoader: class DefaultResourceLoader {
     async reload(): Promise<void> {
       // no-op for tests
