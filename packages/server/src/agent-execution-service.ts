@@ -3523,7 +3523,7 @@ interface SavedPlanningData {
   plan: TaskPlan;
 }
 
-function ensurePlanCallbackRegistry(): Map<string, (data: SavedPlanningData) => void | Promise<void>> {
+export function ensurePlanCallbackRegistry(): Map<string, (data: SavedPlanningData) => void | Promise<void>> {
   if (!globalThis.__piFactoryPlanCallbacks) {
     globalThis.__piFactoryPlanCallbacks = new Map();
   }

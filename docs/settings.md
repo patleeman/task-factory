@@ -60,6 +60,8 @@ For model selection defaults in **New Task**, precedence is:
 
 If a saved default profile ID no longer exists in `modelProfiles`, Task Factory safely drops it (no invalid selection is persisted or returned).
 
+Model profiles support ordered fallback arrays for both planning and execution (`planningFallbackModels[]`, `executionFallbackModels[]`). Fallback entries use the same validation rules as primary model configs (`provider`, `modelId`, optional `thinkingLevel`) and are ignored when empty arrays are saved.
+
 ### First-run migration behavior
 
 - On startup, if no migration decision is stored, Task Factory checks `~/.pi` for migratable categories (`auth`, `skills`, `extensions`).

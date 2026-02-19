@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Workspace Configuration no longer includes an Extensions tab. Workspace skills are now auto-discovered from local `SKILL.md` files (`<workspace>/skills` and `<workspace>/.taskfactory/skills`) and are enabled by default until explicitly toggled.
 - Task Defaults now support `defaultModelProfileId` for both global and workspace scope. Workspace Task Defaults now expose a default-profile selector (with a link to Global Settings for profile management), and Settings → Task Defaults includes a matching global default-profile selector.
 - New Task default model resolution now follows: explicit form state → workspace default profile → global default profile → manual model defaults.
+- Model profiles now support ordered planning/execution fallback model arrays. Planning and execution automatically fail over through those chains on retryable provider errors (rate limits and 5xx-style instability), and failover attempts are recorded in task activity.
 
 ### Fixed
 - Multi-image requests no longer fail with an Anthropic `invalid_request_error` when any attached image exceeds 2000px in either dimension. The server now normalizes all image attachments (task prompts, chat/steer/follow-up messages, and foreman planning messages) to fit within the 2000×2000 px limit before sending to the provider. Images that cannot be normalized are skipped individually rather than aborting the entire request.
