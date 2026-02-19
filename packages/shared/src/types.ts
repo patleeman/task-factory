@@ -1206,7 +1206,7 @@ export interface PostExecutionSkill {
   id: string;              // directory name, matches frontmatter `name`
   name: string;            // from frontmatter
   description: string;     // from frontmatter
-  type: 'follow-up' | 'loop';
+  type: 'follow-up' | 'loop' | 'subagent';
   hooks: SkillHook[];      // supported execution hooks for this skill
   workflowId?: string;     // optional workflow grouping ID (e.g. "tdd")
   pairedSkillId?: string;  // optional paired skill ID for multi-hook workflows

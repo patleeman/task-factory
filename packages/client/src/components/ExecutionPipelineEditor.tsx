@@ -395,7 +395,7 @@ export function ExecutionPipelineEditor({
         </span>
 
         <span className="text-[10px] font-mono text-slate-400 shrink-0">
-          {skill ? (skill.type === 'loop' ? 'loop' : 'skill') : 'missing'}
+          {skill ? (skill.type === 'loop' ? 'loop' : skill.type === 'subagent' ? 'subagent' : 'skill') : 'missing'}
         </span>
 
         <div className="min-w-0 flex-1">

@@ -122,7 +122,10 @@ function parseSkillFile(skillDir: string, dirName: string, source: SkillSource):
       }
     }
 
-    const type = metadata.type === 'loop' ? 'loop' : 'follow-up';
+    const type: PostExecutionSkill['type'] =
+      metadata.type === 'loop' ? 'loop' :
+      metadata.type === 'subagent' ? 'subagent' :
+      'follow-up';
     const hooks = parseSkillHooks(metadata, dirName);
     const maxIterations = parseInt(metadata['max-iterations'] || '1', 10) || 1;
     const doneSignal = metadata['done-signal'] || 'HOOK_DONE';
@@ -527,7 +530,7 @@ async function runFollowUpSkill(
   skill: PostExecutionSkill,
   _ctx: RunSkillsContext,
 ): Promise<boolean> {
-  console.log(`[Skills] Running follow-up skill "${skill.id}" — calling prompt()`);
+  console.log(`[Skills] Running ${skill.type} skill "${skill.id}" — calling prompt()`);
 
   const beforeMessageCount = getMessageCount(piSession);
   const beforeLastAssistantText = getLastAssistantText(piSession);
@@ -536,7 +539,7 @@ async function runFollowUpSkill(
   await piSession.prompt(skill.promptTemplate);
   const elapsed = Date.now() - startTime;
 
-  console.log(`[Skills] Follow-up skill "${skill.id}" completed in ${elapsed}ms`);
+  console.log(`[Skills] ${skill.type} skill "${skill.id}" completed in ${elapsed}ms`);
 
   return didSessionProduceOutput(piSession, beforeMessageCount, beforeLastAssistantText);
 }

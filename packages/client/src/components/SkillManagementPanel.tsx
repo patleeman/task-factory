@@ -496,6 +496,7 @@ export function SkillManagementPanel({ skills, onSkillsChange }: SkillManagement
                 >
                   <option value="follow-up">follow-up</option>
                   <option value="loop">loop</option>
+                  <option value="subagent">subagent</option>
                 </select>
               </label>
             </div>

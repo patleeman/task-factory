@@ -540,7 +540,7 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
               return (
                 <span key={skillId} className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-violet-50 border border-violet-200 text-xs font-medium text-violet-700">
                   <span className="text-[10px] text-violet-400 font-bold">{index + 1}.</span>
-                  <span className="text-[10px] text-slate-400 font-mono">{skill?.type === 'loop' ? 'loop' : 'gate'}</span>
+                  <span className="text-[10px] text-slate-400 font-mono">{skill?.type === 'loop' ? 'loop' : skill?.type === 'subagent' ? 'subagent' : 'gate'}</span>
                   {skill?.name || skillId}
                 </span>
               )
@@ -559,7 +559,7 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
               return (
                 <span key={skillId} className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-blue-50 border border-blue-200 text-xs font-medium text-blue-700">
                   <span className="text-[10px] text-blue-400 font-bold">{index + 1}.</span>
-                  <span className="text-[10px] text-slate-400 font-mono">{skill?.type === 'loop' ? 'loop' : 'gate'}</span>
+                  <span className="text-[10px] text-slate-400 font-mono">{skill?.type === 'loop' ? 'loop' : skill?.type === 'subagent' ? 'subagent' : 'gate'}</span>
                   {skill?.name || skillId}
                 </span>
               )
@@ -578,7 +578,7 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
               return (
                 <span key={skillId} className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-orange-50 border border-orange-200 text-xs font-medium text-orange-700">
                   <span className="text-[10px] text-orange-400 font-bold">{index + 1}.</span>
-                  <span className="text-[10px] text-slate-400 font-mono">{skill?.type === 'loop' ? 'loop' : 'gate'}</span>
+                  <span className="text-[10px] text-slate-400 font-mono">{skill?.type === 'loop' ? 'loop' : skill?.type === 'subagent' ? 'subagent' : 'gate'}</span>
                   {skill?.name || skillId}
                 </span>
               )

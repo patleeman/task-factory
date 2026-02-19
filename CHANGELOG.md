@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- New `subagent` skill execution type. Skills with `metadata.type: subagent` run as a single prompt turn (like `follow-up`) and signal to the agent that it should use `message_agent` to delegate work via a subagent conversation. The type is selectable in the Skill Management UI, via the `create_skill` extension tool (`type: "subagent"`), and in `SKILL.md` frontmatter. Pipeline and task detail views now show distinct labels for `loop`, `subagent`, and default (`skill`/`gate`) types. Unknown `metadata.type` values in SKILL.md files continue to resolve safely to `follow-up`.
 - Inline subagent chat navigation in task chat: when the foreman or an execution agent uses `message_agent` with `messageType: "chat"` to start or resume a conversation with another task, the parent chat timeline now shows a labeled, clickable **Subagent Chat** entry. Clicking it opens that task's conversation in the same panel without navigating away or creating a new task. A **Back** button in the subagent view header returns to the parent conversation. The `message_agent` extension now includes `targetTaskId` in tool result details for `chat` actions to enable this.
 
 ### Changed

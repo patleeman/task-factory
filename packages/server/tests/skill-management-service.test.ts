@@ -247,4 +247,134 @@ Collect planning context before starting.
   it('validates imported markdown shape', () => {
     expect(() => parseImportedSkillMarkdown('no frontmatter')).toThrow('YAML frontmatter');
   });
+
+  it('creates a subagent skill and persists type: subagent in metadata', () => {
+    const skillsDir = createTempSkillsDir();
+
+    const createdId = createFactorySkill(
+      {
+        id: 'my-subagent',
+        description: 'Delegates work to a subagent',
+        type: 'subagent',
+        maxIterations: 1,
+        doneSignal: 'HOOK_DONE',
+        promptTemplate: 'Spawn a subagent to complete the work.',
+        configSchema: [],
+      },
+      { skillsDir },
+    );
+
+    expect(createdId).toBe('my-subagent');
+
+    const skillMdPath = join(skillsDir, 'my-subagent', 'SKILL.md');
+    const content = readFileSync(skillMdPath, 'utf-8');
+    expect(content).toContain('type: subagent');
+    // subagent does not emit loop-only fields
+    expect(content).not.toContain('max-iterations');
+    expect(content).not.toContain('done-signal');
+  });
+
+  it('updates a skill to subagent type and strips loop metadata', () => {
+    const skillsDir = createTempSkillsDir();
+
+    createFactorySkill(
+      {
+        id: 'loop-to-subagent',
+        description: 'Originally a loop skill',
+        type: 'loop',
+        maxIterations: 5,
+        doneSignal: 'ALL_DONE',
+        promptTemplate: 'Loop prompt.',
+        configSchema: [],
+      },
+      { skillsDir },
+    );
+
+    updateFactorySkill(
+      'loop-to-subagent',
+      {
+        id: 'loop-to-subagent',
+        description: 'Now a subagent skill',
+        type: 'subagent',
+        maxIterations: 1,
+        doneSignal: 'HOOK_DONE',
+        promptTemplate: 'Delegate to subagent.',
+        configSchema: [],
+      },
+      { skillsDir },
+    );
+
+    const content = readFileSync(join(skillsDir, 'loop-to-subagent', 'SKILL.md'), 'utf-8');
+    expect(content).toContain('type: subagent');
+    expect(content).not.toContain('max-iterations');
+    expect(content).not.toContain('done-signal');
+  });
+
+  it('imports a SKILL.md with type: subagent metadata', () => {
+    const skillsDir = createTempSkillsDir();
+
+    const importedId = importFactorySkill(
+      `---
+name: imported-subagent
+description: Subagent skill via import
+metadata:
+  type: subagent
+  author: tester
+---
+
+Delegate work to a subagent for this task.
+`,
+      false,
+      { skillsDir },
+    );
+
+    expect(importedId).toBe('imported-subagent');
+
+    const content = readFileSync(join(skillsDir, 'imported-subagent', 'SKILL.md'), 'utf-8');
+    expect(content).toContain('type: subagent');
+  });
+
+  it('parseImportedSkillMarkdown resolves subagent type correctly', () => {
+    const parsed = parseImportedSkillMarkdown(`---
+name: inline-subagent
+description: Inline subagent test
+metadata:
+  type: subagent
+---
+
+Run a subagent conversation.
+`);
+    expect(parsed.type).toBe('subagent');
+  });
+
+  it('parseImportedSkillMarkdown falls back to follow-up for unknown types', () => {
+    const parsed = parseImportedSkillMarkdown(`---
+name: unknown-type-skill
+description: Unknown type skill
+metadata:
+  type: totally-unknown
+---
+
+Some prompt.
+`);
+    expect(parsed.type).toBe('follow-up');
+  });
+
+  it('rejects invalid type in createFactorySkill payload', () => {
+    const skillsDir = createTempSkillsDir();
+    expect(() =>
+      createFactorySkill(
+        {
+          id: 'bad-type',
+          description: 'Bad type skill',
+          type: 'totally-unknown' as any,
+          maxIterations: 1,
+          doneSignal: 'HOOK_DONE',
+          promptTemplate: 'Prompt.',
+          configSchema: [],
+        },
+        { skillsDir },
+      ),
+    ).toThrow('type must be');
+  });
 });

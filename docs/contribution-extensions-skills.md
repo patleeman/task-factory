@@ -53,6 +53,31 @@ How to safely customize Task Factory with repo extensions (`extensions/`) and ex
 | `create_extension` | `global` (default) | `~/.taskfactory/extensions/<id>.ts` |
 | `create_extension` | `repo-local` | `<workspace>/.taskfactory/extensions/<id>.ts` |
 
+### Skill execution types
+
+The `type` field in `metadata` controls how the skill runner dispatches the skill prompt. Set it with `metadata.type` in `SKILL.md` or via the `type` parameter of the `create_skill` tool.
+
+| Type | Behavior | Loop controls needed? |
+|---|---|---|
+| `follow-up` (default) | Single prompt turn sent to the agent | No |
+| `subagent` | Single prompt turn; agent is expected to use `message_agent` to spawn a subagent conversation | No |
+| `loop` | Prompt sent repeatedly until agent responds with `done-signal` or `max-iterations` is reached | Yes — `metadata.max-iterations`, `metadata.done-signal` |
+
+**Example — subagent skill:**
+```yaml
+---
+name: delegate-task
+description: Delegates work to a subagent
+metadata:
+  type: subagent
+  hooks: post
+---
+
+Use the message_agent tool to start a subagent conversation and delegate the remaining work.
+```
+
+Unknown `type` values are silently coerced to `follow-up` during discovery (SKILL.md import), keeping existing skills backward-compatible. The `create_skill` tool and the REST API reject unknown types with a validation error.
+
 ### Hook execution semantics
 
 Execution is lane-driven: if a skill is assigned to a lane, it runs in that lane regardless of `metadata.hooks`.

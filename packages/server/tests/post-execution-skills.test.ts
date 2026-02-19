@@ -1,5 +1,30 @@
-import { describe, expect, it } from 'vitest';
-import { reloadPostExecutionSkills } from '../src/post-execution-skills.js';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { reloadPostExecutionSkills, type RunSkillsContext } from '../src/post-execution-skills.js';
+
+const originalHome = process.env.HOME;
+const originalUserProfile = process.env.USERPROFILE;
+const tempDirs: string[] = [];
+
+function createTempHome(): string {
+  const homePath = mkdtempSync(join(tmpdir(), 'pi-factory-home-'));
+  tempDirs.push(homePath);
+  process.env.HOME = homePath;
+  process.env.USERPROFILE = homePath;
+  return homePath;
+}
+
+afterEach(() => {
+  vi.resetModules();
+  process.env.HOME = originalHome;
+  process.env.USERPROFILE = originalUserProfile;
+  for (const dir of tempDirs) {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  tempDirs.length = 0;
+});
 
 describe('execution skill discovery', () => {
   it('discovers starter skills with universal hook metadata and prompt content', () => {
@@ -64,5 +89,57 @@ describe('execution skill discovery', () => {
 
     expect(skillIds.has('validate-web')).toBe(false);
     expect(skillIds.has('wrapup')).toBe(false);
+  });
+});
+
+describe('subagent skill type', () => {
+  it('discovers a user-defined subagent skill with type subagent', async () => {
+    const homePath = createTempHome();
+    const skillDir = join(homePath, '.taskfactory', 'skills', 'my-subagent');
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(join(skillDir, 'SKILL.md'), `---
+name: my-subagent
+description: Delegates to a subagent
+metadata:
+  type: subagent
+  hooks: post
+---
+
+Spawn a subagent to complete this task.
+`);
+
+    vi.resetModules();
+    const { reloadPostExecutionSkills: reload } = await import('../src/post-execution-skills.js');
+    const skills = reload();
+    const skill = skills.find((s) => s.id === 'my-subagent');
+
+    expect(skill).toBeDefined();
+    expect(skill?.type).toBe('subagent');
+    expect(skill?.hooks).toEqual(['post']);
+    expect(skill?.source).toBe('user');
+  });
+
+  it('falls back to follow-up for unknown metadata types on discovery', async () => {
+    const homePath = createTempHome();
+    const skillDir = join(homePath, '.taskfactory', 'skills', 'weird-type');
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(join(skillDir, 'SKILL.md'), `---
+name: weird-type
+description: Unknown type skill
+metadata:
+  type: totally-unknown
+  hooks: post
+---
+
+Some prompt.
+`);
+
+    vi.resetModules();
+    const { reloadPostExecutionSkills: reload } = await import('../src/post-execution-skills.js');
+    const skills = reload();
+    const skill = skills.find((s) => s.id === 'weird-type');
+
+    expect(skill).toBeDefined();
+    expect(skill?.type).toBe('follow-up');
   });
 });

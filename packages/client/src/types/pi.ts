@@ -77,7 +77,7 @@ export interface PostExecutionSkill {
   id: string;
   name: string;
   description: string;
-  type: 'follow-up' | 'loop';
+  type: 'follow-up' | 'loop' | 'subagent';
   hooks: SkillHook[];
   workflowId?: string;
   pairedSkillId?: string;

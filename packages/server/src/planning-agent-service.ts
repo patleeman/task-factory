@@ -2385,6 +2385,7 @@ declare global {
     createSkill: (payload: {
       name: string;
       description: string;
+      type?: 'follow-up' | 'loop' | 'subagent';
       hooks: ('pre-planning' | 'pre' | 'post')[];
       content: string;
       destination?: 'global' | 'repo-local';
@@ -2397,6 +2398,7 @@ function ensureCreateSkillCallbackRegistry(): Map<string, {
   createSkill: (payload: {
     name: string;
     description: string;
+    type?: 'follow-up' | 'loop' | 'subagent';
     hooks: ('pre-planning' | 'pre' | 'post')[];
     content: string;
     destination?: 'global' | 'repo-local';
@@ -2434,7 +2436,7 @@ function registerCreateSkillCallbacks(workspaceId: string): void {
         const skillPayload = {
           id: payload.name,
           description: payload.description,
-          type: 'follow-up' as const,
+          type: payload.type ?? 'follow-up',
           hooks: payload.hooks,
           promptTemplate: payload.content,
           maxIterations: 1,

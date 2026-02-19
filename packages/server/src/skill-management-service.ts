@@ -18,7 +18,7 @@ const DEFAULT_FACTORY_SKILLS_DIR = resolveTaskFactoryHomePath('skills');
 interface NormalizedSkillDefinition {
   id: string;
   description: string;
-  type: 'follow-up' | 'loop';
+  type: 'follow-up' | 'loop' | 'subagent';
   hooks: SkillHook[];
   workflowId?: string;
   pairedSkillId?: string;
@@ -262,10 +262,11 @@ function normalizeConfigSchema(raw: unknown): SkillConfigField[] {
   return fields;
 }
 
-function parseType(raw: unknown): 'follow-up' | 'loop' {
+function parseType(raw: unknown): 'follow-up' | 'loop' | 'subagent' {
   if (raw === 'loop') return 'loop';
   if (raw === 'follow-up') return 'follow-up';
-  throw new Error('type must be either "follow-up" or "loop"');
+  if (raw === 'subagent') return 'subagent';
+  throw new Error('type must be "follow-up", "loop", or "subagent"');
 }
 
 function parseHooks(raw: unknown, fieldName = 'hooks'): SkillHook[] {
@@ -392,7 +393,10 @@ export function parseImportedSkillMarkdown(content: string): NormalizedSkillDefi
   const description = normalizeDescription(parsed.description);
   const metadataRaw = normalizeStringRecord(parsed.metadata);
 
-  const type = metadataRaw.type === 'loop' ? 'loop' : 'follow-up';
+  const type: 'follow-up' | 'loop' | 'subagent' =
+    metadataRaw.type === 'loop' ? 'loop' :
+    metadataRaw.type === 'subagent' ? 'subagent' :
+    'follow-up';
   const hooks = parseHooks(metadataRaw.hooks, 'metadata.hooks');
   const workflowId = parseOptionalText(metadataRaw['workflow-id']);
   const pairedSkillId = parseOptionalPairedSkillId(metadataRaw['pairs-with']);

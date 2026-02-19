@@ -12,6 +12,7 @@ declare global {
     createSkill: (payload: {
       name: string;
       description: string;
+      type?: 'follow-up' | 'loop' | 'subagent';
       hooks: ('pre-planning' | 'pre' | 'post')[];
       content: string;
       destination?: 'global' | 'repo-local';
@@ -55,6 +56,13 @@ export default function (pi: ExtensionAPI) {
       description: Type.String({
         description: 'Short description of what the skill does',
       }),
+      type: Type.Optional(Type.Union([
+        Type.Literal('follow-up'),
+        Type.Literal('loop'),
+        Type.Literal('subagent'),
+      ], {
+        description: 'Execution type: follow-up (single-turn, default), loop (repeat until done-signal), or subagent (delegates to a subagent conversation)',
+      })),
       hooks: Type.Array(
         Type.Union([Type.Literal('pre-planning'), Type.Literal('pre'), Type.Literal('post')]),
         { description: 'When the skill runs: pre-planning (before planning), pre (before execution), and/or post (after execution)' }
@@ -70,7 +78,7 @@ export default function (pi: ExtensionAPI) {
       })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      const { name, description, hooks, content, destination } = params;
+      const { name, description, type, hooks, content, destination } = params;
 
       const callbacks = globalThis.__piFactoryCreateSkillCallbacks;
       if (!callbacks || callbacks.size === 0) {
@@ -136,6 +144,7 @@ export default function (pi: ExtensionAPI) {
         const result = await cb.createSkill({
           name: name.trim().toLowerCase(),
           description: description.trim(),
+          type,
           hooks,
           content: content.trim(),
           destination,
@@ -154,6 +163,7 @@ export default function (pi: ExtensionAPI) {
             details: { 
               skillId: result.skillId, 
               path: result.path,
+              type: type ?? 'follow-up',
               hooks,
               destination: resolvedDestination,
             },

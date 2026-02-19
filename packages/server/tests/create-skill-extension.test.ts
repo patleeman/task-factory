@@ -88,4 +88,39 @@ describe('create_skill extension', () => {
 
     expect(result.details.destination).toBe('global');
   });
+
+  it('forwards subagent type to callbacks and reports it in details', async () => {
+    const createSkill = vi.fn().mockResolvedValue({
+      success: true,
+      skillId: 'my-subagent',
+      path: '/tmp/home/.taskfactory/skills/my-subagent/SKILL.md',
+    });
+
+    (globalThis as any).__piFactoryCreateSkillCallbacks = new Map([
+      ['workspace-1', { createSkill, listSkills: vi.fn() }],
+    ]);
+
+    const result = await tool.execute(
+      'tool-call-3',
+      {
+        name: 'my-subagent',
+        description: 'Delegates to a subagent',
+        type: 'subagent',
+        hooks: ['post'],
+        content: 'Use message_agent to delegate.',
+      },
+      undefined,
+      undefined,
+      {} as any,
+    );
+
+    expect(createSkill).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'my-subagent',
+        type: 'subagent',
+      }),
+    );
+    expect(result.details.type).toBe('subagent');
+    expect(result.content[0].text).toContain('my-subagent');
+  });
 });
