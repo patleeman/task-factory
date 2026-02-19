@@ -218,4 +218,87 @@ describe('sanitizeSessionFileImages', () => {
     const msg = JSON.parse(lines[1]);
     expect(msg.message.content[0].type).toBe('text');
   });
+
+  // -------------------------------------------------------------------------
+  // Pass 2: Remove messages with empty content (from prior 400 failures)
+  // -------------------------------------------------------------------------
+
+  it('removes messages with empty content arrays (failed-turn assistant messages)', () => {
+    const file = makeTempFile(jsonl(
+      sessionHeader,
+      messageEntry('user', [{ type: 'text', text: 'hello' }]),
+      messageEntry('assistant', [{ type: 'text', text: 'world' }]),
+      messageEntry('user', [{ type: 'text', text: 'retry' }]),
+      messageEntry('assistant', []), // empty — failed turn
+    ));
+
+    _sanitizeSessionFileImages(file);
+
+    const lines = readFileSync(file, 'utf-8').split('\n').filter(Boolean);
+    const msgs = lines.map(l => JSON.parse(l)).filter(e => e.type === 'message');
+    // Empty assistant message should be removed
+    expect(msgs.every(m => m.message.content.length > 0)).toBe(true);
+  });
+
+  // -------------------------------------------------------------------------
+  // Pass 3: Trim trailing user messages left without an assistant response
+  // -------------------------------------------------------------------------
+
+  it('removes trailing user messages orphaned when their empty-assistant partners are stripped', () => {
+    // Real-world pattern: user retries after each 400 failure, leaving
+    // interleaved user + empty-assistant pairs at the tail.
+    // Pass 2 removes the empty assistants; Pass 3 removes the orphaned users.
+    const file = makeTempFile(jsonl(
+      sessionHeader,
+      messageEntry('user', [{ type: 'text', text: 'original' }]),
+      messageEntry('assistant', [{ type: 'text', text: 'response' }]),
+      messageEntry('user', [{ type: 'text', text: 'retry 1' }]),
+      messageEntry('assistant', []),  // failed turn — empty
+      messageEntry('user', [{ type: 'text', text: 'retry 2' }]),
+      messageEntry('assistant', []),  // failed turn — empty
+    ));
+
+    _sanitizeSessionFileImages(file);
+
+    const lines = readFileSync(file, 'utf-8').split('\n').filter(Boolean);
+    const msgs = lines.map(l => JSON.parse(l)).filter(e => e.type === 'message');
+    const last = msgs[msgs.length - 1];
+    expect(last.message.role).toBe('assistant');
+    expect(last.message.content[0].text).toBe('response');
+    expect(msgs).toHaveLength(2); // only original user + assistant remain
+  });
+
+  it('handles the full PIFA-176 scenario: bad image + empty assistants + trailing users', () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    const badImage = { type: 'image', source: { type: 'base64', media_type: '', data: 'abc' } };
+    const file = makeTempFile(jsonl(
+      sessionHeader,
+      messageEntry('user', [{ type: 'text', text: 'question' }, badImage]),
+      messageEntry('assistant', [{ type: 'text', text: 'answer' }]),
+      messageEntry('user', [{ type: 'text', text: 'retry 1' }]),
+      messageEntry('assistant', []), // failed 400 turn
+      messageEntry('user', [{ type: 'text', text: 'retry 2' }]),
+      messageEntry('assistant', []), // failed 400 turn
+      messageEntry('user', [{ type: 'text', text: 'retry 3' }]),
+      messageEntry('assistant', []), // failed 400 turn
+    ));
+
+    _sanitizeSessionFileImages(file);
+
+    const lines = readFileSync(file, 'utf-8').split('\n').filter(Boolean);
+    const msgs = lines.map(l => JSON.parse(l)).filter(e => e.type === 'message');
+
+    // Should end with the good assistant response
+    const last = msgs[msgs.length - 1];
+    expect(last.message.role).toBe('assistant');
+    expect(last.message.content[0].text).toBe('answer');
+
+    // Bad image replaced with text note
+    expect(msgs[0].message.content[1].type).toBe('text');
+    expect(msgs[0].message.content[1].text).toContain('removed');
+
+    // Only 2 messages remain (original user + assistant)
+    expect(msgs).toHaveLength(2);
+  });
 });

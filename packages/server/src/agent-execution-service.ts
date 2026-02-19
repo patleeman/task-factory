@@ -2325,14 +2325,15 @@ function sanitizeSessionFileImages(sessionFilePath: string): void {
   const lines = raw.split('\n');
   let modified = false;
 
-  const sanitizedLines = lines.map(line => {
+  // --- Pass 1: Strip unsupported image blocks from message content -------
+  const pass1Lines = lines.map(line => {
     if (!line.trim()) return line;
 
     let entry: Record<string, unknown>;
     try {
       entry = JSON.parse(line) as Record<string, unknown>;
     } catch {
-      return line; // unparseable line — keep as-is
+      return line;
     }
 
     const msg = entry.message as { role?: string; content?: unknown[] } | undefined;
@@ -2357,18 +2358,73 @@ function sanitizeSessionFileImages(sessionFilePath: string): void {
     });
 
     if (!changed) return line;
-
     return JSON.stringify({ ...entry, message: { ...msg, content: sanitizedContent } });
   });
+
+  // --- Pass 2: Remove messages left with empty content (from prior 400 failures) ---
+  // An empty content array is invalid and will cause a fresh 400 on replay.
+  let pass2Removed = false;
+  const pass2Lines = pass1Lines.filter(line => {
+    if (!line.trim()) return true; // keep blank lines (they're structural)
+    let entry: Record<string, unknown>;
+    try {
+      entry = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      return true;
+    }
+    const msg = entry.message as { content?: unknown[] } | undefined;
+    if (entry.type === 'message') {
+      const content = msg?.content;
+      if (!Array.isArray(content) || content.length === 0) {
+        modified = true;
+        pass2Removed = true;
+        return false; // drop this line
+      }
+    }
+    return true;
+  });
+
+  // --- Pass 3: Trim orphaned user messages left after Pass 2 removed their
+  // paired empty-assistant responses.  Only runs when Pass 2 actually removed
+  // something — otherwise a trailing user message is likely a legitimate
+  // interrupted conversation, not a retry artifact.
+  let trimmedLines = pass2Lines;
+  if (pass2Removed) {
+    while (true) {
+      // Find the last non-blank message entry
+      let lastMsgIdx = -1;
+      for (let i = trimmedLines.length - 1; i >= 0; i--) {
+        const l = trimmedLines[i].trim();
+        if (!l) continue;
+        try {
+          const e = JSON.parse(l) as Record<string, unknown>;
+          if (e.type === 'message') { lastMsgIdx = i; break; }
+        } catch { /* ignore */ }
+        break; // non-message non-blank line — stop
+      }
+      if (lastMsgIdx === -1) break;
+      try {
+        const lastEntry = JSON.parse(trimmedLines[lastMsgIdx].trim()) as Record<string, unknown>;
+        const role = (lastEntry.message as { role?: string } | undefined)?.role;
+        if (role === 'user') {
+          // Orphaned retry user message — remove it.
+          modified = true;
+          trimmedLines = [...trimmedLines.slice(0, lastMsgIdx), ...trimmedLines.slice(lastMsgIdx + 1)];
+          continue;
+        }
+      } catch { /* ignore */ }
+      break;
+    }
+  }
 
   if (!modified) return;
 
   console.warn(
-    `[AgentExecution] Sanitized session file to remove unsupported image MIME types: ${sessionFilePath}`,
+    `[AgentExecution] Sanitized session file (removed bad images / empty messages): ${sessionFilePath}`,
   );
 
   try {
-    writeFileSync(sessionFilePath, sanitizedLines.join('\n'), 'utf-8');
+    writeFileSync(sessionFilePath, trimmedLines.join('\n'), 'utf-8');
   } catch (err) {
     console.error('[AgentExecution] Failed to write sanitized session file:', err);
   }
