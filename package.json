@@ -1,56 +1,33 @@
 {
-  "name": "task-factory",
-  "version": "0.3.0",
+  "name": "pi-factory",
+  "version": "0.1.0",
   "description": "A lean manufacturing-inspired task queue system for AI agents",
   "type": "module",
   "bin": {
-    "task-factory": "bin/task-factory.js"
+    "pi-factory": "./bin/pi-factory.js",
+    "task-factory": "./bin/task-factory.js"
   },
   "files": [
     "bin/",
     "dist/",
-    "packages/client/dist/",
-    "extensions/",
-    "skills/"
+    "packages/client/dist/"
   ],
   "workspaces": [
     "packages/*"
   ],
   "scripts": {
-    "dev": "npm run build -w @task-factory/shared && concurrently \"npm run dev:shared\" \"npm run dev:server\" \"npm run dev:client\"",
-    "dev:shared": "npm run dev -w @task-factory/shared",
-    "dev:server": "npm run dev -w @task-factory/server",
-    "dev:client": "npm run dev -w @task-factory/client",
-    "build": "npm run build -w @task-factory/shared && npm run build -w @task-factory/server && npm run build -w @task-factory/client && node scripts/bundle-server.js",
-    "start": "npm run start -w @task-factory/server",
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:server": "npm run dev -w @pi-factory/server",
+    "dev:client": "npm run dev -w @pi-factory/client",
+    "build": "npm run build -w @pi-factory/shared && npm run build -w @pi-factory/server && npm run build -w @pi-factory/client && node scripts/bundle-server.js",
+    "start": "npm run start -w @pi-factory/server",
     "lint": "npm run lint --workspaces",
     "typecheck": "npm run typecheck --workspaces",
-    "test": "npm run test --workspaces --if-present",
-    "test:coverage": "npm run test:coverage -w @task-factory/server",
-    "check:deadcode": "npm run check:deadcode:knip && npm run check:deadcode:madge",
-    "check:deadcode:knip": "knip --config knip.json",
-    "check:deadcode:madge": "madge --circular packages/server/src/index.ts packages/client/src/main.tsx packages/shared/src/index.ts extensions",
-    "check:release": "npm run lint && npm run typecheck && npm run test && npm run build && npm run check:deadcode"
-  },
-  "dependencies": {
-    "@clack/prompts": "^0.10.0",
-    "@mariozechner/pi-coding-agent": "^0.53.0",
-    "@sinclair/typebox": "^0.34.48",
-    "chalk": "^5.4.1",
-    "cli-table3": "^0.6.5",
-    "commander": "^13.1.0"
+    "test": "npm run test --workspaces --if-present"
   },
   "devDependencies": {
-    "@eslint/js": "^9.35.0",
-    "@typescript-eslint/eslint-plugin": "^8.43.0",
-    "@typescript-eslint/parser": "^8.43.0",
     "concurrently": "^9.2.1",
     "esbuild": "^0.27.3",
-    "eslint": "^9.35.0",
-    "globals": "^16.4.0",
-    "knip": "^5.83.1",
-    "madge": "^8.0.0",
     "typescript": "^5.7.3"
-  },
-  "packageManager": "pnpm@10.30.0+sha512.2b5753de015d480eeb88f5b5b61e0051f05b4301808a82ec8b840c9d2adf7748eb352c83f5c1593ca703ff1017295bc3fdd3119abb9686efc96b9fcb18200937"
+  }
 }

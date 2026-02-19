@@ -1441,6 +1441,8 @@ program
   .description('Start server in foreground (legacy mode)')
   .option('--no-open', 'Do not open browser')
   .option('-o, --open', 'Open browser', true)
+  .option('-p, --port <port>', 'Server port', (val) => parseInt(val, 10))
+  .option('-h, --host <host>', 'Server host (use 0.0.0.0 for Tailscale/network access)')
   .action(async (options) => {
     const serverPath = join(__dirname, '..', 'dist', 'server.js');
 
@@ -1450,18 +1452,24 @@ program
     }
 
     const config = loadCliConfig();
-    const port = process.env.PORT || config.port || DEFAULT_PORT;
-    const host = process.env.HOST || config.host || DEFAULT_HOST;
-    const url = `http://localhost:${port}`;
+    const port = options.port || process.env.PORT || config.port || DEFAULT_PORT;
+    const host = options.host || process.env.HOST || config.host || DEFAULT_HOST;
+    const displayHost = host === '0.0.0.0' ? 'localhost' : host;
+    const url = `http://${displayHost}:${port}`;
 
-    console.log(chalk.bold(`Starting Task Factory server on ${url}...`));
+    console.log(chalk.bold(`Starting Task Factory server on ${host}:${port}...`));
+    
+    if (host === '0.0.0.0') {
+      console.log(chalk.cyan('🌐 Server accessible on all network interfaces'));
+      console.log(chalk.gray(`   Tailscale/IP: http://$(hostname -s).local:${port} or your machine's IP`));
+    }
 
     const proc = spawn(process.execPath, [serverPath], {
       stdio: 'inherit',
-      env: { ...process.env, PORT: port, HOST: host },
+      env: { ...process.env, PORT: port.toString(), HOST: host },
     });
 
-    if (options.open) {
+    if (options.open && host !== '0.0.0.0') {
       setTimeout(() => {
         const openCmd = process.platform === 'darwin' ? 'open' :
                         process.platform === 'win32' ? 'start' : 'xdg-open';
