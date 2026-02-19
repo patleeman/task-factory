@@ -32,6 +32,24 @@ describe('TaskDetailPane attachments visibility by edit mode', () => {
     createdAt: '2026-02-14T00:00:00.000Z',
   };
 
+  const previewableImageAttachment: Attachment = {
+    id: 'att-2',
+    filename: 'diagram.png',
+    storedName: 'att-2.png',
+    mimeType: 'image/png',
+    size: 1024,
+    createdAt: '2026-02-14T00:00:00.000Z',
+  };
+
+  const unsupportedImageAttachment: Attachment = {
+    id: 'att-3',
+    filename: 'camera.heic',
+    storedName: 'att-3.heic',
+    mimeType: 'image/heic',
+    size: 1024,
+    createdAt: '2026-02-14T00:00:00.000Z',
+  };
+
   it('hides the entire attachments section when read-only and no attachments exist', () => {
     const markup = renderAttachmentsSection(false, []);
 
@@ -49,6 +67,21 @@ describe('TaskDetailPane attachments visibility by edit mode', () => {
     expect(markup).not.toContain('+ Add Excalidraw');
     expect(markup).not.toContain('Delete attachment');
     expect(markup).not.toContain('Drag &amp; drop or click to add files');
+  });
+
+  it('shows previewable image attachments as thumbnails', () => {
+    const markup = renderAttachmentsSection(false, [previewableImageAttachment]);
+
+    expect(markup).toContain('<img');
+    expect(markup).toContain('/api/workspaces/workspace-1/tasks/PIFA-93/attachments/att-2.png');
+  });
+
+  it('shows unsupported image attachments as file fallback cards', () => {
+    const markup = renderAttachmentsSection(false, [unsupportedImageAttachment]);
+
+    expect(markup).not.toContain('<img');
+    expect(markup).toContain('FILE');
+    expect(markup).toContain('/api/workspaces/workspace-1/tasks/PIFA-93/attachments/att-3.heic');
   });
 
   it('shows full attachment management controls in edit mode', () => {

@@ -27,6 +27,7 @@ import { PostExecutionSummary, GenerateSummaryButton } from './PostExecutionSumm
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { api } from '../api'
+import { isPreviewableImageMimeType } from '../attachment-preview'
 
 const REMARK_PLUGINS = [remarkGfm]
 
@@ -996,7 +997,7 @@ function ModelBadgeRow({ label, model }: { label: string; model?: ModelConfig })
 // =============================================================================
 
 function isImageMime(mimeType: string): boolean {
-  return mimeType.startsWith('image/')
+  return isPreviewableImageMimeType(mimeType)
 }
 
 function formatFileSize(bytes: number): string {

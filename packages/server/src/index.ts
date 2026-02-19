@@ -1861,6 +1861,7 @@ import {
   regenerateAcceptanceCriteriaForTask,
 } from './agent-execution-service.js';
 import { normalizeAttachmentImage, canonicalizeImageMimeType } from './image-normalize.js';
+import { getAttachmentMimeType } from './attachment-response.js';
 
 import {
   discoverPostExecutionSkills,
@@ -2570,11 +2571,22 @@ app.get('/api/workspaces/:workspaceId/tasks/:taskId/attachments/:storedName', as
   const workspace = await getWorkspaceById(req.params.workspaceId);
   if (!workspace) { res.status(404).json({ error: 'Workspace not found' }); return; }
 
+  const tasksDir = getTasksDir(workspace);
+  const tasks = discoverTasks(tasksDir);
+  const task = tasks.find(t => t.id === req.params.taskId);
+  if (!task) { res.status(404).json({ error: 'Task not found' }); return; }
+
   const dir = getAttachmentsDir(workspace, req.params.taskId);
   const filePath = join(dir, req.params.storedName);
 
   try {
     await stat(filePath);
+
+    const attachmentMimeType = getAttachmentMimeType(task.frontmatter.attachments || [], req.params.storedName);
+    if (attachmentMimeType) {
+      res.setHeader('Content-Type', attachmentMimeType);
+    }
+
     res.sendFile(filePath);
   } catch {
     res.status(404).json({ error: 'Attachment not found' });

@@ -144,6 +144,10 @@ Use `metadata.signal` + `metadata.outcome` + `metadata.sessionId`/`turnId` to bu
 | POST | `/api/workspaces/:workspaceId/planning/attachments` | Upload planning attachments |
 | GET | `/api/workspaces/:workspaceId/planning/attachments/:storedName` | Download planning attachment |
 
+Notes:
+- `GET /api/workspaces/:workspaceId/tasks/:taskId/attachments/:storedName` uses the attachment's stored MIME metadata when available, so uncommon extensions can still be served with the correct `Content-Type`.
+- UI previews are intentionally conservative: inline thumbnails are only rendered for browser-safe image MIME types (`image/jpeg`, `image/png`, `image/gif`, `image/webp`); other image-like files are shown as downloadable file attachments.
+
 ### Common error behavior
 
 | Status | Typical causes |

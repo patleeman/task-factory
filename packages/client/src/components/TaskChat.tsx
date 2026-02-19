@@ -6,6 +6,7 @@ import { useVoiceDictation } from '../hooks/useVoiceDictation'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { api } from '../api'
+import { isPreviewableImageMimeType } from '../attachment-preview'
 import { AppIcon } from './AppIcon'
 import { InlineWhiteboardPanel } from './InlineWhiteboardPanel'
 import {
@@ -1573,7 +1574,7 @@ export function TaskChat({
                           const url = getAttachmentUrlProp
                             ? getAttachmentUrlProp(att.storedName)
                             : workspaceId && taskId ? api.getAttachmentUrl(workspaceId, taskId, att.storedName) : ''
-                          const isImage = att.mimeType.startsWith('image/')
+                          const isImage = isPreviewableImageMimeType(att.mimeType)
                           return isImage ? (
                             <button
                               key={att.id}
@@ -1725,7 +1726,7 @@ export function TaskChat({
         {pendingFiles.length > 0 && (
           <div className="flex flex-wrap gap-1.5 px-3 pt-2 pb-0">
             {pendingFiles.map((file, i) => {
-              const isImage = file.type.startsWith('image/')
+              const isImage = isPreviewableImageMimeType(file.type)
               return (
                 <div
                   key={`${file.name}-${i}`}

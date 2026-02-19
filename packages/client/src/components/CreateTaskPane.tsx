@@ -15,6 +15,7 @@ import { clearStoredWhiteboardScene, createWhiteboardAttachmentFilename, exportW
 import { InlineWhiteboardPanel } from './InlineWhiteboardPanel'
 import { useLocalStorageDraft } from '../hooks/useLocalStorageDraft'
 import { api } from '../api'
+import { isPreviewableImageMimeType } from '../attachment-preview'
 import type { PostExecutionSkill } from '../types/pi'
 
 export interface CreateTaskData {
@@ -545,7 +546,7 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
       {pendingFiles.length > 0 && (
         <div className="space-y-1.5 mb-2">
           {pendingFiles.map((file, i) => {
-            const isImage = file.type.startsWith('image/')
+            const isImage = isPreviewableImageMimeType(file.type)
             return (
               <div
                 key={`${file.name}-${i}`}
