@@ -915,7 +915,7 @@ app.post('/api/workspaces/:workspaceId/activity', async (req, res) => {
       const allTasks = discoverTasks(tasksDir);
       const task = allTasks.find(t => t.id === taskId);
       if (task) {
-        chatImages = loadAttachmentsByIds(
+        chatImages = await loadAttachmentsByIds(
           attachmentIds,
           task.frontmatter.attachments || [],
           workspace.path,
@@ -1860,6 +1860,7 @@ import {
   createTaskConversationSession,
   regenerateAcceptanceCriteriaForTask,
 } from './agent-execution-service.js';
+import { normalizeAttachmentImage } from './image-normalize.js';
 
 import {
   discoverPostExecutionSkills,
@@ -2028,7 +2029,7 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/steer', async (req, res) =>
   // Load image attachments if referenced
   let steerImages: { type: 'image'; data: string; mimeType: string }[] | undefined;
   if (attachmentIds && attachmentIds.length > 0 && workspace && taskForMessage) {
-    const images = loadAttachmentsByIds(
+    const images = await loadAttachmentsByIds(
       attachmentIds,
       taskForMessage.frontmatter.attachments || [],
       workspace.path,
@@ -2092,7 +2093,7 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/follow-up', async (req, res
   // Load image attachments if referenced
   let followUpImages: { type: 'image'; data: string; mimeType: string }[] | undefined;
   if (attachmentIds && attachmentIds.length > 0 && workspace && taskForMessage) {
-    const images = loadAttachmentsByIds(
+    const images = await loadAttachmentsByIds(
       attachmentIds,
       taskForMessage.frontmatter.attachments || [],
       workspace.path,
@@ -2748,7 +2749,10 @@ app.post('/api/workspaces/:workspaceId/planning/message', async (req, res) => {
         try {
           const { readFile } = await import('fs/promises');
           const data = (await readFile(filePath)).toString('base64');
-          images.push({ type: 'image', data, mimeType: att.mimeType });
+          const normalized = await normalizeAttachmentImage({ type: 'image', data, mimeType: att.mimeType });
+          if (normalized) {
+            images.push(normalized);
+          }
         } catch { /* skip */ }
       }
       if (images.length === 0) images = undefined;

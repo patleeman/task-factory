@@ -53,6 +53,7 @@ import { runPrePlanningSkills, runPreExecutionSkills, runPostExecutionSkills } f
 import { withTimeout } from './with-timeout.js';
 import { generateAndPersistSummary } from './summary-service.js';
 import { attachTaskFileAndBroadcast, type AttachTaskFileRequest } from './task-attachment-service.js';
+import { normalizeAttachmentImage } from './image-normalize.js';
 import { logTaskStateTransition } from './state-transition.js';
 import {
   buildContractReference,
@@ -285,15 +286,16 @@ function getAttachmentsDir(workspacePath: string, taskId: string): string {
 
 /**
  * Load task attachments from disk.
- * - Image files are base64-encoded into ImageContent for the LLM.
+ * - Image files are base64-encoded into ImageContent for the LLM, then
+ *   normalized to fit within the 2000px dimension limit for multi-image requests.
  * - Non-image files get a file-path reference so the agent can read them.
  * Returns both the ImageContent array and a markdown prompt section.
  */
-function loadAttachments(
+async function loadAttachments(
   attachments: Attachment[],
   workspacePath: string,
   taskId: string,
-): LoadedAttachments {
+): Promise<LoadedAttachments> {
   if (!attachments || attachments.length === 0) {
     return { images: [], promptSection: '' };
   }
@@ -310,8 +312,13 @@ function loadAttachments(
       if (existsSync(filePath)) {
         try {
           const data = readFileSync(filePath).toString('base64');
-          images.push({ type: 'image', data, mimeType: att.mimeType });
-          lines.push(`- **${att.filename}** (image, attached inline)`);
+          const normalized = await normalizeAttachmentImage({ type: 'image', data, mimeType: att.mimeType });
+          if (normalized) {
+            images.push(normalized);
+            lines.push(`- **${att.filename}** (image, attached inline)`);
+          } else {
+            lines.push(`- **${att.filename}** (image, failed to normalize)`);
+          }
         } catch (err) {
           console.error(`Failed to read image attachment ${att.filename}:`, err);
           lines.push(`- **${att.filename}** (image, failed to load)`);
@@ -332,13 +339,14 @@ function loadAttachments(
 /**
  * Load specific attachments by ID from a task's attachment list.
  * Used when a chat message references particular attachment IDs.
+ * Images are normalized to fit within the 2000px dimension limit.
  */
-export function loadAttachmentsByIds(
+export async function loadAttachmentsByIds(
   attachmentIds: string[],
   allAttachments: Attachment[],
   workspacePath: string,
   taskId: string,
-): ImageContent[] {
+): Promise<ImageContent[]> {
   if (!attachmentIds || attachmentIds.length === 0) return [];
 
   const dir = getAttachmentsDir(workspacePath, taskId);
@@ -356,7 +364,10 @@ export function loadAttachmentsByIds(
 
     try {
       const data = readFileSync(filePath).toString('base64');
-      images.push({ type: 'image', data, mimeType: att.mimeType });
+      const normalized = await normalizeAttachmentImage({ type: 'image', data, mimeType: att.mimeType });
+      if (normalized) {
+        images.push(normalized);
+      }
     } catch (err) {
       console.error(`Failed to read attachment ${att.filename}:`, err);
     }
@@ -443,6 +454,10 @@ interface TaskSession {
   activeTurnErrorMessage?: string;
   /** Interval that refreshes the persisted execution lease heartbeat. */
   leaseHeartbeatTimer?: ReturnType<typeof setInterval>;
+  /** Ordered list of model configs to try: primary first, then fallbacks. */
+  modelChain?: ModelConfig[];
+  /** Index into modelChain indicating the currently active model (0 = primary). */
+  currentModelIndex?: number;
 }
 
 const activeSessions = new Map<string, TaskSession>();
@@ -598,6 +613,8 @@ interface TaskConversationSessionOptions {
   forceNewSession?: boolean;
   purpose?: TaskConversationPurpose;
   defaultThinkingLevel?: NonNullable<Parameters<typeof createAgentSession>[0]>['thinkingLevel'];
+  /** When set, overrides the model config derived from the task frontmatter. */
+  modelConfigOverride?: ModelConfig;
 }
 
 export interface TaskConversationSessionResult {
@@ -664,7 +681,7 @@ export async function createTaskConversationSession(
     sessionOpts.thinkingLevel = defaultThinkingLevel;
   }
 
-  const mc = getModelConfigForPurpose(task, purpose);
+  const mc = options.modelConfigOverride ?? getModelConfigForPurpose(task, purpose);
   if (mc) {
     const resolved = modelRegistry.find(mc.provider, mc.modelId);
     if (resolved) {
@@ -1510,6 +1527,9 @@ export async function executeTask(options: ExecuteTaskOptions): Promise<TaskSess
   const { loadTaskDefaultsForWorkspacePath } = await import('./task-defaults-service.js');
   const taskDefaults = loadTaskDefaultsForWorkspacePath(workspacePath);
 
+  // Build execution model chain: [primary, ...fallbacks]
+  const executionModelChain = buildExecutionModelChain(task);
+
   // Create session
   const session: TaskSession = {
     id: crypto.randomUUID(),
@@ -1535,6 +1555,8 @@ export async function executeTask(options: ExecuteTaskOptions): Promise<TaskSess
     watchdogsEnabled: true,
     sawTurnEvent: false,
     watchdogRecovered: false,
+    modelChain: executionModelChain,
+    currentModelIndex: 0,
   };
 
   registerActiveSession(session);
@@ -1640,7 +1662,7 @@ export async function executeTask(options: ExecuteTaskOptions): Promise<TaskSess
     });
 
     // Load task attachments (images become ImageContent, others become file paths in prompt)
-    const { images: taskImages, promptSection: attachmentSection } = loadAttachments(
+    const { images: taskImages, promptSection: attachmentSection } = await loadAttachments(
       task.frontmatter.attachments,
       workspacePath,
       task.id,
@@ -1671,6 +1693,117 @@ export async function executeTask(options: ExecuteTaskOptions): Promise<TaskSess
   }
 
   return session;
+}
+
+// =============================================================================
+// Execution Model Failover
+// =============================================================================
+
+/**
+ * Returns the next ModelConfig in the session's model chain, or undefined if
+ * the chain is exhausted.  Advances session.currentModelIndex on success.
+ */
+function peekNextExecutionModel(session: TaskSession): ModelConfig | undefined {
+  const chain = session.modelChain;
+  if (!chain || chain.length <= 1) {
+    return undefined;
+  }
+  const nextIndex = (session.currentModelIndex ?? 0) + 1;
+  if (nextIndex >= chain.length) {
+    return undefined;
+  }
+  return chain[nextIndex];
+}
+
+/**
+ * Recreate session.piSession pointing to the next model in the chain.
+ * Logs failover notice to the activity feed.
+ * Returns true on success, false if failover could not be set up.
+ */
+async function failoverToNextExecutionModel(
+  session: TaskSession,
+  workspaceId: string,
+  task: Task,
+  failedErrorMessage: string,
+): Promise<boolean> {
+  const nextModel = peekNextExecutionModel(session);
+  if (!nextModel) {
+    return false;
+  }
+
+  const prevIndex = session.currentModelIndex ?? 0;
+  const prevModel = session.modelChain![prevIndex];
+  const nextIndex = prevIndex + 1;
+
+  const broadcast = session.broadcastToWorkspace;
+
+  broadcastActivityEntry(
+    broadcast,
+    createSystemEvent(
+      workspaceId,
+      task.id,
+      'phase-change',
+      `Model failover: switching from ${prevModel.provider}/${prevModel.modelId} to ${nextModel.provider}/${nextModel.modelId} after retryable error: ${failedErrorMessage}`,
+      {
+        kind: 'execution-model-failover',
+        fromProvider: prevModel.provider,
+        fromModelId: prevModel.modelId,
+        toProvider: nextModel.provider,
+        toModelId: nextModel.modelId,
+        errorMessage: failedErrorMessage,
+      },
+    ),
+    'execution model failover',
+  );
+
+  // Tear down the current Pi session.
+  session.unsubscribe?.();
+  try {
+    await session.piSession?.abort();
+  } catch {
+    // ignore abort errors during teardown
+  }
+  session.piSession = null;
+
+  const workspacePath = session.workspacePath;
+  if (!workspacePath) {
+    console.error('[ExecutionFailover] No workspacePath on session — cannot recreate Pi session');
+    return false;
+  }
+
+  try {
+    const { session: newPiSession } = await createTaskConversationSession({
+      task,
+      workspacePath,
+      purpose: 'execution',
+      forceNewSession: true,
+      modelConfigOverride: nextModel,
+    });
+
+    session.piSession = newPiSession;
+    session.currentModelIndex = nextIndex;
+
+    // Re-subscribe to events from the new Pi session.
+    session.unsubscribe = newPiSession.subscribe((event: AgentSessionEvent) => {
+      handlePiEvent(event, session, workspaceId, task.id);
+    });
+
+    return true;
+  } catch (err) {
+    console.error('[ExecutionFailover] Failed to recreate Pi session with next model:', err);
+    broadcastActivityEntry(
+      broadcast,
+      createSystemEvent(
+        workspaceId,
+        task.id,
+        'phase-change',
+        `Model failover setup failed: ${err}`,
+        { kind: 'execution-model-failover-error', errorMessage: String(err) },
+      ),
+      'execution failover setup error',
+    );
+    return false;
+  }
 }
 
 // =============================================================================
@@ -1745,10 +1878,32 @@ async function runAgentExecution(
     }
 
     const promptOpts = images && images.length > 0 ? { images } : undefined;
-    startExecutionTurnWatchdogs(session, workspaceId, task.id);
-    await session.piSession!.prompt(prompt, promptOpts);
 
-    // prompt() resolved — check if the agent signaled completion.
+    // Prompt loop: retries once per failover model when a retryable provider
+    // error is detected.  Pre-execution skills ran above and are not repeated.
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      // Reset per-turn error state before each attempt.
+      session.activeTurnErrorMessage = undefined;
+      session.agentSignaledComplete = false;
+
+      startExecutionTurnWatchdogs(session, workspaceId, task.id);
+      await session.piSession!.prompt(prompt, promptOpts);
+
+      // Check if the turn ended with a retryable provider error we can failover.
+      const turnError = session.activeTurnErrorMessage;
+      if (turnError && isRetryableProviderError(turnError) && getActiveSession(task.id) === session) {
+        const failedOver = await failoverToNextExecutionModel(session, workspaceId, task, turnError);
+        if (failedOver && session.piSession) {
+          // New Pi session ready — retry the prompt with the fallback model.
+          continue;
+        }
+      }
+
+      break;
+    }
+
+    // prompt() loop done — check if the agent signaled completion.
     // Must await so post-execution skills actually run (and errors are caught).
     await handleAgentTurnEnd(session, workspaceId, task);
   } catch (err) {
@@ -1758,6 +1913,18 @@ async function runAgentExecution(
         console.warn(`[AgentExecution] Ignoring execution error for stale session on task ${task.id}:`, err);
       }
       return;
+    }
+
+    // If the thrown error is retryable and we have a next model, failover.
+    const thrownErrorMsg = normalizeOptionalErrorMessage(err) ?? String(err);
+    if (isRetryableProviderError(thrownErrorMsg)) {
+      const failedOver = await failoverToNextExecutionModel(session, workspaceId, task, thrownErrorMsg);
+      if (failedOver && session.piSession) {
+        // Retry the entire execution with the next model (pre-execution skills
+        // are skipped — the fallback model starts a fresh session without them).
+        runAgentExecution(session, prompt, workspaceId, task, images);
+        return;
+      }
     }
 
     console.error('Agent execution error:', err);
@@ -2072,6 +2239,52 @@ function getAssistantTurnErrorMessage(message: any): string | null {
   }
 
   return normalizeAssistantErrorMessage(message.errorMessage);
+}
+
+/**
+ * Returns true when a provider error message is transient and a different model
+ * might succeed (rate limits, quota exhaustion, server-side 5xx).
+ */
+function isRetryableProviderError(errorMessage: string): boolean {
+  const lower = errorMessage.toLowerCase();
+  return (
+    lower.includes('rate limit')
+    || lower.includes('ratelimit')
+    || lower.includes('429')
+    || lower.includes('too many requests')
+    || lower.includes('quota')
+    || lower.includes('500')
+    || lower.includes('503')
+    || lower.includes('529')
+    || lower.includes('internal server error')
+    || lower.includes('service unavailable')
+    || lower.includes('overloaded')
+    || lower.includes('capacity')
+  );
+}
+
+/**
+ * Build an ordered model chain from a task: [primary, ...fallbacks].
+ * Returns undefined when there is no model configured.
+ */
+function buildExecutionModelChain(task: Task): ModelConfig[] | undefined {
+  const primary = task.frontmatter.executionModelConfig ?? task.frontmatter.modelConfig;
+  if (!primary) {
+    return undefined;
+  }
+  const fallbacks = task.frontmatter.executionFallbackModels ?? [];
+  return [primary, ...fallbacks];
+}
+
+function buildPlanningModelChain(task: Task): ModelConfig[] | undefined {
+  const primary = task.frontmatter.planningModelConfig
+    ?? task.frontmatter.executionModelConfig
+    ?? task.frontmatter.modelConfig;
+  if (!primary) {
+    return undefined;
+  }
+  const fallbacks = task.frontmatter.planningFallbackModels ?? [];
+  return [primary, ...fallbacks];
 }
 
 function shouldSkipToolEchoMessage(session: TaskSession, content: string): boolean {
@@ -3243,6 +3456,12 @@ export interface PlanTaskOptions {
   workspaceId: string;
   workspacePath: string;
   broadcastToWorkspace?: (event: any) => void;
+  /** @internal Model override for model-chain failover retries. */
+  _modelOverride?: ModelConfig;
+  /** @internal Full planning model chain used for failover. */
+  _modelChain?: ModelConfig[];
+  /** @internal Current index in _modelChain (0 = primary). */
+  _modelIndex?: number;
 }
 
 function syncTaskReference(target: Task, source: Task): void {
@@ -3267,6 +3486,15 @@ function persistPlanningMutation(task: Task, mutate: (latestTask: Task) => void)
 
 export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | null> {
   const { task, workspaceId, workspacePath, broadcastToWorkspace } = options;
+
+  // Build planning model chain on the first (primary) attempt only.
+  if (!options._modelChain) {
+    const chain = buildPlanningModelChain(task);
+    if (chain && chain.length > 1) {
+      options._modelChain = chain;
+      options._modelIndex = 0;
+    }
+  }
 
   const stateBeforePlanning = buildTaskStateSnapshot(task.frontmatter);
 
@@ -3394,6 +3622,7 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
       settingsManager: planningSettings,
       purpose: 'planning',
       defaultThinkingLevel: PLANNING_DEFAULT_THINKING_LEVEL,
+      modelConfigOverride: options._modelOverride,
     });
 
     if (!await attachPiSessionIfStillActive(session, piSession, 'planning session setup')) {
@@ -3510,7 +3739,7 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
     }
 
     // Load task attachments for the planning prompt
-    const { images: planImages, promptSection: planAttachmentSection } = loadAttachments(
+    const { images: planImages, promptSection: planAttachmentSection } = await loadAttachments(
       task.frontmatter.attachments,
       workspacePath,
       task.id,
@@ -3662,6 +3891,56 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
 
       return savedPlan;
     }
+
+    // — Planning model failover ——————————————————————————————————————————
+    // When the primary/current model hits a retryable provider error (rate
+    // limit, 5xx) and the task has more fallback models, tear down this
+    // session and retry planTask with the next model in the chain.
+    if (!savedPlan && isRetryableProviderError(errMessage)) {
+      const chain = options._modelChain;
+      const currentIdx = options._modelIndex ?? 0;
+      const nextIdx = currentIdx + 1;
+
+      if (chain && nextIdx < chain.length) {
+        const prevModel = chain[currentIdx];
+        const nextModel = chain[nextIdx];
+
+        broadcastActivityEntry(
+          broadcastToWorkspace,
+          createSystemEvent(
+            workspaceId,
+            task.id,
+            'phase-change',
+            `Planning model failover: switching from ${prevModel.provider}/${prevModel.modelId} to ${nextModel.provider}/${nextModel.modelId} after retryable error: ${errMessage}`,
+            {
+              kind: 'planning-model-failover',
+              fromProvider: prevModel.provider,
+              fromModelId: prevModel.modelId,
+              toProvider: nextModel.provider,
+              toModelId: nextModel.modelId,
+              errorMessage: errMessage,
+            },
+          ),
+          'planning model failover',
+        );
+
+        // Clean up current failed session before retry.
+        session.unsubscribe?.();
+        try { await session.piSession?.abort(); } catch { /* ignore */ }
+        session.status = 'error';
+        session.endTime = new Date().toISOString();
+        clearActiveSessionIfOwned(task.id, session);
+        registry.delete(task.id);
+
+        return planTask({
+          ...options,
+          _modelOverride: nextModel,
+          _modelChain: chain,
+          _modelIndex: nextIdx,
+        });
+      }
+    }
+    // —————————————————————————————————————————————————————————————————————
 
     console.error(`Planning agent failed for ${task.id}:`, err);
 

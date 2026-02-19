@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New Task default model resolution now follows: explicit form state → workspace default profile → global default profile → manual model defaults.
 
 ### Fixed
+- Multi-image requests no longer fail with an Anthropic `invalid_request_error` when any attached image exceeds 2000px in either dimension. The server now normalizes all image attachments (task prompts, chat/steer/follow-up messages, and foreman planning messages) to fit within the 2000×2000 px limit before sending to the provider. Images that cannot be normalized are skipped individually rather than aborting the entire request.
 - Removed the duplicate theme switcher from the global Settings header; theme changes remain available from the workspace sidebar toggle and Settings → Appearance selector.
 - Stale default model profile IDs are now safely ignored and cleared on save/load, preventing invalid profile selections from being returned or persisted.
 
