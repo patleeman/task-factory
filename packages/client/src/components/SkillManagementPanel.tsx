@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ChangeEvent } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { PostExecutionSkill, SkillConfigField } from '../types/pi'
 
 interface SkillManagementPanelProps {
@@ -208,12 +208,6 @@ export function SkillManagementPanel({ skills, onSkillsChange }: SkillManagement
   const [saveMessage, setSaveMessage] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
 
-  const [importContent, setImportContent] = useState('')
-  const [overwriteImport, setOverwriteImport] = useState(false)
-  const [importError, setImportError] = useState<string | null>(null)
-  const [importMessage, setImportMessage] = useState<string | null>(null)
-  const [isImporting, setIsImporting] = useState(false)
-
   useEffect(() => {
     if (isCreating) return
 
@@ -403,64 +397,12 @@ export function SkillManagementPanel({ skills, onSkillsChange }: SkillManagement
     }
   }
 
-  const handleImportFile = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
-    if (!file) return
-
-    try {
-      const content = await file.text()
-      setImportContent(content)
-      setImportError(null)
-    } catch {
-      setImportError('Failed to read file')
-    } finally {
-      event.target.value = ''
-    }
-  }
-
-  const handleImport = async () => {
-    setImportError(null)
-    setImportMessage(null)
-
-    if (!importContent.trim()) {
-      setImportError('Paste SKILL.md content first')
-      return
-    }
-
-    setIsImporting(true)
-
-    try {
-      const response = await fetch('/api/factory/skills/import', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          content: importContent,
-          overwrite: overwriteImport,
-        }),
-      })
-
-      if (!response.ok) {
-        throw new Error(await parseErrorMessage(response, 'Failed to import skill'))
-      }
-
-      const importedSkill = await response.json() as PostExecutionSkill
-      await refreshSkills(importedSkill.id)
-      setImportMessage(`Imported ${importedSkill.id}`)
-      setImportContent('')
-      setOverwriteImport(false)
-    } catch (err) {
-      setImportError(err instanceof Error ? err.message : 'Failed to import skill')
-    } finally {
-      setIsImporting(false)
-    }
-  }
-
   return (
     <div className="space-y-5">
       <div>
         <h3 className="text-sm font-semibold text-slate-800">Skill Library</h3>
         <p className="text-xs text-slate-500 mt-1">
-          Create and import reusable execution skills. Parameters defined here can be configured per task.
+          Create and manage reusable execution skills. Parameters defined here can be configured per task.
         </p>
       </div>
 
@@ -772,62 +714,6 @@ export function SkillManagementPanel({ skills, onSkillsChange }: SkillManagement
             </div>
           </section>
 
-          <section className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
-            <h4 className="text-sm font-semibold text-slate-800">Import SKILL.md</h4>
-            <p className="text-xs text-slate-500">
-              Paste a skill from another project, or load a local SKILL.md file.
-            </p>
-
-            {importError && (
-              <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
-                {importError}
-              </div>
-            )}
-
-            {importMessage && !importError && (
-              <div className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-700">
-                {importMessage}
-              </div>
-            )}
-
-            <textarea
-              value={importContent}
-              onChange={(event) => setImportContent(event.target.value)}
-              className="w-full min-h-[160px] rounded-lg border border-slate-200 px-3 py-2 text-xs font-mono"
-              placeholder="---\nname: my-skill\ndescription: ...\n---"
-            />
-
-            <div className="flex items-center justify-between gap-3">
-              <label className="text-xs text-slate-600 inline-flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={overwriteImport}
-                  onChange={(event) => setOverwriteImport(event.target.checked)}
-                />
-                Overwrite if skill id already exists
-              </label>
-
-              <div className="flex items-center gap-2">
-                <label className="text-xs text-blue-600 hover:text-blue-700 cursor-pointer">
-                  <input
-                    type="file"
-                    accept=".md,text/markdown"
-                    className="hidden"
-                    onChange={handleImportFile}
-                  />
-                  Load File
-                </label>
-                <button
-                  type="button"
-                  onClick={handleImport}
-                  disabled={isImporting}
-                  className="btn btn-secondary text-sm py-1.5 px-3 disabled:opacity-50"
-                >
-                  {isImporting ? 'Importing...' : 'Import Skill'}
-                </button>
-              </div>
-            </div>
-          </section>
         </div>
       </div>
     </div>

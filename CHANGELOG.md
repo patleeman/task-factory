@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Global Settings page now uses a unified tab navigation: **Appearance**, Authentication, Task Defaults, and Skills. Appearance was previously always visible above the tab strip; it is now a first-class tab and the default landing tab. The Skills tab gained a callout that clarifies the distinction between skill library management (create/edit skills here) and default lane assignment (Task Defaults tab).
+- Settings → Skills no longer shows the **Import SKILL.md** section (paste textarea, overwrite checkbox, file loader, and Import Skill button). Skills can still be created and managed directly in the panel.
 
 ### Fixed
 - _None yet._
