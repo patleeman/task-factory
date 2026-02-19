@@ -244,7 +244,7 @@ export function SettingsPage() {
   const navigate = useNavigate()
   const { preference, setPreference } = useTheme()
 
-  const [activeTab, setActiveTab] = useState<'auth' | 'task-defaults' | 'skills'>('auth')
+  const [activeTab, setActiveTab] = useState<'appearance' | 'auth' | 'task-defaults' | 'skills'>('appearance')
 
   const [models, setModels] = useState<AvailableModel[]>([])
   const [skills, setSkills] = useState<PostExecutionSkill[]>([])
@@ -645,90 +645,8 @@ export function SettingsPage() {
         <div className="max-w-6xl mx-auto px-6 py-8 space-y-5">
           <div>
             <h2 className="text-xl font-semibold text-slate-800">Pi Settings</h2>
-            <p className="text-sm text-slate-500">Configure API keys, OAuth login, task defaults, and custom skills in one place.</p>
+            <p className="text-sm text-slate-500">Manage appearance, authentication, task defaults, and execution skills.</p>
           </div>
-
-          <section className="rounded-xl border border-slate-200 bg-white p-4 space-y-2">
-            <h3 className="text-sm font-semibold text-slate-800">Appearance</h3>
-            <p className="text-xs text-slate-500">
-              Choose how Task Factory should render. Preference is saved in Task Factory settings and restored on reload.
-            </p>
-            <div className="max-w-xs">
-              <label className="block text-sm font-medium text-slate-700 mb-1">Theme</label>
-              <select
-                value={preference}
-                onChange={(event) => setPreference(event.target.value as ThemePreference)}
-                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent"
-              >
-                <option value="light">Light</option>
-                <option value="dark">Dark</option>
-                <option value="system">System</option>
-              </select>
-            </div>
-
-            <div className="max-w-sm">
-              <label className="block text-sm font-medium text-slate-700 mb-1">Voice input hotkey</label>
-              <input
-                type="text"
-                value={voiceInputHotkey}
-                readOnly
-                onKeyDown={(event) => {
-                  if (event.key === 'Tab') return
-                  event.preventDefault()
-
-                  const nextHotkey = formatVoiceInputHotkeyFromEvent(event)
-                  if (!nextHotkey) return
-
-                  const validationError = validateVoiceInputHotkeyForUi(nextHotkey)
-                  if (validationError) {
-                    setSystemSettingsError(validationError)
-                    setSystemSettingsMessage(null)
-                    return
-                  }
-
-                  setVoiceInputHotkey(nextHotkey)
-                  setSystemSettingsError(null)
-                  setSystemSettingsMessage(null)
-                }}
-                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent font-mono"
-                aria-label="Voice input hotkey"
-              />
-              <p className="mt-1 text-xs text-slate-500">
-                Focus this field and press the key combo you want. Hold this hotkey to record voice input; release to stop.
-              </p>
-              <div className="mt-2 flex items-center gap-2">
-                <button
-                  onClick={handleSaveVoiceInputHotkey}
-                  disabled={isSavingSystemSettings}
-                  className="btn btn-primary text-xs py-1.5 px-3 disabled:opacity-50"
-                >
-                  {isSavingSystemSettings ? 'Saving...' : 'Save Voice Hotkey'}
-                </button>
-                <button
-                  onClick={() => {
-                    setVoiceInputHotkey(DEFAULT_VOICE_INPUT_HOTKEY)
-                    setSystemSettingsError(null)
-                    setSystemSettingsMessage(null)
-                  }}
-                  className="btn btn-secondary text-xs py-1.5 px-3"
-                >
-                  Reset to Default
-                </button>
-              </div>
-            </div>
-
-            {systemSettingsError && (
-              <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                {systemSettingsError}
-              </div>
-            )}
-
-            {systemSettingsMessage && !systemSettingsError && (
-              <div className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">
-                {systemSettingsMessage}
-              </div>
-            )}
-          </section>
 
           {loadError && (
             <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -737,6 +655,16 @@ export function SettingsPage() {
           )}
 
           <div className="flex border-b border-slate-200">
+            <button
+              onClick={() => setActiveTab('appearance')}
+              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === 'appearance'
+                  ? 'border-safety-orange text-safety-orange'
+                  : 'border-transparent text-slate-600 hover:text-slate-800'
+              }`}
+            >
+              Appearance
+            </button>
             <button
               onClick={() => setActiveTab('auth')}
               className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
@@ -768,6 +696,95 @@ export function SettingsPage() {
               Skills
             </button>
           </div>
+
+          {activeTab === 'appearance' && (
+            <div className="space-y-5">
+              <section className="rounded-xl border border-slate-200 bg-white p-4 space-y-4">
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-800">Appearance</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Choose how Task Factory should render. Preference is saved in Task Factory settings and restored on reload.
+                  </p>
+                </div>
+
+                <div className="max-w-xs">
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Theme</label>
+                  <select
+                    value={preference}
+                    onChange={(event) => setPreference(event.target.value as ThemePreference)}
+                    className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent"
+                  >
+                    <option value="light">Light</option>
+                    <option value="dark">Dark</option>
+                    <option value="system">System</option>
+                  </select>
+                </div>
+
+                <div className="max-w-sm">
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Voice input hotkey</label>
+                  <input
+                    type="text"
+                    value={voiceInputHotkey}
+                    readOnly
+                    onKeyDown={(event) => {
+                      if (event.key === 'Tab') return
+                      event.preventDefault()
+
+                      const nextHotkey = formatVoiceInputHotkeyFromEvent(event)
+                      if (!nextHotkey) return
+
+                      const validationError = validateVoiceInputHotkeyForUi(nextHotkey)
+                      if (validationError) {
+                        setSystemSettingsError(validationError)
+                        setSystemSettingsMessage(null)
+                        return
+                      }
+
+                      setVoiceInputHotkey(nextHotkey)
+                      setSystemSettingsError(null)
+                      setSystemSettingsMessage(null)
+                    }}
+                    className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent font-mono"
+                    aria-label="Voice input hotkey"
+                  />
+                  <p className="mt-1 text-xs text-slate-500">
+                    Focus this field and press the key combo you want. Hold this hotkey to record voice input; release to stop.
+                  </p>
+                  <div className="mt-2 flex items-center gap-2">
+                    <button
+                      onClick={handleSaveVoiceInputHotkey}
+                      disabled={isSavingSystemSettings}
+                      className="btn btn-primary text-xs py-1.5 px-3 disabled:opacity-50"
+                    >
+                      {isSavingSystemSettings ? 'Saving...' : 'Save Voice Hotkey'}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setVoiceInputHotkey(DEFAULT_VOICE_INPUT_HOTKEY)
+                        setSystemSettingsError(null)
+                        setSystemSettingsMessage(null)
+                      }}
+                      className="btn btn-secondary text-xs py-1.5 px-3"
+                    >
+                      Reset to Default
+                    </button>
+                  </div>
+                </div>
+
+                {systemSettingsError && (
+                  <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                    {systemSettingsError}
+                  </div>
+                )}
+
+                {systemSettingsMessage && !systemSettingsError && (
+                  <div className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">
+                    {systemSettingsMessage}
+                  </div>
+                )}
+              </section>
+            </div>
+          )}
 
           {activeTab === 'auth' && (
             <div className="space-y-5">
@@ -1289,7 +1306,18 @@ export function SettingsPage() {
           )}
 
           {activeTab === 'skills' && (
-            <SkillManagementPanel skills={skills} onSkillsChange={handleSkillsChange} />
+            <div className="space-y-4">
+              <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2.5 text-sm text-blue-800">
+                <span className="font-semibold">Skill Library</span> — create and edit reusable skills here.
+                To configure which skills run by default on new tasks (pre-planning, pre-execution, post-execution),
+                go to the <button
+                  type="button"
+                  onClick={() => setActiveTab('task-defaults')}
+                  className="underline font-medium hover:text-blue-900"
+                >Task Defaults</button> tab.
+              </div>
+              <SkillManagementPanel skills={skills} onSkillsChange={handleSkillsChange} />
+            </div>
           )}
         </div>
       </div>

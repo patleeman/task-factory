@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - _None yet._
 
 ### Changed
-- _None yet._
+- Global Settings page now uses a unified tab navigation: **Appearance**, Authentication, Task Defaults, and Skills. Appearance was previously always visible above the tab strip; it is now a first-class tab and the default landing tab. The Skills tab gained a callout that clarifies the distinction between skill library management (create/edit skills here) and default lane assignment (Task Defaults tab).
 
 ### Fixed
 - _None yet._
