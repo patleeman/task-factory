@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Settings → Skills no longer shows the **Import SKILL.md** section (paste textarea, overwrite checkbox, file loader, and Import Skill button). Skills can still be created and managed directly in the panel.
 
 ### Fixed
-- _None yet._
+- Removed the duplicate theme switcher from the global Settings header; theme changes remain available from the workspace sidebar toggle and Settings → Appearance selector.
 
 ## [0.3.0] - 2026-02-18
 

@@ -25,7 +25,6 @@ import { AppIcon } from './AppIcon'
 import { ExecutionPipelineEditor } from './ExecutionPipelineEditor'
 import { ModelSelector } from './ModelSelector'
 import { SkillManagementPanel } from './SkillManagementPanel'
-import { ThemeToggle } from './ThemeToggle'
 import { useTheme, type ThemePreference } from '../hooks/useTheme'
 import {
   DEFAULT_VOICE_INPUT_HOTKEY,
@@ -630,7 +629,6 @@ export function SettingsPage() {
           <span className="text-sm font-medium text-slate-300">Settings</span>
         </div>
         <div className="flex items-center gap-3">
-          <ThemeToggle />
           <button
             onClick={() => navigate(-1)}
             className="text-sm text-slate-400 hover:text-white transition-colors inline-flex items-center gap-1"
