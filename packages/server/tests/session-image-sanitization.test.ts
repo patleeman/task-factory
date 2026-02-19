@@ -181,4 +181,41 @@ describe('sanitizeSessionFileImages', () => {
     const file = makeTempFile('');
     expect(() => _sanitizeSessionFileImages(file)).not.toThrow();
   });
+
+  it('removes image blocks with empty string media_type (the real-world failure case)', () => {
+    // This is what caused PIFA-176 to deadlock — images with media_type: ""
+    // stored in the session file.  An empty string is falsy in JS so the
+    // original check `if (src?.media_type)` would have silently passed them
+    // through.  The fix checks the block type first, then defaults to "".
+    const emptyMimeBlock = {
+      type: 'image',
+      source: { type: 'base64', media_type: '', data: 'abc' },
+    };
+    const file = makeTempFile(jsonl(
+      sessionHeader,
+      messageEntry('user', [{ type: 'text', text: 'screenshot' }, emptyMimeBlock]),
+    ));
+
+    _sanitizeSessionFileImages(file);
+
+    const lines = readFileSync(file, 'utf-8').split('\n').filter(Boolean);
+    const msg = JSON.parse(lines[1]);
+    expect(msg.message.content).toHaveLength(2);
+    expect(msg.message.content[1].type).toBe('text');
+    expect(msg.message.content[1].text).toContain('removed');
+  });
+
+  it('removes image blocks with missing source/media_type entirely', () => {
+    const noSourceBlock = { type: 'image' }; // no source field at all
+    const file = makeTempFile(jsonl(
+      sessionHeader,
+      messageEntry('user', [noSourceBlock]),
+    ));
+
+    _sanitizeSessionFileImages(file);
+
+    const lines = readFileSync(file, 'utf-8').split('\n').filter(Boolean);
+    const msg = JSON.parse(lines[1]);
+    expect(msg.message.content[0].type).toBe('text');
+  });
 });

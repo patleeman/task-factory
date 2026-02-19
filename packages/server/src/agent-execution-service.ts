@@ -2342,12 +2342,15 @@ function sanitizeSessionFileImages(sessionFilePath: string): void {
 
     let changed = false;
     const sanitizedContent = (msg!.content as Record<string, unknown>[]).flatMap(block => {
-      const src = block.source as { media_type?: string } | undefined;
-      if (block.type === 'image' && src?.media_type) {
-        if (!canonicalizeImageMimeType(src.media_type)) {
+      if (block.type === 'image') {
+        // Check regardless of whether media_type is present, missing, or an
+        // empty string — all three cases are invalid for model dispatch.
+        const src = block.source as { media_type?: string } | undefined;
+        const mimeType = src?.media_type ?? '';
+        if (!canonicalizeImageMimeType(mimeType)) {
           changed = true;
           modified = true;
-          return [{ type: 'text', text: `[Image removed: unsupported format "${src.media_type}" cannot be replayed to the model]` }];
+          return [{ type: 'text', text: `[Image removed: unsupported/missing media_type "${mimeType}" cannot be replayed to the model]` }];
         }
       }
       return [block];
