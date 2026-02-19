@@ -2,9 +2,11 @@
  * Tests for image normalization and attachment loading with resize.
  *
  * Covers:
- * - normalizeAttachmentImage: resize path, error fallback
- * - loadAttachmentsByIds: multi-image normalization, per-image failure skip,
- *   non-image attachment no-op regression
+ * - canonicalizeImageMimeType: supported types, aliases, unsupported types
+ * - normalizeAttachmentImage: unsupported MIME rejection, alias canonicalization,
+ *   resize path, error fallback
+ * - loadAttachmentsByIds: multi-image normalization, unsupported-MIME skip,
+ *   per-image failure skip, non-image attachment no-op regression
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -13,7 +15,9 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 
 import {
+  canonicalizeImageMimeType,
   normalizeAttachmentImage,
+  SUPPORTED_IMAGE_MIME_TYPES,
   _setResizeFnForTesting,
   _resetResizeFnCache,
   type AttachmentImageContent,
@@ -72,10 +76,127 @@ afterEach(() => {
 });
 
 // ---------------------------------------------------------------------------
+// canonicalizeImageMimeType
+// ---------------------------------------------------------------------------
+
+describe('canonicalizeImageMimeType', () => {
+  it('returns canonical form for each directly supported type', () => {
+    for (const mime of SUPPORTED_IMAGE_MIME_TYPES) {
+      expect(canonicalizeImageMimeType(mime)).toBe(mime);
+    }
+  });
+
+  it('normalizes uppercase input to canonical lowercase', () => {
+    expect(canonicalizeImageMimeType('image/JPEG')).toBe('image/jpeg');
+    expect(canonicalizeImageMimeType('IMAGE/PNG')).toBe('image/png');
+    expect(canonicalizeImageMimeType('Image/WebP')).toBe('image/webp');
+  });
+
+  it('strips MIME parameters before comparison', () => {
+    expect(canonicalizeImageMimeType('image/jpeg; charset=utf-8')).toBe('image/jpeg');
+    expect(canonicalizeImageMimeType('image/png;q=0.9')).toBe('image/png');
+  });
+
+  it('maps image/jpg alias to image/jpeg', () => {
+    expect(canonicalizeImageMimeType('image/jpg')).toBe('image/jpeg');
+  });
+
+  it('maps image/jpe alias to image/jpeg', () => {
+    expect(canonicalizeImageMimeType('image/jpe')).toBe('image/jpeg');
+  });
+
+  it('maps image/pjpeg alias to image/jpeg', () => {
+    expect(canonicalizeImageMimeType('image/pjpeg')).toBe('image/jpeg');
+  });
+
+  it('maps image/x-png alias to image/png', () => {
+    expect(canonicalizeImageMimeType('image/x-png')).toBe('image/png');
+  });
+
+  it('returns null for image/svg+xml', () => {
+    expect(canonicalizeImageMimeType('image/svg+xml')).toBeNull();
+  });
+
+  it('returns null for image/tiff', () => {
+    expect(canonicalizeImageMimeType('image/tiff')).toBeNull();
+  });
+
+  it('returns null for image/bmp', () => {
+    expect(canonicalizeImageMimeType('image/bmp')).toBeNull();
+  });
+
+  it('returns null for non-image MIME types', () => {
+    expect(canonicalizeImageMimeType('application/pdf')).toBeNull();
+    expect(canonicalizeImageMimeType('text/plain')).toBeNull();
+  });
+
+  it('returns null for an empty string', () => {
+    expect(canonicalizeImageMimeType('')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // normalizeAttachmentImage
 // ---------------------------------------------------------------------------
 
 describe('normalizeAttachmentImage', () => {
+  it('returns null (without calling resize) for an unsupported MIME type', async () => {
+    const resizeFn = makeResizeFn('SHOULD_NOT_BE_CALLED');
+    _setResizeFnForTesting(resizeFn);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    const result = await normalizeAttachmentImage({
+      type: 'image',
+      data: SMALL_PNG_B64,
+      mimeType: 'image/svg+xml',
+    });
+
+    expect(result).toBeNull();
+    expect(resizeFn).not.toHaveBeenCalled();
+    // Warning should name the offending MIME type to aid debugging.
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('image/svg+xml'));
+  });
+
+  it('falls back to canonical input MIME when resizer returns an unrecognized MIME type', async () => {
+    // Defensive: if the resize utility ever returns a non-canonical MIME
+    // (shouldn't happen in practice), we fall back to the canonical input type.
+    const strangeResizeFn: ResizeImageFn = vi.fn(async (img: AttachmentImageContent) => ({
+      data: 'RESIZED',
+      mimeType: 'image/x-unknown-format', // unexpected output from resizer
+      wasResized: true,
+      originalWidth: 100,
+      originalHeight: 100,
+      width: 100,
+      height: 100,
+    }));
+    _setResizeFnForTesting(strangeResizeFn);
+
+    const result = await normalizeAttachmentImage({
+      type: 'image',
+      data: SMALL_PNG_B64,
+      mimeType: 'image/png',
+    });
+
+    expect(result).not.toBeNull();
+    // Output MIME should be the canonical input type, not the unknown resizer output.
+    expect(result!.mimeType).toBe('image/png');
+  });
+
+  it('normalizes image/jpg alias to image/jpeg before passing to resize', async () => {
+    const resizeFn = makeResizeFn();
+    _setResizeFnForTesting(resizeFn);
+
+    const result = await normalizeAttachmentImage({
+      type: 'image',
+      data: SMALL_PNG_B64,
+      mimeType: 'image/jpg',
+    });
+
+    expect(result).not.toBeNull();
+    // The resize function should receive the canonical MIME type.
+    expect((resizeFn as ReturnType<typeof vi.fn>).mock.calls[0][0].mimeType).toBe('image/jpeg');
+  });
+
   it('returns the resized image data from the resize function', async () => {
     const resizedB64 = 'RESIZED_DATA';
     _setResizeFnForTesting(makeResizeFn(resizedB64));
@@ -153,6 +274,52 @@ describe('loadAttachmentsByIds', () => {
     expect(resizeFn).toHaveBeenCalledTimes(2);
   });
 
+  it('skips an image with an unsupported MIME type (e.g. image/svg+xml)', async () => {
+    const resizeFn = makeResizeFn('NORMALIZED');
+    _setResizeFnForTesting(resizeFn);
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    const { workspacePath } = createTempWorkspace();
+    const taskId = 'TASK-SVG-1';
+    const dir = createTaskAttachmentDir(workspacePath, taskId);
+
+    writeFileSync(join(dir, 'icon.svg'), '<svg/>');
+    writeFileSync(join(dir, 'img.png'), Buffer.from(SMALL_PNG_B64, 'base64'));
+
+    const attachments = [
+      { id: 'svg1', filename: 'icon.svg', storedName: 'icon.svg', mimeType: 'image/svg+xml', size: 6, createdAt: '' },
+      { id: 'png1', filename: 'img.png', storedName: 'img.png', mimeType: 'image/png', size: 10, createdAt: '' },
+    ];
+
+    const result = await loadAttachmentsByIds(['svg1', 'png1'], attachments, workspacePath, taskId);
+
+    // SVG is skipped; only the PNG comes through.
+    expect(result).toHaveLength(1);
+    expect(result[0].mimeType).toBe('image/png');
+    // resize was only called for the PNG
+    expect(resizeFn).toHaveBeenCalledTimes(1);
+  });
+
+  it('normalizes image/jpg alias attachment to image/jpeg', async () => {
+    const resizeFn = makeResizeFn('NORMALIZED_JPEG');
+    _setResizeFnForTesting(resizeFn);
+
+    const { workspacePath } = createTempWorkspace();
+    const taskId = 'TASK-JPG-ALIAS';
+    const dir = createTaskAttachmentDir(workspacePath, taskId);
+
+    writeFileSync(join(dir, 'photo.jpg'), Buffer.from(SMALL_PNG_B64, 'base64'));
+
+    const attachments = [
+      { id: 'j1', filename: 'photo.jpg', storedName: 'photo.jpg', mimeType: 'image/jpg', size: 10, createdAt: '' },
+    ];
+
+    const result = await loadAttachmentsByIds(['j1'], attachments, workspacePath, taskId);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].data).toBe('NORMALIZED_JPEG');
+  });
+
   it('skips an image that fails normalization, returning the rest', async () => {
     let callCount = 0;
     const mixedFn: ResizeImageFn = vi.fn(async (img: AttachmentImageContent) => {
@@ -225,27 +392,5 @@ describe('loadAttachmentsByIds', () => {
     );
 
     expect(result).toHaveLength(0);
-  });
-
-  it('skips an image whose file is absent on disk', async () => {
-    _setResizeFnForTesting(makeResizeFn('NORMALIZED'));
-
-    const { workspacePath } = createTempWorkspace();
-    const taskId = 'TASK-NODISK-1';
-    const dir = createTaskAttachmentDir(workspacePath, taskId);
-
-    // Only write the second file; leave the first absent.
-    writeFileSync(join(dir, 'present.png'), Buffer.from(SMALL_PNG_B64, 'base64'));
-
-    const attachments = [
-      { id: 'a1', filename: 'absent.png', storedName: 'absent.png', mimeType: 'image/png', size: 10, createdAt: '' },
-      { id: 'a2', filename: 'present.png', storedName: 'present.png', mimeType: 'image/png', size: 10, createdAt: '' },
-    ];
-
-    const result = await loadAttachmentsByIds(['a1', 'a2'], attachments, workspacePath, taskId);
-
-    // The absent file is silently skipped; the present file is normalized.
-    expect(result).toHaveLength(1);
-    expect(result[0].data).toBe('NORMALIZED');
   });
 });

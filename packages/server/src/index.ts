@@ -1860,7 +1860,7 @@ import {
   createTaskConversationSession,
   regenerateAcceptanceCriteriaForTask,
 } from './agent-execution-service.js';
-import { normalizeAttachmentImage } from './image-normalize.js';
+import { normalizeAttachmentImage, canonicalizeImageMimeType } from './image-normalize.js';
 
 import {
   discoverPostExecutionSkills,
@@ -2744,7 +2744,8 @@ app.post('/api/workspaces/:workspaceId/planning/message', async (req, res) => {
       images = [];
       for (const id of attachmentIds) {
         const att = allAtts.find(a => a.id === id);
-        if (!att || !att.mimeType.startsWith('image/')) continue;
+        // Only process attachments with a supported (or canonicalizable) MIME type.
+        if (!att || !canonicalizeImageMimeType(att.mimeType)) continue;
         const filePath = join(dir, att.storedName);
         try {
           const { readFile } = await import('fs/promises');
@@ -2756,6 +2757,16 @@ app.post('/api/workspaces/:workspaceId/planning/message', async (req, res) => {
         } catch { /* skip */ }
       }
       if (images.length === 0) images = undefined;
+    }
+
+    // Guard: if the message has no text content and no supported inline images
+    // could be resolved, return a clear 400 rather than forwarding an empty
+    // or meaningless request to the planning agent.
+    if (!content && !images) {
+      res.status(400).json({
+        error: 'No supported image attachments could be loaded. Supported formats: JPEG, PNG, GIF, WebP.',
+      });
+      return;
     }
 
     // Fire and forget — response streams via WebSocket

@@ -53,7 +53,7 @@ import { runPrePlanningSkills, runPreExecutionSkills, runPostExecutionSkills } f
 import { withTimeout } from './with-timeout.js';
 import { generateAndPersistSummary } from './summary-service.js';
 import { attachTaskFileAndBroadcast, type AttachTaskFileRequest } from './task-attachment-service.js';
-import { normalizeAttachmentImage } from './image-normalize.js';
+import { normalizeAttachmentImage, canonicalizeImageMimeType } from './image-normalize.js';
 import { logTaskStateTransition } from './state-transition.js';
 import {
   buildContractReference,
@@ -306,9 +306,12 @@ async function loadAttachments(
 
   for (const att of attachments) {
     const filePath = join(dir, att.storedName);
-    const isImage = att.mimeType.startsWith('image/');
+    // Use the canonical MIME check as the single gate: supported image types
+    // are inlined, everything else (non-images and unsupported image formats
+    // like SVG) gets a file-path reference so the agent can read the file directly.
+    const canonicalMime = canonicalizeImageMimeType(att.mimeType);
 
-    if (isImage) {
+    if (canonicalMime) {
       if (existsSync(filePath)) {
         try {
           const data = readFileSync(filePath).toString('base64');
@@ -327,7 +330,7 @@ async function loadAttachments(
         lines.push(`- **${att.filename}** (image, file missing)`);
       }
     } else {
-      // Non-image: give the agent the file path so it can read it
+      // Non-image or unsupported image format: give the agent the file path
       lines.push(`- **${att.filename}**: \`${filePath}\``);
     }
   }
@@ -356,8 +359,10 @@ export async function loadAttachmentsByIds(
     const att = allAttachments.find(a => a.id === id);
     if (!att) continue;
 
-    const isImage = att.mimeType.startsWith('image/');
-    if (!isImage) continue;
+    // Only include images with a supported (or canonicalizable) MIME type.
+    // Unsupported formats (e.g. image/svg+xml) are silently skipped here;
+    // the task prompt already contains a file-path reference for those files.
+    if (!canonicalizeImageMimeType(att.mimeType)) continue;
 
     const filePath = join(dir, att.storedName);
     if (!existsSync(filePath)) continue;

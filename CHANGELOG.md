@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Multi-image requests no longer fail with an Anthropic `invalid_request_error` when any attached image exceeds 2000px in either dimension. The server now normalizes all image attachments (task prompts, chat/steer/follow-up messages, and foreman planning messages) to fit within the 2000×2000 px limit before sending to the provider. Images that cannot be normalized are skipped individually rather than aborting the entire request.
+- Agent turns no longer fail with a provider `invalid_request_error` caused by unsupported image MIME types (e.g. `image/svg+xml`, `image/tiff`). The server now enforces an inline-image allowlist (`image/jpeg`, `image/png`, `image/gif`, `image/webp`) and normalizes known aliases (e.g. `image/jpg` → `image/jpeg`) before dispatch. Unsupported image attachments are excluded from inline image payloads; in task execution contexts they appear as readable file-path references so the agent can still access the file. The foreman planning message endpoint now returns `400` with a descriptive error when a message contains only attachment references and none resolve to a supported image format.
 - Removed the duplicate theme switcher from the global Settings header; theme changes remain available from the workspace sidebar toggle and Settings → Appearance selector.
 - Stale default model profile IDs are now safely ignored and cleared on save/load, preventing invalid profile selections from being returned or persisted.
 
