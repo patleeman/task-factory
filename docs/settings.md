@@ -52,6 +52,14 @@ Workspace Configuration only manages skill enable/disable state; extensions are 
 2. Otherwise global defaults from `~/.taskfactory/settings.json` apply.
 3. Built-in starter behavior is used when neither override exists.
 
+For model selection defaults in **New Task**, precedence is:
+1. Explicit form state (manual selection, restored draft, or prefill)
+2. Workspace `taskDefaults.defaultModelProfileId`
+3. Global `taskDefaults.defaultModelProfileId`
+4. Manual planning/execution model defaults
+
+If a saved default profile ID no longer exists in `modelProfiles`, Task Factory safely drops it (no invalid selection is persisted or returned).
+
 ### First-run migration behavior
 
 - On startup, if no migration decision is stored, Task Factory checks `~/.pi` for migratable categories (`auth`, `skills`, `extensions`).

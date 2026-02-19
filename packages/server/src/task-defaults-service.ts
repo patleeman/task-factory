@@ -44,6 +44,7 @@ const BUILT_IN_TASK_DEFAULTS: TaskDefaults = {
   planningModelConfig: undefined,
   executionModelConfig: undefined,
   modelConfig: undefined,
+  defaultModelProfileId: undefined,
   prePlanningSkills: [...DEFAULT_PRE_PLANNING_SKILLS],
   preExecutionSkills: [...DEFAULT_PRE_EXECUTION_SKILLS],
   postExecutionSkills: [...DEFAULT_POST_EXECUTION_SKILLS],
@@ -59,6 +60,7 @@ interface TaskDefaultsOverride {
   planningModelConfig?: ModelConfig;
   executionModelConfig?: ModelConfig;
   modelConfig?: ModelConfig;
+  defaultModelProfileId?: string;
   prePlanningSkills?: string[];
   preExecutionSkills?: string[];
   postExecutionSkills?: string[];
@@ -84,6 +86,7 @@ function cloneTaskDefaults(defaults: TaskDefaults): TaskDefaults {
     executionModelConfig,
     // Keep legacy field aligned for backward compatibility.
     modelConfig: cloneModelConfig(executionModelConfig),
+    defaultModelProfileId: defaults.defaultModelProfileId,
     prePlanningSkills: [...defaults.prePlanningSkills],
     preExecutionSkills: [...defaults.preExecutionSkills],
     postExecutionSkills: [...defaults.postExecutionSkills],
@@ -94,12 +97,14 @@ function cloneTaskDefaults(defaults: TaskDefaults): TaskDefaults {
 
 function normalizeTaskDefaults(defaults: TaskDefaults): TaskDefaults {
   const executionModelConfig = cloneModelConfig(defaults.executionModelConfig ?? defaults.modelConfig);
+  const defaultModelProfileId = sanitizeDefaultModelProfileId(defaults.defaultModelProfileId);
 
   return {
     planningModelConfig: cloneModelConfig(defaults.planningModelConfig),
     executionModelConfig,
     // Keep legacy field aligned for backward compatibility.
     modelConfig: cloneModelConfig(executionModelConfig),
+    defaultModelProfileId,
     prePlanningSkills: [...defaults.prePlanningSkills],
     preExecutionSkills: [...defaults.preExecutionSkills],
     postExecutionSkills: [...defaults.postExecutionSkills],
@@ -177,6 +182,50 @@ function sanitizePromptTemplate(raw: unknown): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
+function sanitizeDefaultModelProfileId(raw: unknown): string | undefined {
+  if (typeof raw !== 'string') {
+    return undefined;
+  }
+
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function getValidModelProfileIds(settings: PiFactorySettings | null | undefined): Set<string> {
+  const validIds = new Set<string>();
+  const rawProfiles = settings?.modelProfiles;
+
+  if (!Array.isArray(rawProfiles)) {
+    return validIds;
+  }
+
+  for (const profile of rawProfiles) {
+    if (!profile || typeof profile !== 'object') {
+      continue;
+    }
+
+    const id = sanitizeDefaultModelProfileId((profile as { id?: unknown }).id);
+    if (id) {
+      validIds.add(id);
+    }
+  }
+
+  return validIds;
+}
+
+function coerceDefaultModelProfileId(
+  defaultModelProfileId: string | undefined,
+  validModelProfileIds: Set<string>,
+): string | undefined {
+  if (!defaultModelProfileId) {
+    return undefined;
+  }
+
+  return validModelProfileIds.has(defaultModelProfileId)
+    ? defaultModelProfileId
+    : undefined;
+}
+
 function areModelConfigsEqual(left: ModelConfig | undefined, right: ModelConfig | undefined): boolean {
   if (!left && !right) {
     return true;
@@ -227,6 +276,10 @@ function buildWorkspaceTaskDefaultsOverride(
     override.modelConfig = cloneModelConfig(normalizedExecutionModel);
   }
 
+  if (normalizedDefaults.defaultModelProfileId !== normalizedGlobalDefaults.defaultModelProfileId) {
+    override.defaultModelProfileId = normalizedDefaults.defaultModelProfileId;
+  }
+
   if (!areSkillIdListsEqual(normalizedDefaults.prePlanningSkills, normalizedGlobalDefaults.prePlanningSkills)) {
     override.prePlanningSkills = [...normalizedDefaults.prePlanningSkills];
   }
@@ -251,6 +304,7 @@ function buildWorkspaceTaskDefaultsOverride(
     override.planningModelConfig !== undefined
     || override.executionModelConfig !== undefined
     || override.modelConfig !== undefined
+    || override.defaultModelProfileId !== undefined
     || override.prePlanningSkills !== undefined
     || override.preExecutionSkills !== undefined
     || override.postExecutionSkills !== undefined
@@ -269,6 +323,7 @@ function resolveTaskDefaultsOverride(raw: unknown): TaskDefaultsOverride | null 
     planningModelConfig?: unknown;
     executionModelConfig?: unknown;
     modelConfig?: unknown;
+    defaultModelProfileId?: unknown;
     prePlanningSkills?: unknown;
     preExecutionSkills?: unknown;
     postExecutionSkills?: unknown;
@@ -280,6 +335,7 @@ function resolveTaskDefaultsOverride(raw: unknown): TaskDefaultsOverride | null 
     planningModelConfig: sanitizeModelConfig(defaults.planningModelConfig),
     executionModelConfig: sanitizeModelConfig(defaults.executionModelConfig),
     modelConfig: sanitizeModelConfig(defaults.modelConfig),
+    defaultModelProfileId: sanitizeDefaultModelProfileId(defaults.defaultModelProfileId),
     prePlanningSkills: sanitizeOptionalSkillIds(defaults.prePlanningSkills),
     preExecutionSkills: sanitizeOptionalSkillIds(defaults.preExecutionSkills),
     postExecutionSkills: sanitizeOptionalSkillIds(defaults.postExecutionSkills),
@@ -291,6 +347,7 @@ function resolveTaskDefaultsOverride(raw: unknown): TaskDefaultsOverride | null 
     override.planningModelConfig !== undefined
     || override.executionModelConfig !== undefined
     || override.modelConfig !== undefined
+    || override.defaultModelProfileId !== undefined
     || override.prePlanningSkills !== undefined
     || override.preExecutionSkills !== undefined
     || override.postExecutionSkills !== undefined
@@ -317,6 +374,9 @@ function mergeTaskDefaults(base: TaskDefaults, workspaceOverride: TaskDefaultsOv
     executionModelConfig,
     // Keep legacy field aligned for backward compatibility.
     modelConfig: cloneModelConfig(executionModelConfig),
+    defaultModelProfileId: workspaceOverride.defaultModelProfileId !== undefined
+      ? workspaceOverride.defaultModelProfileId
+      : base.defaultModelProfileId,
     prePlanningSkills: workspaceOverride.prePlanningSkills !== undefined
       ? [...workspaceOverride.prePlanningSkills]
       : [...base.prePlanningSkills],
@@ -396,12 +456,18 @@ export function resolveTaskDefaults(rawSettings: PiFactorySettings | null | unde
   const planningModelConfig = sanitizeModelConfig((defaults as { planningModelConfig?: unknown }).planningModelConfig);
   const executionModelConfig = sanitizeModelConfig((defaults as { executionModelConfig?: unknown }).executionModelConfig)
     ?? legacyModelConfig;
+  const validModelProfileIds = getValidModelProfileIds(rawSettings);
+  const defaultModelProfileId = coerceDefaultModelProfileId(
+    sanitizeDefaultModelProfileId((defaults as { defaultModelProfileId?: unknown }).defaultModelProfileId),
+    validModelProfileIds,
+  );
 
   return {
     planningModelConfig,
     executionModelConfig,
     // Keep legacy field aligned for backward compatibility.
     modelConfig: executionModelConfig,
+    defaultModelProfileId,
     prePlanningSkills: sanitizePrePlanningSkillIds((defaults as { prePlanningSkills?: unknown }).prePlanningSkills),
     preExecutionSkills: sanitizePreSkillIds((defaults as { preExecutionSkills?: unknown }).preExecutionSkills),
     postExecutionSkills: sanitizePostSkillIds((defaults as { postExecutionSkills?: unknown }).postExecutionSkills),
@@ -418,7 +484,13 @@ export function loadTaskDefaults(): TaskDefaults {
 export function loadTaskDefaultsForWorkspace(workspaceId: string): TaskDefaults {
   const globalDefaults = loadTaskDefaults();
   const workspaceOverride = loadWorkspaceTaskDefaultsOverride(workspaceId);
-  return mergeTaskDefaults(globalDefaults, workspaceOverride);
+  const mergedDefaults = mergeTaskDefaults(globalDefaults, workspaceOverride);
+  const validModelProfileIds = getValidModelProfileIds(loadPiFactorySettings());
+
+  return {
+    ...mergedDefaults,
+    defaultModelProfileId: coerceDefaultModelProfileId(mergedDefaults.defaultModelProfileId, validModelProfileIds),
+  };
 }
 
 export function loadTaskDefaultsForWorkspacePath(workspacePath: string): TaskDefaults {
@@ -433,19 +505,31 @@ export function loadTaskDefaultsForWorkspacePath(workspacePath: string): TaskDef
 export function saveTaskDefaults(defaults: TaskDefaults): TaskDefaults {
   const current = loadPiFactorySettings() || {};
   const normalized = normalizeTaskDefaults(defaults);
+  const validModelProfileIds = getValidModelProfileIds(current);
+  const sanitizedDefaults: TaskDefaults = {
+    ...normalized,
+    defaultModelProfileId: coerceDefaultModelProfileId(normalized.defaultModelProfileId, validModelProfileIds),
+  };
 
   savePiFactorySettings({
     ...current,
-    taskDefaults: normalized,
+    taskDefaults: sanitizedDefaults,
   });
 
-  return cloneTaskDefaults(normalized);
+  return cloneTaskDefaults(sanitizedDefaults);
 }
 
 export function saveWorkspaceTaskDefaults(workspaceId: string, defaults: TaskDefaults): TaskDefaults {
   const normalized = normalizeTaskDefaults(defaults);
+  const settings = loadPiFactorySettings();
+  const validModelProfileIds = getValidModelProfileIds(settings);
+  const sanitizedDefaults: TaskDefaults = {
+    ...normalized,
+    defaultModelProfileId: coerceDefaultModelProfileId(normalized.defaultModelProfileId, validModelProfileIds),
+  };
+
   const globalDefaults = loadTaskDefaults();
-  const workspaceOverride = buildWorkspaceTaskDefaultsOverride(normalized, globalDefaults);
+  const workspaceOverride = buildWorkspaceTaskDefaultsOverride(sanitizedDefaults, globalDefaults);
 
   const workspaceDefaultsPath = getWorkspaceTaskDefaultsPath(workspaceId);
   const workspaceDefaultsDir = dirname(workspaceDefaultsPath);
@@ -605,6 +689,7 @@ export function parseTaskDefaultsPayload(raw: unknown): { ok: true; value: TaskD
     planningModelConfig?: unknown;
     executionModelConfig?: unknown;
     modelConfig?: unknown;
+    defaultModelProfileId?: unknown;
     prePlanningSkills?: unknown;
     preExecutionSkills?: unknown;
     postExecutionSkills?: unknown;
@@ -643,6 +728,10 @@ export function parseTaskDefaultsPayload(raw: unknown): { ok: true; value: TaskD
     }
   }
 
+  if (payload.defaultModelProfileId !== undefined && payload.defaultModelProfileId !== null && typeof payload.defaultModelProfileId !== 'string') {
+    return { ok: false, error: 'defaultModelProfileId must be a string when provided' };
+  }
+
   // pre-planning/execution hooks default to empty arrays if not provided
   const prePlanningSkills: string[] = Array.isArray(payload.prePlanningSkills)
     ? [...payload.prePlanningSkills]
@@ -676,6 +765,7 @@ export function parseTaskDefaultsPayload(raw: unknown): { ok: true; value: TaskD
       executionModelConfig,
       // Keep legacy field aligned for backward compatibility.
       modelConfig: executionModelConfig,
+      defaultModelProfileId: sanitizeDefaultModelProfileId(payload.defaultModelProfileId),
       prePlanningSkills: [...prePlanningSkills],
       preExecutionSkills: [...preExecutionSkills],
       postExecutionSkills: [...payload.postExecutionSkills],

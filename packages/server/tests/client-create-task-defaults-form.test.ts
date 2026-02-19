@@ -18,6 +18,7 @@ describe('create-task form defaults', () => {
         provider: 'openai',
         modelId: 'gpt-4o',
       },
+      defaultModelProfileId: 'profile-team-default',
       prePlanningSkills: ['plan-context'],
       preExecutionSkills: ['checkpoint'],
       postExecutionSkills: ['checkpoint', 'code-review', 'update-docs'],
@@ -29,6 +30,7 @@ describe('create-task form defaults', () => {
       selectedPrePlanningSkillIds: ['plan-context'],
       selectedPreSkillIds: ['checkpoint'],
       selectedSkillIds: ['checkpoint', 'code-review', 'update-docs'],
+      selectedModelProfileId: 'profile-team-default',
       planningModelConfig: {
         provider: 'anthropic',
         modelId: 'claude-sonnet-4',

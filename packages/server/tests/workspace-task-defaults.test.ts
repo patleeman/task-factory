@@ -338,4 +338,52 @@ describe('workspace task defaults', () => {
     expect(created.frontmatter.preExecutionSkills).toEqual([]);
     expect(created.frontmatter.postExecutionSkills).toEqual(['checkpoint']);
   });
+
+  it('persists valid workspace defaultModelProfileId and clears stale profile IDs on save', async () => {
+    const homePath = setTempHome();
+
+    writeFactorySettings(homePath, {
+      modelProfiles: [
+        {
+          id: 'profile-default',
+          name: 'Default',
+          planningModelConfig: { provider: 'anthropic', modelId: 'claude-sonnet-4' },
+          executionModelConfig: { provider: 'openai', modelId: 'gpt-4o' },
+        },
+      ],
+      taskDefaults: {
+        prePlanningSkills: [],
+        preExecutionSkills: [],
+        postExecutionSkills: ['checkpoint'],
+        defaultModelProfileId: 'profile-default',
+      },
+    });
+
+    const { saveWorkspaceTaskDefaults, loadTaskDefaultsForWorkspace } = await import('../src/task-defaults-service.js');
+
+    const savedValid = saveWorkspaceTaskDefaults('ws-profile', {
+      planningModelConfig: undefined,
+      executionModelConfig: undefined,
+      modelConfig: undefined,
+      defaultModelProfileId: 'profile-default',
+      prePlanningSkills: [],
+      preExecutionSkills: [],
+      postExecutionSkills: ['checkpoint'],
+    });
+
+    expect(savedValid.defaultModelProfileId).toBe('profile-default');
+
+    const savedStale = saveWorkspaceTaskDefaults('ws-profile', {
+      planningModelConfig: undefined,
+      executionModelConfig: undefined,
+      modelConfig: undefined,
+      defaultModelProfileId: 'profile-missing',
+      prePlanningSkills: [],
+      preExecutionSkills: [],
+      postExecutionSkills: ['checkpoint'],
+    });
+
+    expect(savedStale.defaultModelProfileId).toBe('profile-default');
+    expect(loadTaskDefaultsForWorkspace('ws-profile').defaultModelProfileId).toBe('profile-default');
+  });
 });

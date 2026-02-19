@@ -92,6 +92,8 @@ export interface TaskDefaults {
    * Kept for backward compatibility with existing settings/task files.
    */
   modelConfig?: ModelConfig;
+  /** Optional reusable model profile ID for planning+execution defaults. */
+  defaultModelProfileId?: string;
   /** Pre-planning skills (run before the planning prompt). */
   prePlanningSkills: string[];
   /** Pre-execution skills (run before the execution prompt). */

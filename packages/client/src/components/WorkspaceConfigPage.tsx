@@ -7,12 +7,13 @@ import {
   DEFAULT_POST_EXECUTION_SKILLS,
   DEFAULT_PLANNING_PROMPT_TEMPLATE,
   DEFAULT_EXECUTION_PROMPT_TEMPLATE,
+  type ModelConfig,
+  type ModelProfile,
   type TaskDefaults,
 } from '@task-factory/shared'
 import type { PiSkill, PostExecutionSkill } from '../types/pi'
 import { api, type WorkflowAutomationResponse, type WorkflowAutomationUpdate } from '../api'
 import { AppIcon } from './AppIcon'
-import { ModelSelector } from './ModelSelector'
 import { ExecutionPipelineEditor } from './ExecutionPipelineEditor'
 
 interface WorkspaceConfig {
@@ -26,6 +27,7 @@ const EMPTY_TASK_DEFAULTS: TaskDefaults = {
   planningModelConfig: undefined,
   executionModelConfig: undefined,
   modelConfig: undefined,
+  defaultModelProfileId: undefined,
   prePlanningSkills: [...DEFAULT_PRE_PLANNING_SKILLS],
   preExecutionSkills: [...DEFAULT_PRE_EXECUTION_SKILLS],
   postExecutionSkills: [...DEFAULT_POST_EXECUTION_SKILLS],
@@ -82,11 +84,58 @@ function buildWorkflowUpdateFromForm(form: WorkflowOverridesForm): WorkflowAutom
   }
 }
 
+function cloneModelConfig(modelConfig: ModelConfig | undefined): ModelConfig | undefined {
+  if (!modelConfig) {
+    return undefined
+  }
+
+  return {
+    provider: modelConfig.provider,
+    modelId: modelConfig.modelId,
+    thinkingLevel: modelConfig.thinkingLevel,
+  }
+}
+
+function normalizeModelProfiles(rawProfiles: unknown): ModelProfile[] {
+  if (!Array.isArray(rawProfiles)) {
+    return []
+  }
+
+  return rawProfiles
+    .map((profile): ModelProfile | null => {
+      if (!profile || typeof profile !== 'object') {
+        return null
+      }
+
+      const id = typeof profile.id === 'string' ? profile.id.trim() : ''
+      const name = typeof profile.name === 'string' ? profile.name.trim() : ''
+      const planningModelConfig = cloneModelConfig((profile as { planningModelConfig?: ModelConfig }).planningModelConfig)
+      const executionModelConfig = cloneModelConfig(
+        (profile as { executionModelConfig?: ModelConfig; modelConfig?: ModelConfig }).executionModelConfig
+          ?? (profile as { modelConfig?: ModelConfig }).modelConfig,
+      )
+
+      if (!id || !name || !planningModelConfig || !executionModelConfig) {
+        return null
+      }
+
+      return {
+        id,
+        name,
+        planningModelConfig,
+        executionModelConfig,
+        modelConfig: executionModelConfig,
+      }
+    })
+    .filter((profile): profile is ModelProfile => profile !== null)
+}
+
 export function WorkspaceConfigPage() {
   const { workspaceId } = useParams<{ workspaceId: string }>()
   const navigate = useNavigate()
   const [allSkills, setAllSkills] = useState<PiSkill[]>([])
   const [taskSkills, setTaskSkills] = useState<PostExecutionSkill[]>([])
+  const [modelProfiles, setModelProfiles] = useState<ModelProfile[]>([])
   const [taskDefaults, setTaskDefaults] = useState<TaskDefaults>({ ...EMPTY_TASK_DEFAULTS })
   const [config, setConfig] = useState<WorkspaceConfig>({
     skills: { enabled: [], config: {} },
@@ -132,6 +181,7 @@ export function WorkspaceConfigPage() {
       api.getWorkspace(workspaceId),
       api.getWorkspaceTaskDefaults(workspaceId),
       api.getWorkflowAutomation(workspaceId),
+      api.getPiFactorySettings(),
     ])
       .then(([
         skillsData,
@@ -141,6 +191,7 @@ export function WorkspaceConfigPage() {
         workspace,
         workspaceTaskDefaults,
         workflowSettings,
+        settings,
       ]) => {
         if (cancelled) return
 
@@ -152,8 +203,15 @@ export function WorkspaceConfigPage() {
         setTaskSkills(taskSkillsData)
 
         const knownSkillIds = new Set(taskSkillsData.map((skill) => skill.id))
+        const normalizedProfiles = normalizeModelProfiles(settings.modelProfiles)
+        const validProfileIds = new Set(normalizedProfiles.map((profile) => profile.id))
+        setModelProfiles(normalizedProfiles)
+
         setTaskDefaults({
           ...workspaceTaskDefaults,
+          defaultModelProfileId: validProfileIds.has(workspaceTaskDefaults.defaultModelProfileId ?? '')
+            ? workspaceTaskDefaults.defaultModelProfileId
+            : undefined,
           prePlanningSkills: workspaceTaskDefaults.prePlanningSkills.filter((skillId) => knownSkillIds.has(skillId)),
           preExecutionSkills: workspaceTaskDefaults.preExecutionSkills.filter((skillId) => knownSkillIds.has(skillId)),
           postExecutionSkills: workspaceTaskDefaults.postExecutionSkills.filter((skillId) => knownSkillIds.has(skillId)),
@@ -491,38 +549,37 @@ export function WorkspaceConfigPage() {
                 <p className="text-xs text-slate-500">Applied automatically when creating tasks in this workspace without explicit model/skill selections.</p>
               </div>
 
-              <div className="grid gap-4 md:grid-cols-2">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">
-                    Default Planning Model
-                  </label>
-                  <ModelSelector
-                    value={taskDefaults.planningModelConfig}
-                    onChange={(config) => {
-                      updateTaskDefaults((current) => ({
-                        ...current,
-                        planningModelConfig: config,
-                      }))
-                    }}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">
-                    Default Execution Model
-                  </label>
-                  <ModelSelector
-                    value={taskDefaults.executionModelConfig ?? taskDefaults.modelConfig}
-                    onChange={(config) => {
-                      updateTaskDefaults((current) => ({
-                        ...current,
-                        executionModelConfig: config,
-                        // Keep legacy alias aligned for backward compatibility.
-                        modelConfig: config,
-                      }))
-                    }}
-                  />
-                </div>
+              <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-2">
+                <label className="block text-sm font-medium text-slate-700">
+                  Default Model Profile
+                </label>
+                <select
+                  value={taskDefaults.defaultModelProfileId ?? ''}
+                  onChange={(event) => {
+                    const nextValue = event.target.value.trim()
+                    updateTaskDefaults((current) => ({
+                      ...current,
+                      defaultModelProfileId: nextValue.length > 0 ? nextValue : undefined,
+                    }))
+                  }}
+                  className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent"
+                >
+                  <option value="">No profile (inherit global/manual defaults)</option>
+                  {modelProfiles.map((profile) => (
+                    <option key={profile.id} value={profile.id}>{profile.name}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-slate-500">
+                  Create and edit profiles in{' '}
+                  <button
+                    type="button"
+                    onClick={() => navigate('/settings')}
+                    className="text-blue-600 hover:text-blue-700 underline"
+                  >
+                    Global Settings
+                  </button>
+                  .
+                </p>
               </div>
 
               <div>

@@ -14,9 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Global Settings page now uses a unified tab navigation: **Appearance**, Authentication, Task Defaults, and Skills. Appearance was previously always visible above the tab strip; it is now a first-class tab and the default landing tab. The Skills tab gained a callout that clarifies the distinction between skill library management (create/edit skills here) and default lane assignment (Task Defaults tab).
 - Settings → Skills no longer shows the **Import SKILL.md** section (paste textarea, overwrite checkbox, file loader, and Import Skill button). Skills can still be created and managed directly in the panel.
 - Workspace Configuration no longer includes an Extensions tab. Workspace skills are now auto-discovered from local `SKILL.md` files (`<workspace>/skills` and `<workspace>/.taskfactory/skills`) and are enabled by default until explicitly toggled.
+- Task Defaults now support `defaultModelProfileId` for both global and workspace scope. Workspace Task Defaults now expose a default-profile selector (with a link to Global Settings for profile management), and Settings → Task Defaults includes a matching global default-profile selector.
+- New Task default model resolution now follows: explicit form state → workspace default profile → global default profile → manual model defaults.
 
 ### Fixed
 - Removed the duplicate theme switcher from the global Settings header; theme changes remain available from the workspace sidebar toggle and Settings → Appearance selector.
+- Stale default model profile IDs are now safely ignored and cleared on save/load, preventing invalid profile selections from being returned or persisted.
 
 ## [0.3.0] - 2026-02-18
 

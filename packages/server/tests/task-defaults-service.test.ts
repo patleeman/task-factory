@@ -216,6 +216,48 @@ describe('resolveTaskDefaults', () => {
     });
     expect(resolved.modelConfig).toEqual(resolved.executionModelConfig);
   });
+
+  it('keeps defaultModelProfileId when it exists in settings.modelProfiles', () => {
+    const resolved = resolveTaskDefaults({
+      modelProfiles: [
+        {
+          id: 'profile-1',
+          name: 'Default',
+          planningModelConfig: { provider: 'anthropic', modelId: 'claude-sonnet-4' },
+          executionModelConfig: { provider: 'openai', modelId: 'gpt-4o' },
+        },
+      ],
+      taskDefaults: {
+        prePlanningSkills: [],
+        preExecutionSkills: [],
+        postExecutionSkills: ['checkpoint'],
+        defaultModelProfileId: 'profile-1',
+      },
+    } as any)
+
+    expect(resolved.defaultModelProfileId).toBe('profile-1')
+  })
+
+  it('drops stale defaultModelProfileId when profile no longer exists', () => {
+    const resolved = resolveTaskDefaults({
+      modelProfiles: [
+        {
+          id: 'profile-2',
+          name: 'Another',
+          planningModelConfig: { provider: 'anthropic', modelId: 'claude-sonnet-4' },
+          executionModelConfig: { provider: 'openai', modelId: 'gpt-4o' },
+        },
+      ],
+      taskDefaults: {
+        prePlanningSkills: [],
+        preExecutionSkills: [],
+        postExecutionSkills: ['checkpoint'],
+        defaultModelProfileId: 'missing-profile',
+      },
+    } as any)
+
+    expect(resolved.defaultModelProfileId).toBeUndefined()
+  })
 });
 
 describe('parseTaskDefaultsPayload', () => {
@@ -240,6 +282,7 @@ describe('parseTaskDefaultsPayload', () => {
   it('uses legacy modelConfig as execution model when executionModelConfig is missing', () => {
     const parsed = parseTaskDefaultsPayload({
       modelConfig: { provider: 'openai', modelId: 'gpt-4o' },
+      defaultModelProfileId: 'profile-default',
       postExecutionSkills: ['checkpoint'],
     });
 
@@ -247,9 +290,22 @@ describe('parseTaskDefaultsPayload', () => {
     if (parsed.ok) {
       expect(parsed.value.executionModelConfig).toEqual({ provider: 'openai', modelId: 'gpt-4o' });
       expect(parsed.value.modelConfig).toEqual({ provider: 'openai', modelId: 'gpt-4o' });
+      expect(parsed.value.defaultModelProfileId).toBe('profile-default')
       expect(parsed.value.prePlanningSkills).toEqual([]);
     }
   });
+
+  it('rejects non-string defaultModelProfileId', () => {
+    const parsed = parseTaskDefaultsPayload({
+      defaultModelProfileId: 123,
+      postExecutionSkills: ['checkpoint'],
+    })
+
+    expect(parsed).toEqual({
+      ok: false,
+      error: 'defaultModelProfileId must be a string when provided',
+    })
+  })
 
   it('rejects non-array pre-planning/pre-execution hook payloads', () => {
     const prePlanningParsed = parseTaskDefaultsPayload({

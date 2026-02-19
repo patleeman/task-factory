@@ -102,6 +102,7 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
   const { initialDraft, restoredFromDraft, updateDraft, clearDraft, dismissRestoredBanner } = useLocalStorageDraft(workspaceId)
   const whiteboardStorageKey = getCreateTaskWhiteboardStorageKey(workspaceId)
   const hasRestoredDraftContent = !prefillRequest && initialDraft.content.trim().length > 0
+  const hasExplicitPrefillState = Boolean(prefillRequest)
 
   const [content, setContent] = useState(
     typeof prefillRequest?.formState.content === 'string'
@@ -145,6 +146,7 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
     planningModelConfig: undefined,
     executionModelConfig: undefined,
     modelConfig: undefined,
+    defaultModelProfileId: undefined,
     prePlanningSkills: [...DEFAULT_PRE_PLANNING_SKILLS],
     preExecutionSkills: [...DEFAULT_PRE_EXECUTION_SKILLS],
     postExecutionSkills: [...DEFAULT_POST_EXECUTION_SKILLS],
@@ -180,8 +182,8 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
         setTaskDefaults(defaults)
         setModelProfiles(normalizeModelProfiles(settings.modelProfiles))
 
-        // Preserve restored drafts with user-entered content.
-        if (hasRestoredDraftContent) {
+        // Preserve any explicit form state (restored draft or prefill payload).
+        if (hasRestoredDraftContent || hasExplicitPrefillState) {
           return
         }
 
@@ -191,12 +193,12 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
         setSelectedSkillIds(formDefaults.selectedSkillIds)
         setPlanningModelConfig(formDefaults.planningModelConfig)
         setExecutionModelConfig(formDefaults.executionModelConfig)
-        setSelectedModelProfileId(undefined)
+        setSelectedModelProfileId(formDefaults.selectedModelProfileId)
       })
       .catch((err) => {
         console.error('Failed to load task defaults/settings:', err)
       })
-  }, [workspaceId, hasRestoredDraftContent])
+  }, [workspaceId, hasRestoredDraftContent, hasExplicitPrefillState])
 
   // Register form with server when pane opens, unregister on close
   useEffect(() => {
@@ -360,7 +362,7 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
     setSelectedPreSkillIds(formDefaults.selectedPreSkillIds)
     setSelectedSkillIds(formDefaults.selectedSkillIds)
     setSkillConfigs({})
-    setSelectedModelProfileId(undefined)
+    setSelectedModelProfileId(formDefaults.selectedModelProfileId)
     setPlanningModelConfig(formDefaults.planningModelConfig)
     setExecutionModelConfig(formDefaults.executionModelConfig)
     setPendingFiles([])

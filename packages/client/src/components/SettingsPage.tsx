@@ -60,6 +60,7 @@ function normalizeTaskDefaultsForUi(
   defaults: TaskDefaults,
   models: AvailableModel[],
   skills: PostExecutionSkill[],
+  profileIds: Set<string>,
 ): TaskDefaults {
   const knownSkillIds = new Set(skills.map((skill) => skill.id))
   const executionModelConfig = normalizeModelConfigForUi(
@@ -72,6 +73,9 @@ function normalizeTaskDefaultsForUi(
     executionModelConfig,
     // Keep legacy alias aligned for backward compatibility.
     modelConfig: executionModelConfig,
+    defaultModelProfileId: profileIds.has(defaults.defaultModelProfileId ?? '')
+      ? defaults.defaultModelProfileId
+      : undefined,
     prePlanningSkills: defaults.prePlanningSkills.filter((skillId) => knownSkillIds.has(skillId)),
     preExecutionSkills: defaults.preExecutionSkills.filter((skillId) => knownSkillIds.has(skillId)),
     postExecutionSkills: defaults.postExecutionSkills.filter((skillId) => knownSkillIds.has(skillId)),
@@ -300,10 +304,12 @@ export function SettingsPage() {
         if (isCancelled) return
         setModels(availableModels)
         setSkills(availableSkills)
-        setForm(normalizeTaskDefaultsForUi(defaults, availableModels, availableSkills))
+        const normalizedProfiles = normalizeModelProfilesForUi(settings, availableModels)
+        const profileIds = new Set(normalizedProfiles.map((profile) => profile.id))
+        setModelProfilesForm(normalizedProfiles)
+        setForm(normalizeTaskDefaultsForUi(defaults, availableModels, availableSkills, profileIds))
         setPlanningGuardrailsForm(normalizePlanningGuardrailsForUi(settings))
         setWorkflowDefaultsForm(normalizeWorkflowDefaultsForUi(settings))
-        setModelProfilesForm(normalizeModelProfilesForUi(settings, availableModels))
         setVoiceInputHotkey(normalizeVoiceInputHotkey(settings.voiceInputHotkey))
         setAuthOverview(auth)
       })
@@ -355,6 +361,24 @@ export function SettingsPage() {
     })
   }, [])
 
+  useEffect(() => {
+    setForm((current) => {
+      if (!current?.defaultModelProfileId) {
+        return current
+      }
+
+      const validProfileIds = new Set(modelProfilesForm.map((profile) => profile.id))
+      if (validProfileIds.has(current.defaultModelProfileId)) {
+        return current
+      }
+
+      return {
+        ...current,
+        defaultModelProfileId: undefined,
+      }
+    })
+  }, [modelProfilesForm])
+
   const handleSaveVoiceInputHotkey = async () => {
     setIsSavingSystemSettings(true)
     setSystemSettingsError(null)
@@ -394,27 +418,6 @@ export function SettingsPage() {
     setDefaultsSaveMessage(null)
 
     try {
-      const executionModelConfig = form.executionModelConfig ?? form.modelConfig
-      const payload: TaskDefaults = {
-        planningModelConfig: form.planningModelConfig
-          ? { ...form.planningModelConfig }
-          : undefined,
-        executionModelConfig: executionModelConfig
-          ? { ...executionModelConfig }
-          : undefined,
-        // Keep legacy alias aligned for backward compatibility.
-        modelConfig: executionModelConfig
-          ? { ...executionModelConfig }
-          : undefined,
-        prePlanningSkills: [...form.prePlanningSkills],
-        preExecutionSkills: [...form.preExecutionSkills],
-        postExecutionSkills: [...form.postExecutionSkills],
-        planningPromptTemplate: form.planningPromptTemplate?.trim() || undefined,
-        executionPromptTemplate: form.executionPromptTemplate?.trim() || undefined,
-      }
-
-      const savedDefaults = await api.saveTaskDefaults(payload)
-
       const normalizedProfiles: ModelProfile[] = modelProfilesForm.map((profile, index) => {
         const name = profile.name.trim()
         if (!name) {
@@ -444,6 +447,29 @@ export function SettingsPage() {
         }
       })
 
+      const profileIds = new Set(normalizedProfiles.map((profile) => profile.id))
+      const executionModelConfig = form.executionModelConfig ?? form.modelConfig
+      const payload: TaskDefaults = {
+        planningModelConfig: form.planningModelConfig
+          ? { ...form.planningModelConfig }
+          : undefined,
+        executionModelConfig: executionModelConfig
+          ? { ...executionModelConfig }
+          : undefined,
+        // Keep legacy alias aligned for backward compatibility.
+        modelConfig: executionModelConfig
+          ? { ...executionModelConfig }
+          : undefined,
+        defaultModelProfileId: profileIds.has(form.defaultModelProfileId ?? '')
+          ? form.defaultModelProfileId
+          : undefined,
+        prePlanningSkills: [...form.prePlanningSkills],
+        preExecutionSkills: [...form.preExecutionSkills],
+        postExecutionSkills: [...form.postExecutionSkills],
+        planningPromptTemplate: form.planningPromptTemplate?.trim() || undefined,
+        executionPromptTemplate: form.executionPromptTemplate?.trim() || undefined,
+      }
+
       const currentSettings = await api.getPiFactorySettings()
       const workflowDefaults: WorkflowDefaultsConfig = {
         readyLimit: workflowDefaultsForm.readyLimit,
@@ -463,10 +489,13 @@ export function SettingsPage() {
       }
 
       await api.savePiFactorySettings(nextSettings)
+      const savedDefaults = await api.saveTaskDefaults(payload)
+      const savedProfileIds = new Set(normalizedProfiles.map((profile) => profile.id))
+
       setPlanningGuardrailsForm(normalizePlanningGuardrailsForUi(nextSettings))
       setWorkflowDefaultsForm(normalizeWorkflowDefaultsForUi(nextSettings))
-      setModelProfilesForm(normalizeModelProfilesForUi(nextSettings, models))
-      setForm(normalizeTaskDefaultsForUi(savedDefaults, models, skills))
+      setModelProfilesForm(normalizedProfiles)
+      setForm(normalizeTaskDefaultsForUi(savedDefaults, models, skills, savedProfileIds))
       setDefaultsSaveMessage('Task defaults, model profiles, planning guardrails, and workflow defaults saved')
     } catch (err) {
       console.error('Failed to save settings:', err)
@@ -959,6 +988,29 @@ export function SettingsPage() {
                     }}
                   />
                 </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-2">
+                <label className="block text-sm font-medium text-slate-700">
+                  Default Model Profile
+                </label>
+                <select
+                  value={form.defaultModelProfileId ?? ''}
+                  onChange={(event) => {
+                    const nextValue = event.target.value.trim()
+                    setForm({
+                      ...form,
+                      defaultModelProfileId: nextValue.length > 0 ? nextValue : undefined,
+                    })
+                  }}
+                  className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent"
+                >
+                  <option value="">No profile (use manual model defaults)</option>
+                  {modelProfilesForm.map((profile) => (
+                    <option key={profile.id} value={profile.id}>{profile.name.trim() || profile.id}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-slate-500">Choose a reusable profile for new tasks by default, or leave blank to use manual planning/execution defaults.</p>
               </div>
 
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-3">
