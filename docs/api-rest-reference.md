@@ -38,6 +38,10 @@ Conventions:
 | DELETE | `/api/workspaces/:workspaceId` | Delete workspace |
 | GET | `/api/workspaces/attention` | Workspace awaiting-input counts |
 | POST | `/api/workspaces/:workspaceId/archive/open-in-explorer` | Open task archive folder in file explorer |
+| GET | `/api/workspaces/:workspaceId/pi-config` | Read workspace Pi config (skill enablement overrides) |
+| POST | `/api/workspaces/:workspaceId/pi-config` | Save workspace Pi config |
+| GET | `/api/workspaces/:workspaceId/skills/discovered` | List all workspace-discovered `SKILL.md` skills (unfiltered) |
+| GET | `/api/workspaces/:workspaceId/skills` | List enabled workspace skills after applying saved toggles |
 
 ### Task endpoints
 

@@ -65,6 +65,16 @@ function writeGlobalAgentsMd(homePath: string, content: string): void {
   writeFileSync(join(agentDir, 'AGENTS.md'), content, 'utf-8');
 }
 
+function writeWorkspaceSkill(workspacePath: string, skillId: string, content = 'Skill body'): void {
+  const skillDir = join(workspacePath, 'skills', skillId);
+  mkdirSync(skillDir, { recursive: true });
+  writeFileSync(
+    join(skillDir, 'SKILL.md'),
+    `---\nname: ${skillId}\ndescription: ${skillId} description\nallowed-tools: read, bash\n---\n\n${content}\n`,
+    'utf-8',
+  );
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
   vi.resetModules();
@@ -110,6 +120,85 @@ describe('pi skill/extension runtime resolution', () => {
     const { discoverPiExtensions } = await import('../src/pi-integration.js');
 
     expect(discoverPiExtensions()).toEqual([]);
+  });
+});
+
+describe('workspace skill discovery + enablement', () => {
+  it('discovers skills from the current workspace instead of global ~/.taskfactory/agent/skills', async () => {
+    const homePath = setTempHome();
+    const workspaceId = 'ws-skills';
+    const workspacePath = createTempDir('pi-factory-workspace-');
+
+    registerWorkspace(homePath, workspaceId, workspacePath);
+    writeWorkspaceSkill(workspacePath, 'workspace-skill');
+
+    const globalSkillDir = join(homePath, '.taskfactory', 'agent', 'skills', 'global-skill');
+    mkdirSync(globalSkillDir, { recursive: true });
+    writeFileSync(
+      join(globalSkillDir, 'SKILL.md'),
+      '---\nname: global-skill\ndescription: global\n---\n\nglobal\n',
+      'utf-8',
+    );
+
+    const { discoverWorkspacePiSkills, getEnabledSkillsForWorkspace } = await import('../src/pi-integration.js');
+
+    const discovered = discoverWorkspacePiSkills(workspacePath);
+    expect(discovered.map((skill) => skill.id)).toEqual(['workspace-skill']);
+
+    const enabled = getEnabledSkillsForWorkspace(workspaceId, workspacePath);
+    expect(enabled.map((skill) => skill.id)).toEqual(['workspace-skill']);
+  });
+
+  it('defaults to all discovered workspace skills when no workspace selection is saved', async () => {
+    const homePath = setTempHome();
+    const workspaceId = 'ws-default-all';
+    const workspacePath = createTempDir('pi-factory-workspace-');
+
+    registerWorkspace(homePath, workspaceId, workspacePath);
+    writeWorkspaceSkill(workspacePath, 'skill-a');
+    writeWorkspaceSkill(workspacePath, 'skill-b');
+
+    const { getEnabledSkillsForWorkspace } = await import('../src/pi-integration.js');
+
+    const enabled = getEnabledSkillsForWorkspace(workspaceId, workspacePath);
+    expect(enabled.map((skill) => skill.id)).toEqual(['skill-a', 'skill-b']);
+  });
+
+  it('respects persisted workspace skill deactivations', async () => {
+    const homePath = setTempHome();
+    const workspaceId = 'ws-filtered';
+    const workspacePath = createTempDir('pi-factory-workspace-');
+
+    registerWorkspace(homePath, workspaceId, workspacePath);
+    writeWorkspaceSkill(workspacePath, 'skill-a');
+    writeWorkspaceSkill(workspacePath, 'skill-b');
+
+    const { saveWorkspacePiConfig, getEnabledSkillsForWorkspace } = await import('../src/pi-integration.js');
+
+    saveWorkspacePiConfig(workspaceId, {
+      skills: { enabled: ['skill-b'], config: {} },
+    });
+
+    const enabled = getEnabledSkillsForWorkspace(workspaceId, workspacePath);
+    expect(enabled.map((skill) => skill.id)).toEqual(['skill-b']);
+  });
+
+  it('keeps explicit empty workspace selection (all skills disabled)', async () => {
+    const homePath = setTempHome();
+    const workspaceId = 'ws-empty';
+    const workspacePath = createTempDir('pi-factory-workspace-');
+
+    registerWorkspace(homePath, workspaceId, workspacePath);
+    writeWorkspaceSkill(workspacePath, 'skill-a');
+
+    const { saveWorkspacePiConfig, getEnabledSkillsForWorkspace } = await import('../src/pi-integration.js');
+
+    saveWorkspacePiConfig(workspaceId, {
+      skills: { enabled: [], config: {} },
+    });
+
+    const enabled = getEnabledSkillsForWorkspace(workspaceId, workspacePath);
+    expect(enabled).toEqual([]);
   });
 });
 

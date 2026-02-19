@@ -35,6 +35,9 @@ describe('universal skill availability regression checks', () => {
     expect(workspaceConfigPage).not.toContain("skill.hooks.includes('pre-planning')");
     expect(workspaceConfigPage).not.toContain("skill.hooks.includes('pre')");
     expect(workspaceConfigPage).not.toContain("skill.hooks.includes('post')");
+    expect(workspaceConfigPage).not.toContain("setActiveTab('extensions')");
+    expect(workspaceConfigPage).not.toContain('Extensions (');
+    expect(workspaceConfigPage).not.toContain('Select extensions active in this workspace.');
 
     expect(skillManagementPanel).toContain("const hooks: Array<'pre-planning' | 'pre' | 'post'> = ['pre-planning', 'pre', 'post']");
     expect(skillManagementPanel).not.toContain('Select at least one hook');

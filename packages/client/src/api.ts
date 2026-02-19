@@ -739,19 +739,12 @@ export const api = {
 
     const workspaceSkills = normalizeWorkspaceSkills(await workspaceRes.json().catch(() => []))
 
-    const [globalPiSkills, hookSkills] = await Promise.all([
-      fetch('/api/pi/skills')
-        .then(async (res) => (res.ok ? normalizeWorkspaceSkills(await res.json().catch(() => [])) : []))
-        .catch(() => []),
-      fetch('/api/factory/skills')
-        .then(async (res) => (res.ok ? normalizeWorkspaceHookSkills(await res.json().catch(() => [])) : []))
-        .catch(() => []),
-    ])
-
-    const slashSkillSource = workspaceSkills.length > 0 ? workspaceSkills : globalPiSkills
+    const hookSkills = await fetch('/api/factory/skills')
+      .then(async (res) => (res.ok ? normalizeWorkspaceHookSkills(await res.json().catch(() => [])) : []))
+      .catch(() => [])
 
     return {
-      slashSkills: mergeWorkspaceSkillLists(slashSkillSource),
+      slashSkills: mergeWorkspaceSkillLists(workspaceSkills),
       hookSkills: mergeWorkspaceHookSkillLists(hookSkills),
     }
   },

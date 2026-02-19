@@ -18,6 +18,7 @@ import {
   getTaskFactoryGlobalExtensionsDir,
   getTaskFactoryHomeDir,
   getTaskFactoryPiSkillsDir,
+  getWorkspaceTaskFactorySkillsDir,
 } from './taskfactory-home.js';
 import {
   loadWorkspaceConfigFromDiskSync,
@@ -256,15 +257,44 @@ export interface PiSkill {
   path: string;
 }
 
-export function discoverPiSkills(): PiSkill[] {
-  const skillsDir = resolveReadablePiSkillsDir();
+function parsePiSkillFromContent(skillId: string, skillPath: string, content: string): PiSkill {
+  const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
 
-  if (!skillsDir) {
+  if (!frontmatterMatch) {
+    return {
+      id: skillId,
+      name: skillId,
+      description: '',
+      allowedTools: [],
+      content,
+      path: skillPath,
+    };
+  }
+
+  const [, yamlContent, bodyContent] = frontmatterMatch;
+  const nameMatch = yamlContent.match(/name:\s*(.+)/);
+  const toolsMatch = yamlContent.match(/allowed-tools:\s*(.+)/);
+
+  return {
+    id: skillId,
+    name: nameMatch ? nameMatch[1].trim() : skillId,
+    description: bodyContent.split('\n')[0]?.replace(/^#+\s*/, '') || '',
+    allowedTools: toolsMatch
+      ? toolsMatch[1].split(',').map((tool) => tool.trim())
+      : [],
+    content,
+    path: skillPath,
+  };
+}
+
+function discoverPiSkillsFromDir(skillsDir: string): PiSkill[] {
+  if (!existsSync(skillsDir)) {
     return [];
   }
 
   const skills: PiSkill[] = [];
-  const entries = readdirSync(skillsDir, { withFileTypes: true });
+  const entries = readdirSync(skillsDir, { withFileTypes: true })
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
@@ -276,43 +306,44 @@ export function discoverPiSkills(): PiSkill[] {
 
     try {
       const content = readFileSync(skillMdPath, 'utf-8');
-      
-      // Parse frontmatter
-      const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
-      
-      if (frontmatterMatch) {
-        const [, yamlContent, bodyContent] = frontmatterMatch;
-        
-        // Simple YAML parsing for name and allowed-tools
-        const nameMatch = yamlContent.match(/name:\s*(.+)/);
-        const toolsMatch = yamlContent.match(/allowed-tools:\s*(.+)/);
-        
-        skills.push({
-          id: entry.name,
-          name: nameMatch ? nameMatch[1].trim() : entry.name,
-          description: bodyContent.split('\n')[0]?.replace(/^#+\s*/, '') || '',
-          allowedTools: toolsMatch 
-            ? toolsMatch[1].split(',').map(t => t.trim()) 
-            : [],
-          content: content,
-          path: skillPath,
-        });
-      } else {
-        skills.push({
-          id: entry.name,
-          name: entry.name,
-          description: '',
-          allowedTools: [],
-          content: content,
-          path: skillPath,
-        });
-      }
+      skills.push(parsePiSkillFromContent(entry.name, skillPath, content));
     } catch (err) {
       console.error(`Failed to load skill ${entry.name}:`, err);
     }
   }
 
   return skills;
+}
+
+function dedupeSkillsById(skills: PiSkill[]): PiSkill[] {
+  const deduped = new Map<string, PiSkill>();
+
+  for (const skill of skills) {
+    deduped.set(skill.id, skill);
+  }
+
+  return Array.from(deduped.values());
+}
+
+export function discoverPiSkills(): PiSkill[] {
+  const skillsDir = resolveReadablePiSkillsDir();
+
+  if (!skillsDir) {
+    return [];
+  }
+
+  return discoverPiSkillsFromDir(skillsDir);
+}
+
+export function discoverWorkspacePiSkills(workspacePath: string): PiSkill[] {
+  const repoSkillsDir = join(workspacePath, 'skills');
+  const localTaskFactorySkillsDir = getWorkspaceTaskFactorySkillsDir(workspacePath);
+
+  // Repo skills first, then local .taskfactory overrides by ID.
+  return dedupeSkillsById([
+    ...discoverPiSkillsFromDir(repoSkillsDir),
+    ...discoverPiSkillsFromDir(localTaskFactorySkillsDir),
+  ]);
 }
 
 export function loadPiSkill(skillId: string): PiSkill | null {
@@ -326,31 +357,11 @@ export function loadPiSkill(skillId: string): PiSkill | null {
 
   try {
     const content = readFileSync(skillMdPath, 'utf-8');
-    
-    const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
-    
-    if (frontmatterMatch) {
-      const [, yamlContent, bodyContent] = frontmatterMatch;
-      
-      const nameMatch = yamlContent.match(/name:\s*(.+)/);
-      const toolsMatch = yamlContent.match(/allowed-tools:\s*(.+)/);
-      
-      return {
-        id: skillId,
-        name: nameMatch ? nameMatch[1].trim() : skillId,
-        description: bodyContent.split('\n')[0]?.replace(/^#+\s*/, '') || '',
-        allowedTools: toolsMatch 
-          ? toolsMatch[1].split(',').map(t => t.trim()) 
-          : [],
-        content: content,
-        path: skillPath,
-      };
-    }
+    return parsePiSkillFromContent(skillId, skillPath, content);
   } catch (err) {
     console.error(`Failed to load skill ${skillId}:`, err);
+    return null;
   }
-
-  return null;
 }
 
 // =============================================================================
@@ -492,11 +503,11 @@ function loadWorkspacePathFromRegistry(workspaceId: string): string | undefined 
 // =============================================================================
 
 export interface WorkspacePiConfig {
-  skills: {
+  skills?: {
     enabled: string[];
     config: Record<string, any>;
   };
-  extensions: {
+  extensions?: {
     enabled: string[];
     config: Record<string, any>;
   };
@@ -584,28 +595,37 @@ export function saveForemanSettings(workspaceId: string, settings: ForemanSettin
 // Enabled Skills for Workspace
 // =============================================================================
 
-export function getEnabledSkillsForWorkspace(workspaceId?: string): PiSkill[] {
+function hasExplicitWorkspaceSkillSelection(workspaceConfig: WorkspacePiConfig | null): boolean {
+  return Array.isArray(workspaceConfig?.skills?.enabled);
+}
+
+export function getEnabledSkillsForWorkspace(workspaceId?: string, workspacePath?: string): PiSkill[] {
+  if (workspaceId || workspacePath) {
+    const resolvedWorkspacePath = workspacePath || (workspaceId ? loadWorkspacePathFromRegistry(workspaceId) : undefined);
+    if (!resolvedWorkspacePath) {
+      return [];
+    }
+
+    const allWorkspaceSkills = discoverWorkspacePiSkills(resolvedWorkspacePath);
+    const workspaceConfig = workspaceId ? loadWorkspacePiConfig(workspaceId) : null;
+
+    if (hasExplicitWorkspaceSkillSelection(workspaceConfig)) {
+      const enabledIds = workspaceConfig?.skills?.enabled ?? [];
+      return allWorkspaceSkills.filter((skill) => enabledIds.includes(skill.id));
+    }
+
+    // Default behavior: if no saved workspace selection exists, all discovered
+    // workspace skills are enabled.
+    return allWorkspaceSkills;
+  }
+
+  // Non-workspace contexts keep global behavior.
   const allSkills = discoverPiSkills();
-  
-  if (!workspaceId) {
-    // Return globally enabled skills or all skills
-    const factorySettings = loadPiFactorySettings();
-    const enabledIds = factorySettings?.skills?.enabled;
-    return enabledIds 
-      ? allSkills.filter(s => enabledIds.includes(s.id))
-      : allSkills;
-  }
-  
-  const workspaceConfig = loadWorkspacePiConfig(workspaceId);
-  if (workspaceConfig?.skills?.enabled) {
-    return allSkills.filter(s => workspaceConfig.skills.enabled.includes(s.id));
-  }
-  
-  // Fall back to global factory settings
   const factorySettings = loadPiFactorySettings();
   const enabledIds = factorySettings?.skills?.enabled;
-  return enabledIds 
-    ? allSkills.filter(s => enabledIds.includes(s.id))
+
+  return enabledIds
+    ? allSkills.filter((skill) => enabledIds.includes(skill.id))
     : allSkills;
 }
 
@@ -625,8 +645,9 @@ export function getEnabledExtensionsForWorkspace(workspaceId?: string): PiExtens
   }
   
   const workspaceConfig = loadWorkspacePiConfig(workspaceId);
-  if (workspaceConfig?.extensions?.enabled) {
-    return allExtensions.filter(e => workspaceConfig.extensions.enabled.includes(e.id));
+  const enabledWorkspaceExtensionIds = workspaceConfig?.extensions?.enabled;
+  if (Array.isArray(enabledWorkspaceExtensionIds)) {
+    return allExtensions.filter((extension) => enabledWorkspaceExtensionIds.includes(extension.id));
   }
   
   const factorySettings = loadPiFactorySettings();
@@ -679,7 +700,7 @@ export function buildAgentContext(
   if (skillIds) {
     availableSkills = skillIds.map(id => loadPiSkill(id)).filter(Boolean) as PiSkill[];
   } else {
-    availableSkills = getEnabledSkillsForWorkspace(workspaceId);
+    availableSkills = getEnabledSkillsForWorkspace(workspaceId, resolvedWorkspacePath);
   }
 
   const activeExtensions = getEnabledExtensionsForWorkspace(workspaceId);

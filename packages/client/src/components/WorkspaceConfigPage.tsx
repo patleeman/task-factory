@@ -9,7 +9,7 @@ import {
   DEFAULT_EXECUTION_PROMPT_TEMPLATE,
   type TaskDefaults,
 } from '@task-factory/shared'
-import type { PiSkill, PiExtension, PostExecutionSkill } from '../types/pi'
+import type { PiSkill, PostExecutionSkill } from '../types/pi'
 import { api, type WorkflowAutomationResponse, type WorkflowAutomationUpdate } from '../api'
 import { AppIcon } from './AppIcon'
 import { ModelSelector } from './ModelSelector'
@@ -17,10 +17,6 @@ import { ExecutionPipelineEditor } from './ExecutionPipelineEditor'
 
 interface WorkspaceConfig {
   skills: {
-    enabled: string[]
-    config: Record<string, any>
-  }
-  extensions: {
     enabled: string[]
     config: Record<string, any>
   }
@@ -90,17 +86,15 @@ export function WorkspaceConfigPage() {
   const { workspaceId } = useParams<{ workspaceId: string }>()
   const navigate = useNavigate()
   const [allSkills, setAllSkills] = useState<PiSkill[]>([])
-  const [allExtensions, setAllExtensions] = useState<PiExtension[]>([])
   const [taskSkills, setTaskSkills] = useState<PostExecutionSkill[]>([])
   const [taskDefaults, setTaskDefaults] = useState<TaskDefaults>({ ...EMPTY_TASK_DEFAULTS })
   const [config, setConfig] = useState<WorkspaceConfig>({
     skills: { enabled: [], config: {} },
-    extensions: { enabled: [], config: {} },
   })
   const [sharedContext, setSharedContext] = useState('')
   const [sharedContextPath, setSharedContextPath] = useState('.taskfactory/workspace-context.md')
   const [workflowForm, setWorkflowForm] = useState<WorkflowOverridesForm | null>(null)
-  const [activeTab, setActiveTab] = useState<'skills' | 'extensions' | 'task-defaults' | 'workflow' | 'shared-context' | 'storage'>('skills')
+  const [activeTab, setActiveTab] = useState<'skills' | 'task-defaults' | 'workflow' | 'shared-context' | 'storage'>('skills')
   const [artifactRoot, setArtifactRoot] = useState<string>('')
   const [artifactRootInput, setArtifactRootInput] = useState<string>('')
   const [artifactRootSaving, setArtifactRootSaving] = useState(false)
@@ -110,6 +104,8 @@ export function WorkspaceConfigPage() {
   const [isSaving, setIsSaving] = useState(false)
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'error'>('idle')
   const [saveError, setSaveError] = useState('')
+  const [hasSavedSkillSelection, setHasSavedSkillSelection] = useState(false)
+  const [skillsTouched, setSkillsTouched] = useState(false)
 
   // Workspace deletion state
   const [workspaceName, setWorkspaceName] = useState('')
@@ -125,10 +121,11 @@ export function WorkspaceConfigPage() {
     setIsLoading(true)
     setSaveError('')
     setWorkflowForm(null)
+    setHasSavedSkillSelection(false)
+    setSkillsTouched(false)
 
     Promise.all([
-      fetch('/api/pi/skills').then(r => r.json()),
-      fetch('/api/pi/extensions').then(r => r.json()),
+      fetch(`/api/workspaces/${workspaceId}/skills/discovered`).then(r => r.json()),
       fetch('/api/factory/skills').then(r => r.json() as Promise<PostExecutionSkill[]>),
       fetch(`/api/workspaces/${workspaceId}/pi-config`).then(r => r.json()),
       fetch(`/api/workspaces/${workspaceId}/shared-context`).then(r => r.json()),
@@ -138,7 +135,6 @@ export function WorkspaceConfigPage() {
     ])
       .then(([
         skillsData,
-        extensionsData,
         taskSkillsData,
         configData,
         sharedContextData,
@@ -148,8 +144,11 @@ export function WorkspaceConfigPage() {
       ]) => {
         if (cancelled) return
 
-        setAllSkills(skillsData)
-        setAllExtensions(extensionsData)
+        const discoveredSkillIds = Array.isArray(skillsData)
+          ? skillsData.map((skill: PiSkill) => skill.id)
+          : []
+
+        setAllSkills(Array.isArray(skillsData) ? skillsData : [])
         setTaskSkills(taskSkillsData)
 
         const knownSkillIds = new Set(taskSkillsData.map((skill) => skill.id))
@@ -160,9 +159,18 @@ export function WorkspaceConfigPage() {
           postExecutionSkills: workspaceTaskDefaults.postExecutionSkills.filter((skillId) => knownSkillIds.has(skillId)),
         })
 
+        const hasSavedSkillSelection = Array.isArray(configData?.skills?.enabled)
+        const enabledSkillIds = hasSavedSkillSelection
+          ? configData.skills.enabled
+          : discoveredSkillIds
+
+        setHasSavedSkillSelection(hasSavedSkillSelection)
+
         setConfig({
-          skills: configData.skills || { enabled: [], config: {} },
-          extensions: configData.extensions || { enabled: [], config: {} },
+          skills: {
+            enabled: enabledSkillIds,
+            config: configData?.skills?.config || {},
+          },
         })
         setWorkflowForm(buildWorkflowOverridesForm(workflowSettings))
         setSharedContext(sharedContextData.content || '')
@@ -198,20 +206,7 @@ export function WorkspaceConfigPage() {
           : [...prev.skills.enabled, skillId],
       },
     }))
-    setSaveStatus('idle')
-    setSaveError('')
-  }
-
-  const toggleExtension = (extId: string) => {
-    setConfig(prev => ({
-      ...prev,
-      extensions: {
-        ...prev.extensions,
-        enabled: prev.extensions.enabled.includes(extId)
-          ? prev.extensions.enabled.filter(id => id !== extId)
-          : [...prev.extensions.enabled, extId],
-      },
-    }))
+    setSkillsTouched(true)
     setSaveStatus('idle')
     setSaveError('')
   }
@@ -224,6 +219,7 @@ export function WorkspaceConfigPage() {
         enabled: allSkills.map(s => s.id),
       },
     }))
+    setSkillsTouched(true)
     setSaveStatus('idle')
     setSaveError('')
   }
@@ -236,30 +232,7 @@ export function WorkspaceConfigPage() {
         enabled: [],
       },
     }))
-    setSaveStatus('idle')
-    setSaveError('')
-  }
-
-  const selectAllExtensions = () => {
-    setConfig(prev => ({
-      ...prev,
-      extensions: {
-        ...prev.extensions,
-        enabled: allExtensions.map(e => e.id),
-      },
-    }))
-    setSaveStatus('idle')
-    setSaveError('')
-  }
-
-  const deselectAllExtensions = () => {
-    setConfig(prev => ({
-      ...prev,
-      extensions: {
-        ...prev.extensions,
-        enabled: [],
-      },
-    }))
+    setSkillsTouched(true)
     setSaveStatus('idle')
     setSaveError('')
   }
@@ -288,11 +261,16 @@ export function WorkspaceConfigPage() {
         ? buildWorkflowUpdateFromForm(workflowForm)
         : null
 
+      const shouldPersistSkillSelection = hasSavedSkillSelection || skillsTouched
+      const configPayload = shouldPersistSkillSelection
+        ? { skills: config.skills }
+        : {}
+
       const [configRes, sharedContextRes, savedTaskDefaults, workflowResult] = await Promise.all([
         fetch(`/api/workspaces/${workspaceId}/pi-config`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(config),
+          body: JSON.stringify(configPayload),
         }),
         fetch(`/api/workspaces/${workspaceId}/shared-context`, {
           method: 'PUT',
@@ -314,6 +292,8 @@ export function WorkspaceConfigPage() {
         setWorkflowForm(buildWorkflowOverridesForm(workflowResult))
       }
 
+      setHasSavedSkillSelection(shouldPersistSkillSelection)
+      setSkillsTouched(false)
       setSaveStatus('saved')
     } catch (err) {
       console.error('Failed to save config:', err)
@@ -380,7 +360,7 @@ export function WorkspaceConfigPage() {
           <div className="flex items-center gap-3 mb-6">
             <div>
               <h2 className="text-xl font-semibold text-slate-800">Workspace Configuration</h2>
-              <p className="text-sm text-slate-500">Configure skills, extensions, and task defaults for this workspace</p>
+              <p className="text-sm text-slate-500">Configure workspace skills and task defaults for this workspace</p>
             </div>
           </div>
 
@@ -396,16 +376,7 @@ export function WorkspaceConfigPage() {
             >
               Skills ({config.skills.enabled.length}/{allSkills.length})
             </button>
-            <button
-              onClick={() => setActiveTab('extensions')}
-              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === 'extensions'
-                  ? 'border-safety-orange text-safety-orange'
-                  : 'border-transparent text-slate-600 hover:text-slate-800'
-              }`}
-            >
-              Extensions ({config.extensions.enabled.length}/{allExtensions.length})
-            </button>
+
             <button
               onClick={() => setActiveTab('task-defaults')}
               className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
@@ -486,7 +457,7 @@ export function WorkspaceConfigPage() {
                     }`}
                   >
                     <div className="flex items-center gap-3">
-                      <span className="text-xs font-semibold text-slate-400 uppercase">Ext</span>
+                      <span className="text-xs font-semibold text-slate-400 uppercase">Skill</span>
                       <div>
                         <div className="font-medium text-slate-800">{skill.name}</div>
                         <div className="text-xs text-slate-500">{skill.id}</div>
@@ -504,68 +475,10 @@ export function WorkspaceConfigPage() {
                   </div>
                 )
               })}
-            </div>
-          )}
 
-          {activeTab === 'extensions' && (
-            <div className="space-y-3">
-              {/* Toggle All Bar */}
-              <div className="flex items-center justify-between">
-                <p className="text-sm text-slate-500">
-                  Select extensions active in this workspace.
-                </p>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={selectAllExtensions}
-                    className="text-xs text-slate-500 hover:text-safety-orange transition-colors px-2 py-1 rounded hover:bg-slate-100"
-                  >
-                    Select All
-                  </button>
-                  <span className="text-slate-300">|</span>
-                  <button
-                    onClick={deselectAllExtensions}
-                    className="text-xs text-slate-500 hover:text-safety-orange transition-colors px-2 py-1 rounded hover:bg-slate-100"
-                  >
-                    Deselect All
-                  </button>
-                </div>
-              </div>
-
-              {allExtensions.map(ext => {
-                const isEnabled = config.extensions.enabled.includes(ext.id)
-                return (
-                  <div
-                    key={ext.id}
-                    onClick={() => toggleExtension(ext.id)}
-                    className={`flex items-center justify-between p-3 rounded-lg border cursor-pointer transition-colors ${
-                      isEnabled
-                        ? 'border-safety-orange bg-orange-50'
-                        : 'border-slate-200 bg-white hover:border-slate-300'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <span className="text-xs font-semibold text-slate-400 uppercase">Plug</span>
-                      <div>
-                        <div className="font-medium text-slate-800">{ext.name}</div>
-                        <div className="text-xs text-slate-500">v{ext.version}</div>
-                      </div>
-                    </div>
-                    <div
-                      className={`w-5 h-5 rounded border flex items-center justify-center ${
-                        isEnabled
-                          ? 'bg-safety-orange border-safety-orange text-white'
-                          : 'border-slate-300'
-                      }`}
-                    >
-                      {isEnabled && <AppIcon icon={Check} size="xs" className="text-white" />}
-                    </div>
-                  </div>
-                )
-              })}
-
-              {allExtensions.length === 0 && (
+              {allSkills.length === 0 && (
                 <p className="text-sm text-slate-400 text-center py-8">
-                  No extensions found in ~/.taskfactory/extensions/
+                  No workspace SKILL.md files found.
                 </p>
               )}
             </div>

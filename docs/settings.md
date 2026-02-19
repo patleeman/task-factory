@@ -40,6 +40,12 @@ How Task Factory stores and resolves global + workspace settings, including firs
 | `<workspace>/.taskfactory/skills/` | Repo-local skills created via `create_skill destination: repo-local` |
 | `<workspace>/.taskfactory/extensions/` | Repo-local extensions created via `create_extension destination: repo-local` |
 
+Workspace skill discovery for agent availability now reads local `SKILL.md` files from:
+- `<workspace>/skills/`
+- `<workspace>/.taskfactory/skills/`
+
+Workspace Configuration only manages skill enable/disable state; extensions are configured globally.
+
 ### Precedence summary
 
 1. Workspace-level overrides win when present.

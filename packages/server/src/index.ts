@@ -1433,6 +1433,7 @@ import {
   savePiFactorySettings,
   loadWorkspacePiConfig,
   saveWorkspacePiConfig,
+  discoverWorkspacePiSkills,
   getEnabledSkillsForWorkspace,
   getEnabledExtensionsForWorkspace,
   getWorkspaceSharedContextPath,
@@ -1633,7 +1634,7 @@ app.put('/api/workspaces/:workspaceId/task-defaults', (req, res) => {
 // Get workspace Pi configuration
 app.get('/api/workspaces/:workspaceId/pi-config', (req, res) => {
   const config = loadWorkspacePiConfig(req.params.workspaceId);
-  res.json(config || { skills: { enabled: [], config: {} }, extensions: { enabled: [], config: {} } });
+  res.json(config || {});
 });
 
 // Save workspace Pi configuration
@@ -1732,9 +1733,29 @@ app.put('/api/workspaces/:workspaceId/shared-context', async (req, res) => {
   }
 });
 
+// Get discovered workspace skills (unfiltered)
+app.get('/api/workspaces/:workspaceId/skills/discovered', async (req, res) => {
+  const workspace = await getWorkspaceById(req.params.workspaceId);
+
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return;
+  }
+
+  const skills = discoverWorkspacePiSkills(workspace.path);
+  res.json(skills);
+});
+
 // Get enabled skills for workspace
-app.get('/api/workspaces/:workspaceId/skills', (req, res) => {
-  const skills = getEnabledSkillsForWorkspace(req.params.workspaceId);
+app.get('/api/workspaces/:workspaceId/skills', async (req, res) => {
+  const workspace = await getWorkspaceById(req.params.workspaceId);
+
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return;
+  }
+
+  const skills = getEnabledSkillsForWorkspace(req.params.workspaceId, workspace.path);
   res.json(skills);
 });
 
