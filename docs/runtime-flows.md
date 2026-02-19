@@ -130,6 +130,11 @@ backlog (planning running)
   -> ready
   -> executing
   -> complete
+
+Direct shortcut (backlog task with acceptance criteria, planning not actively running):
+backlog
+  -> executing  (skips ready; requires non-empty acceptance criteria)
+  -> complete
 ```
 
 ## Related docs

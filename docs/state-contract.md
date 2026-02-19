@@ -47,7 +47,7 @@ Canonical lifecycle contract for task modes, phases, planning status, and transi
 
 | From | Allowed to |
 |---|---|
-| `backlog` | `ready`, `complete`, `archived` |
+| `backlog` | `ready`, `executing`*, `complete`, `archived` |
 | `ready` | `backlog`, `executing`, `archived` |
 | `executing` | `backlog`, `ready`, `complete`, `archived` |
 | `complete` | `ready`, `executing`, `archived` |
@@ -57,6 +57,7 @@ Additional guards:
 
 - Move to `ready` requires at least one acceptance criterion.
 - Move to `executing` is blocked when planning is still running and no plan exists.
+- `backlog → executing`* (direct skip): also requires at least one acceptance criterion.
 
 ## Examples
 

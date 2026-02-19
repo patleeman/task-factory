@@ -975,17 +975,57 @@ describe('canMoveToPhase', () => {
     expect(result).toEqual({ allowed: true });
   });
 
-  it('keeps non-archive constraints (backlog -> executing is rejected)', () => {
-    const task = createTask({ phase: 'backlog' });
+  it('allows moving a planned backlog task (planningStatus=completed) directly to executing', () => {
+    const task = createTask({
+      phase: 'backlog',
+      acceptanceCriteria: ['Criterion one'],
+      planningStatus: 'completed',
+    });
+    const result = canMoveToPhase(task, 'executing');
+
+    expect(result).toEqual({ allowed: true });
+  });
+
+  it('allows moving a backlog task with criteria and no prior planning run directly to executing', () => {
+    const task = createTask({ phase: 'backlog', acceptanceCriteria: ['Criterion one'] });
+    const result = canMoveToPhase(task, 'executing');
+
+    expect(result).toEqual({ allowed: true });
+  });
+
+  it('blocks backlog -> executing when the task has no acceptance criteria', () => {
+    const task = createTask({ phase: 'backlog', acceptanceCriteria: [] });
     const result = canMoveToPhase(task, 'executing');
 
     expect(result.allowed).toBe(false);
-    expect(result.reason).toBe('Cannot move from backlog to executing');
+    expect(result.reason).toBe('Task must have acceptance criteria before moving directly to Executing');
   });
 
-  it('blocks move to executing when planning is still running', () => {
+  it('blocks backlog -> executing when criteria are only whitespace', () => {
+    const task = createTask({ phase: 'backlog', acceptanceCriteria: ['   ', '\t'] });
+    const result = canMoveToPhase(task, 'executing');
+
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toBe('Task must have acceptance criteria before moving directly to Executing');
+  });
+
+  it('blocks move to executing when planning is still running (ready phase)', () => {
     const task = createTask({
       phase: 'ready',
+      acceptanceCriteria: ['all good'],
+      planningStatus: 'running',
+      plan: undefined,
+    });
+
+    const result = canMoveToPhase(task, 'executing');
+
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toBe('Task planning is still running');
+  });
+
+  it('blocks backlog -> executing when planning is still running', () => {
+    const task = createTask({
+      phase: 'backlog',
       acceptanceCriteria: ['all good'],
       planningStatus: 'running',
       plan: undefined,

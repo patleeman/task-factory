@@ -14,7 +14,7 @@ How tasks move through pipeline phases and how queue automation dispatches work.
 
 1. Create a task in `backlog`.
 2. Let planning complete (or regenerate plan as needed).
-3. Move task to `ready`.
+3. Move task to `ready`, or move it directly to `executing` if it already has acceptance criteria (skips the ready phase).
 4. Start queue processing (`/queue/start`) or execute manually.
 5. Agent runs in `executing`; completion callback moves task to `complete`.
 

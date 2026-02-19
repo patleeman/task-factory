@@ -376,6 +376,12 @@ export function createTask(
     executionModelConfig: resolvedDefaults.executionModelConfig,
     // Keep legacy field aligned for backward compatibility.
     modelConfig: resolvedDefaults.modelConfig,
+    planningFallbackModels: Array.isArray(request.planningFallbackModels) && request.planningFallbackModels.length > 0
+      ? request.planningFallbackModels
+      : undefined,
+    executionFallbackModels: Array.isArray(request.executionFallbackModels) && request.executionFallbackModels.length > 0
+      ? request.executionFallbackModels
+      : undefined,
     usageMetrics: createEmptyTaskUsageMetrics(),
     prePlanningSkills: resolvedDefaults.prePlanningSkills,
     preExecutionSkills: resolvedDefaults.preExecutionSkills,
@@ -452,6 +458,16 @@ export function updateTask(
     // Legacy field updates execution model.
     task.frontmatter.executionModelConfig = request.modelConfig;
     task.frontmatter.modelConfig = request.modelConfig;
+  }
+
+  if (request.planningFallbackModels !== undefined) {
+    task.frontmatter.planningFallbackModels =
+      request.planningFallbackModels.length > 0 ? request.planningFallbackModels : undefined;
+  }
+
+  if (request.executionFallbackModels !== undefined) {
+    task.frontmatter.executionFallbackModels =
+      request.executionFallbackModels.length > 0 ? request.executionFallbackModels : undefined;
   }
 
   if (request.blocked !== undefined) {
@@ -814,8 +830,10 @@ export function canMoveToPhase(task: Task, targetPhase: Phase): {
   // Define valid transitions
   // Users can pause executing tasks (move back to backlog/ready) and resume later.
   // The session file is preserved so the agent picks up where it left off.
+  // Backlog tasks with acceptance criteria may move directly to executing,
+  // skipping the ready phase when the task is already execution-ready.
   const validTransitions: Record<Phase, Phase[]> = {
-    backlog: ['ready', 'complete', 'archived'],
+    backlog: ['ready', 'executing', 'complete', 'archived'],
     ready: ['backlog', 'executing', 'archived'],
     executing: ['backlog', 'ready', 'complete', 'archived'],
     complete: ['ready', 'executing', 'archived'],
@@ -829,7 +847,10 @@ export function canMoveToPhase(task: Task, targetPhase: Phase): {
     };
   }
 
-  // Phase-specific validation
+  // Phase-specific validation.
+  // Note: the planning-running guard is intentionally checked before the criteria guard so
+  // that "still planning" gives a more actionable error than "missing criteria" when both
+  // conditions are true on a backlog task.
   if (targetPhase === 'executing' && task.frontmatter.planningStatus === 'running' && !task.frontmatter.plan) {
     return {
       allowed: false,
@@ -842,6 +863,17 @@ export function canMoveToPhase(task: Task, targetPhase: Phase): {
       return {
         allowed: false,
         reason: 'Task must have acceptance criteria before moving to Ready',
+      };
+    }
+  }
+
+  // Backlog tasks moving directly to executing must be execution-ready:
+  // they need at least one acceptance criterion so the agent has something to work toward.
+  if (targetPhase === 'executing' && currentPhase === 'backlog') {
+    if (normalizeAcceptanceCriteria(task.frontmatter.acceptanceCriteria).length === 0) {
+      return {
+        allowed: false,
+        reason: 'Task must have acceptance criteria before moving directly to Executing',
       };
     }
   }
