@@ -5,7 +5,7 @@
 
 import { join, dirname, basename } from 'path';
 import { homedir } from 'os';
-import { existsSync, mkdirSync, readdirSync, readFileSync } from 'fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import {
   createAgentSession,
@@ -666,6 +666,15 @@ export async function createTaskConversationSession(
   }
 
   const shouldResume = !forceNewSession && hasExistingSession;
+
+  // Before opening an existing session, sanitize any image content blocks
+  // with unsupported MIME types.  This prevents a bad image stored in history
+  // (before the MIME allowlist was enforced) from permanently blocking all
+  // future turns via a provider 400 invalid_request_error.
+  if (shouldResume && previousSessionFile) {
+    sanitizeSessionFileImages(previousSessionFile);
+  }
+
   const sessionManager = shouldResume && previousSessionFile
     ? SessionManager.open(previousSessionFile)
     : SessionManager.create(workspacePath);
@@ -2136,6 +2145,13 @@ function handleAgentError(
   const normalizedError = normalizeOptionalErrorMessage(err) ?? String(err);
   session.activeTurnErrorMessage = normalizedError;
 
+  // If the turn failed due to an unsupported image MIME type in replayed
+  // history, sanitize the session file immediately so the next resume
+  // (triggered by the user retrying) loads a clean conversation.
+  if (isImageMimeTypeError(normalizedError) && task.frontmatter.sessionFile) {
+    sanitizeSessionFileImages(task.frontmatter.sessionFile);
+  }
+
   closeExecutionTurnTelemetryIfNeeded(session, workspaceId, task.id, {
     outcome: 'error',
     source: 'handleAgentError',
@@ -2266,6 +2282,93 @@ function isRetryableProviderError(errorMessage: string): boolean {
     || lower.includes('overloaded')
     || lower.includes('capacity')
   );
+}
+
+/**
+ * Returns true when a provider error is caused by an unsupported image
+ * media_type in the request.  These errors originate from replayed
+ * conversation history that contains an image with a non-whitelisted MIME
+ * (e.g. image/svg+xml) stored before the MIME allowlist was in place.
+ *
+ * Example: "messages.68.content.1.image.source.base64.media_type:
+ *           Input should be 'image/jpeg', 'image/png', 'image/gif' or 'image/webp'"
+ */
+function isImageMimeTypeError(errorMessage: string): boolean {
+  const lower = errorMessage.toLowerCase();
+  return lower.includes('media_type') && (
+    lower.includes('image/jpeg')
+    || lower.includes('input should be')
+    || lower.includes('image.source')
+  );
+}
+
+/** Exposed for tests only. */
+export { sanitizeSessionFileImages as _sanitizeSessionFileImages, isImageMimeTypeError as _isImageMimeTypeError };
+
+/**
+ * Scan a session JSONL file and remove image content blocks whose MIME type
+ * is not in the supported allowlist.  Removed image blocks are replaced with
+ * a text note so the conversation context is not silently truncated.
+ *
+ * The file is only rewritten when at least one unsupported image is found.
+ * Errors during read/write are logged but never thrown — sanitization
+ * failures must not block a session from opening.
+ */
+function sanitizeSessionFileImages(sessionFilePath: string): void {
+  let raw: string;
+  try {
+    raw = readFileSync(sessionFilePath, 'utf-8');
+  } catch {
+    return;
+  }
+
+  const lines = raw.split('\n');
+  let modified = false;
+
+  const sanitizedLines = lines.map(line => {
+    if (!line.trim()) return line;
+
+    let entry: Record<string, unknown>;
+    try {
+      entry = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      return line; // unparseable line — keep as-is
+    }
+
+    const msg = entry.message as { role?: string; content?: unknown[] } | undefined;
+    if (entry.type !== 'message' || !Array.isArray(msg?.content)) {
+      return line;
+    }
+
+    let changed = false;
+    const sanitizedContent = (msg!.content as Record<string, unknown>[]).flatMap(block => {
+      const src = block.source as { media_type?: string } | undefined;
+      if (block.type === 'image' && src?.media_type) {
+        if (!canonicalizeImageMimeType(src.media_type)) {
+          changed = true;
+          modified = true;
+          return [{ type: 'text', text: `[Image removed: unsupported format "${src.media_type}" cannot be replayed to the model]` }];
+        }
+      }
+      return [block];
+    });
+
+    if (!changed) return line;
+
+    return JSON.stringify({ ...entry, message: { ...msg, content: sanitizedContent } });
+  });
+
+  if (!modified) return;
+
+  console.warn(
+    `[AgentExecution] Sanitized session file to remove unsupported image MIME types: ${sessionFilePath}`,
+  );
+
+  try {
+    writeFileSync(sessionFilePath, sanitizedLines.join('\n'), 'utf-8');
+  } catch (err) {
+    console.error('[AgentExecution] Failed to write sanitized session file:', err);
+  }
 }
 
 /**
@@ -3955,6 +4058,12 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
       await session.piSession?.abort();
     } catch (abortErr) {
       console.error(`[planTask] abort() failed for ${task.id}:`, abortErr);
+    }
+
+    // If the turn failed due to a bad image MIME in replayed history, sanitize
+    // the session file so the next planning attempt loads a clean conversation.
+    if (isImageMimeTypeError(errMessage) && task.frontmatter.sessionFile) {
+      sanitizeSessionFileImages(task.frontmatter.sessionFile);
     }
 
     session.status = 'error';
