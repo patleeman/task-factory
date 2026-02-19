@@ -1070,6 +1070,23 @@ function extractDraftTaskPayloadFromToolResult(toolName: string, result: unknown
   return undefined;
 }
 
+/**
+ * Extracts the subagent conversation reference from a `message_agent` tool result.
+ * Returns the targetTaskId string when the agent chatted with another task, or undefined.
+ */
+function extractSubagentRefFromToolResult(toolName: string, result: unknown): string | undefined {
+  if (toolName !== 'message_agent') return undefined;
+
+  const details = extractPlanningToolResultDetails(result);
+  if (!details) return undefined;
+
+  const targetTaskId = details.targetTaskId;
+  if (typeof targetTaskId === 'string' && targetTaskId.length > 0) {
+    return targetTaskId;
+  }
+  return undefined;
+}
+
 function getPlanningContextUsageSnapshot(session: PlanningSession): ContextUsageSnapshot | null {
   try {
     const usage = session.piSession?.getContextUsage?.();
@@ -1407,6 +1424,7 @@ function handlePlanningEvent(
       const toolInfo = session.toolCallArgs.get(event.toolCallId);
       const artifactPayload = event.isError ? undefined : extractArtifactPayloadFromToolResult(event.toolName, event.result);
       const draftTaskPayload = event.isError ? undefined : extractDraftTaskPayloadFromToolResult(event.toolName, event.result);
+      const subagentTargetTaskId = event.isError ? undefined : extractSubagentRefFromToolResult(event.toolName, event.result);
 
       if (artifactPayload) {
         session.artifacts.set(artifactPayload.id, artifactPayload);
@@ -1439,6 +1457,7 @@ function handlePlanningEvent(
           artifactName: artifactPayload?.name,
           artifactHtml: artifactPayload?.html,
           draftTask: draftTaskPayload,
+          subagentTargetTaskId,
         },
       };
       session.messages.push(toolMsg);

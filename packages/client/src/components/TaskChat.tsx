@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, memo, useMemo, useCallback } from 'react'
-import { CornerUpLeft, Loader2, Paperclip, PencilLine, SendHorizontal, X, Zap } from 'lucide-react'
+import { Bot, CornerUpLeft, Loader2, Paperclip, PencilLine, SendHorizontal, X, Zap } from 'lucide-react'
 import type { ActivityEntry, Attachment, DraftTask, Phase, AgentExecutionStatus } from '@task-factory/shared'
 import type { AgentStreamState, ToolCallState } from '../hooks/useAgentStreaming'
 import { useVoiceDictation } from '../hooks/useVoiceDictation'
@@ -78,6 +78,8 @@ interface TaskChatProps {
   draftTaskStates?: Record<string, { status: 'created' | 'dismissed'; taskId?: string }>
   /** Draft IDs currently being created directly from inline cards. */
   creatingDraftTaskIds?: ReadonlySet<string>
+  /** Called when user clicks an inline subagent entry to open its conversation. */
+  onOpenSubagent?: (subagentTaskId: string) => void
 }
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; pulse?: boolean }> = {
@@ -639,6 +641,40 @@ const InlineDraftTaskWidget = memo(function InlineDraftTaskWidget({
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Inline subagent entry widget — shown when message_agent chat action succeeds
+// ─────────────────────────────────────────────────────────────────────────────
+
+const InlineSubagentWidget = memo(function InlineSubagentWidget({
+  targetTaskId,
+  onOpen,
+}: {
+  targetTaskId: string
+  onOpen?: (taskId: string) => void
+}) {
+  return (
+    <div className="-mx-4 border-l-2 border-violet-300 bg-violet-50/60 px-4 py-2.5">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 min-w-0">
+          <Bot size={14} className="text-violet-500 shrink-0" />
+          <div>
+            <div className="text-[10px] font-semibold text-violet-700 uppercase tracking-wide">Subagent Chat</div>
+            <div className="text-sm font-medium text-slate-800 font-mono">{targetTaskId}</div>
+          </div>
+        </div>
+        {onOpen && (
+          <button
+            onClick={() => onOpen(targetTaskId)}
+            className="text-xs px-2.5 py-1 rounded font-medium bg-violet-600 text-white hover:bg-violet-700 transition-colors shrink-0"
+          >
+            View conversation →
+          </button>
+        )}
+      </div>
+    </div>
+  )
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Inferred tool block — old entries without metadata, detected by heuristic
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -735,6 +771,7 @@ export function TaskChat({
   onDismissDraftTask,
   draftTaskStates,
   creatingDraftTaskIds,
+  onOpenSubagent,
 }: TaskChatProps) {
   const [input, setInput] = useState('')
   const [isComposing, setIsComposing] = useState(false)
@@ -1486,6 +1523,25 @@ export function TaskChat({
                       onDismiss={onDismissDraftTask}
                       state={draftTaskStates?.[draftTask.id]}
                       isCreating={creatingDraftTaskIds?.has(draftTask.id)}
+                    />
+                  )
+                }
+
+                // Inline subagent entry: message_agent chat action that started/resumed a conversation
+                const subagentTargetTaskId = typeof meta.subagentTargetTaskId === 'string'
+                  ? meta.subagentTargetTaskId
+                  : undefined
+
+                if (
+                  toolName === 'message_agent' &&
+                  subagentTargetTaskId &&
+                  !Boolean(meta.isError)
+                ) {
+                  return (
+                    <InlineSubagentWidget
+                      key={entry.id}
+                      targetTaskId={subagentTargetTaskId}
+                      onOpen={onOpenSubagent}
                     />
                   )
                 }

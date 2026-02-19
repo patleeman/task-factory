@@ -57,6 +57,7 @@ function messagesToEntries(messages: PlanningMessage[]): ActivityEntry[] {
           artifactName: msg.metadata?.artifactName,
           artifactHtml: msg.metadata?.artifactHtml,
           draftTask: msg.metadata?.draftTask,
+          subagentTargetTaskId: msg.metadata?.subagentTargetTaskId,
         },
       }
     }

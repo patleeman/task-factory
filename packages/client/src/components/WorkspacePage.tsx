@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { ArrowLeft, Lightbulb, Plus, Power } from 'lucide-react'
+import { ArrowLeft, Bot, ChevronLeft, Lightbulb, Plus, Power } from 'lucide-react'
 import { useParams, useNavigate, useMatch, useOutletContext } from 'react-router-dom'
 import type { Task, Workspace, ActivityEntry, Phase, QueueStatus, PlanningMessage, QAAnswer, AgentExecutionStatus, WorkspaceWorkflowSettings, Artifact, DraftTask, IdeaBacklog, IdeaBacklogItem, NewTaskFormState } from '@task-factory/shared'
 import { DEFAULT_WORKFLOW_SETTINGS } from '@task-factory/shared'
@@ -205,6 +205,15 @@ export function WorkspacePage() {
   const { subscribe, isConnected } = useOutletContext<WorkspaceWebSocketConnection>()
   const agentStream = useAgentStreaming(taskId || null, subscribe)
   const planningStream = usePlanningStreaming(workspaceId || null, subscribe, planningMessages)
+
+  // Subagent in-place navigation state: null = parent view, non-null = subagent view
+  const [subagentView, setSubagentView] = useState<{ taskId: string } | null>(null)
+  const subagentViewRef = useRef<{ taskId: string } | null>(null)
+  const [subagentActivity, setSubagentActivity] = useState<ActivityEntry[]>([])
+  const subagentAgentStream = useAgentStreaming(subagentView?.taskId ?? null, subscribe)
+
+  // Keep ref in sync so WebSocket handler always sees latest subagentView
+  subagentViewRef.current = subagentView
   const { modelConfig: foremanModelConfig, setModelConfig: setForemanModelConfig } = useForemanModel(workspaceId || null)
 
   // Update browser tab title to include the workspace name.
@@ -594,6 +603,12 @@ export function WorkspacePage() {
     setMoveError(null)
   }, [taskId, isCreateRoute, isArchiveRoute])
 
+  // Reset subagent view when navigating to a different parent task
+  useEffect(() => {
+    setSubagentView(null)
+    setSubagentActivity([])
+  }, [taskId])
+
   // Handle WebSocket messages
   useEffect(() => {
     return subscribe((msg) => {
@@ -689,6 +704,18 @@ export function WorkspacePage() {
             if (!entry?.id) return prev
             if (prev.some((e) => e.id === entry.id)) return prev
             return [entry, ...prev]
+          })
+          // Also forward entries that belong to the current subagent conversation
+          setSubagentActivity((prev) => {
+            const entry = msg.entry
+            if (!entry?.id) return prev
+            if (prev.some((e) => e.id === entry.id)) return prev
+            // Use ref to get the latest subagentView without stale-closure issues
+            const currentSubagentView = subagentViewRef.current
+            if (currentSubagentView && entry.taskId === currentSubagentView.taskId) {
+              return [entry, ...prev]
+            }
+            return prev
           })
           break
         case 'queue:status':
@@ -1066,6 +1093,34 @@ export function WorkspacePage() {
       clearTaskStopping(taskId)
     }
   }
+
+  // Subagent in-place navigation handlers
+  const handleOpenSubagent = useCallback((subagentTaskId: string) => {
+    if (!workspaceId) return
+    setSubagentView({ taskId: subagentTaskId })
+    setSubagentActivity([])
+    // Load the subagent's activity history; guard against stale results if
+    // the user opens a different subagent before this fetch resolves.
+    api.getTaskActivity(workspaceId, subagentTaskId, 200)
+      .then((entries) => {
+        const sorted = [...entries].sort((a, b) =>
+          (b.timestamp || '').localeCompare(a.timestamp || '')
+        )
+        setSubagentActivity((prev) => {
+          // Only apply if we're still viewing this subagent task
+          if (subagentViewRef.current?.taskId !== subagentTaskId) return prev
+          return sorted
+        })
+      })
+      .catch((err) => {
+        console.error('Failed to load subagent activity:', err)
+      })
+  }, [workspaceId])
+
+  const handleCloseSubagent = useCallback(() => {
+    setSubagentView(null)
+    setSubagentActivity([])
+  }, [])
 
   // Planning agent handlers
   const handlePlanningMessage = async (content: string, attachmentIds?: string[]) => {
@@ -1797,48 +1852,91 @@ export function WorkspacePage() {
                 creatingDraftTaskIds={creatingDraftTaskIds}
                 isVoiceHotkeyPressed={isVoiceHotkeyPressed}
                 onVoiceDictationStateChange={handleVoiceDictationStateChange}
+                onOpenSubagent={(subagentTaskId) => navigate(`${workspaceRootPath}/tasks/${subagentTaskId}`)}
               />
             ) : (
               /* Task mode: show task chat in left pane */
               <div className="flex flex-col h-full">
-                <div className="flex items-center gap-2 px-4 h-10 border-b border-slate-200 bg-slate-50 shrink-0">
-                  <button
-                    onClick={() => navigate(workspaceRootPath)}
-                    className="text-slate-400 hover:text-slate-600 transition-colors text-xs font-medium inline-flex items-center gap-1"
-                  >
-                    <AppIcon icon={ArrowLeft} size="xs" />
-                    Foreman
-                  </button>
-                  <div className="h-4 w-px bg-slate-200" />
-                  <span className="font-mono text-[10px] text-slate-400">{taskId}</span>
-                  <span className="text-xs font-medium text-slate-700 truncate">
-                    {selectedTask ? selectedTask.frontmatter.title : 'Task not found'}
-                  </span>
-                </div>
-                <div className="flex-1 overflow-hidden min-h-0">
-                  {selectedTask ? (
-                    <TaskChat
-                      taskId={selectedTask.id}
-                      taskPhase={selectedTask.frontmatter.phase}
-                      isAwaitingInput={awaitingTaskIds.has(selectedTask.id)}
-                      workspaceId={workspaceId || ''}
-                      entries={activity}
-                      attachments={selectedTask.frontmatter.attachments || []}
-                      agentStream={agentStream}
-                      onSendMessage={(content, attachmentIds) => handleSendMessage(selectedTask.id, content, attachmentIds)}
-                      onSteer={(content, attachmentIds) => handleSteer(selectedTask.id, content, attachmentIds)}
-                      onFollowUp={(content, attachmentIds) => handleFollowUp(selectedTask.id, content, attachmentIds)}
-                      onStop={() => handleStopTaskExecution(selectedTask.id)}
-                      isStopping={stoppingTaskIds.has(selectedTask.id)}
-                      slashCommands={taskSlashCommands}
-                      hookSkills={hookSkillOptions}
-                      isVoiceHotkeyPressed={isVoiceHotkeyPressed}
-                      onVoiceDictationStateChange={handleVoiceDictationStateChange}
-                    />
-                  ) : (
-                    <TaskRouteMissingState onBack={() => navigate(workspaceRootPath)} />
-                  )}
-                </div>
+                {subagentView ? (
+                  /* Subagent view — in-place navigation without task switch */
+                  <>
+                    <div className="flex items-center gap-2 px-4 h-10 border-b border-violet-200 bg-violet-50 shrink-0">
+                      <button
+                        onClick={handleCloseSubagent}
+                        className="text-violet-600 hover:text-violet-800 transition-colors text-xs font-medium inline-flex items-center gap-1"
+                      >
+                        <AppIcon icon={ChevronLeft} size="xs" />
+                        Back
+                      </button>
+                      <div className="h-4 w-px bg-violet-200" />
+                      <Bot size={12} className="text-violet-500 shrink-0" />
+                      <span className="text-[10px] font-semibold text-violet-600 uppercase tracking-wide">Subagent</span>
+                      <span className="font-mono text-[10px] text-violet-500">{subagentView.taskId}</span>
+                    </div>
+                    <div className="flex-1 overflow-hidden min-h-0">
+                      <TaskChat
+                        taskId={subagentView.taskId}
+                        workspaceId={workspaceId || ''}
+                        entries={subagentActivity}
+                        attachments={[]}
+                        agentStream={subagentAgentStream}
+                        onSendMessage={(content, attachmentIds) => handleSendMessage(subagentView.taskId, content, attachmentIds)}
+                        onSteer={(content, attachmentIds) => handleSteer(subagentView.taskId, content, attachmentIds)}
+                        onFollowUp={(content, attachmentIds) => handleFollowUp(subagentView.taskId, content, attachmentIds)}
+                        onStop={() => handleStopTaskExecution(subagentView.taskId)}
+                        isStopping={stoppingTaskIds.has(subagentView.taskId)}
+                        slashCommands={taskSlashCommands}
+                        hookSkills={hookSkillOptions}
+                        isVoiceHotkeyPressed={isVoiceHotkeyPressed}
+                        onVoiceDictationStateChange={handleVoiceDictationStateChange}
+                        emptyState={{ title: 'Subagent Chat', subtitle: 'No activity yet for this subagent task.' }}
+                      />
+                    </div>
+                  </>
+                ) : (
+                  /* Parent task view */
+                  <>
+                    <div className="flex items-center gap-2 px-4 h-10 border-b border-slate-200 bg-slate-50 shrink-0">
+                      <button
+                        onClick={() => navigate(workspaceRootPath)}
+                        className="text-slate-400 hover:text-slate-600 transition-colors text-xs font-medium inline-flex items-center gap-1"
+                      >
+                        <AppIcon icon={ArrowLeft} size="xs" />
+                        Foreman
+                      </button>
+                      <div className="h-4 w-px bg-slate-200" />
+                      <span className="font-mono text-[10px] text-slate-400">{taskId}</span>
+                      <span className="text-xs font-medium text-slate-700 truncate">
+                        {selectedTask ? selectedTask.frontmatter.title : 'Task not found'}
+                      </span>
+                    </div>
+                    <div className="flex-1 overflow-hidden min-h-0">
+                      {selectedTask ? (
+                        <TaskChat
+                          taskId={selectedTask.id}
+                          taskPhase={selectedTask.frontmatter.phase}
+                          isAwaitingInput={awaitingTaskIds.has(selectedTask.id)}
+                          workspaceId={workspaceId || ''}
+                          entries={activity}
+                          attachments={selectedTask.frontmatter.attachments || []}
+                          agentStream={agentStream}
+                          onSendMessage={(content, attachmentIds) => handleSendMessage(selectedTask.id, content, attachmentIds)}
+                          onSteer={(content, attachmentIds) => handleSteer(selectedTask.id, content, attachmentIds)}
+                          onFollowUp={(content, attachmentIds) => handleFollowUp(selectedTask.id, content, attachmentIds)}
+                          onStop={() => handleStopTaskExecution(selectedTask.id)}
+                          isStopping={stoppingTaskIds.has(selectedTask.id)}
+                          slashCommands={taskSlashCommands}
+                          hookSkills={hookSkillOptions}
+                          isVoiceHotkeyPressed={isVoiceHotkeyPressed}
+                          onVoiceDictationStateChange={handleVoiceDictationStateChange}
+                          onOpenSubagent={handleOpenSubagent}
+                        />
+                      ) : (
+                        <TaskRouteMissingState onBack={() => navigate(workspaceRootPath)} />
+                      )}
+                    </div>
+                  </>
+                )}
               </div>
             )}
           </div>

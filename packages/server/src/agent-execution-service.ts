@@ -2042,6 +2042,21 @@ function extractToolResultText(result: any): string {
   return '';
 }
 
+/**
+ * Extracts the subagent conversation reference from a `message_agent` tool result.
+ * Returns the targetTaskId string when the agent used 'chat' action, or undefined.
+ */
+function extractSubagentRefFromToolResult(toolName: string, result: any): string | undefined {
+  if (toolName !== 'message_agent') return undefined;
+  const details = result?.details;
+  if (!details || typeof details !== 'object') return undefined;
+  const targetTaskId = (details as Record<string, unknown>).targetTaskId;
+  if (typeof targetTaskId === 'string' && targetTaskId.length > 0) {
+    return targetTaskId;
+  }
+  return undefined;
+}
+
 function normalizeAssistantErrorMessage(errorMessage: unknown): string {
   return normalizeOptionalErrorMessage(errorMessage)
     ?? 'Provider returned stopReason=error without an error message.';
@@ -2339,6 +2354,9 @@ function handlePiEvent(
       const toolInfo = session.toolCallArgs.get(event.toolCallId);
       const streamedText = session.toolCallOutput.get(event.toolCallId) || '';
       const finalResultText = extractToolResultText((event as any).result) || streamedText;
+      const subagentTargetTaskId = event.isError
+        ? undefined
+        : extractSubagentRefFromToolResult(event.toolName, (event as any).result);
 
       // Store as structured activity entry with tool metadata
       broadcastActivityEntry(
@@ -2348,6 +2366,7 @@ function handlePiEvent(
           toolCallId: event.toolCallId,
           args: toolInfo?.args || {},
           isError: event.isError,
+          subagentTargetTaskId,
         }),
         'tool result message',
       );

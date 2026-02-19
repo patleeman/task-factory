@@ -108,9 +108,14 @@ export default function (pi: ExtensionAPI) {
         }
 
         if (result) {
+          // Include targetTaskId for chat actions so the UI can show an inline
+          // subagent entry that the user can click to view the subagent conversation.
+          const extraDetails: Record<string, unknown> = messageType === 'chat'
+            ? { targetTaskId: taskId }
+            : {};
           return {
             content: [{ type: 'text' as const, text: `Successfully ${actionDescription} task ${taskId}.` }],
-            details: { success: true },
+            details: { success: true, ...extraDetails },
           };
         } else {
           return {

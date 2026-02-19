@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- _None yet._
+- Inline subagent chat navigation in task chat: when the foreman or an execution agent uses `message_agent` with `messageType: "chat"` to start or resume a conversation with another task, the parent chat timeline now shows a labeled, clickable **Subagent Chat** entry. Clicking it opens that task's conversation in the same panel without navigating away or creating a new task. A **Back** button in the subagent view header returns to the parent conversation. The `message_agent` extension now includes `targetTaskId` in tool result details for `chat` actions to enable this.
 
 ### Changed
 - Global Settings page now uses a unified tab navigation: **Appearance**, Authentication, Task Defaults, and Skills. Appearance was previously always visible above the tab strip; it is now a first-class tab and the default landing tab. The Skills tab gained a callout that clarifies the distinction between skill library management (create/edit skills here) and default lane assignment (Task Defaults tab).
