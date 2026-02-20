@@ -47,57 +47,6 @@ export interface WorkspaceAttentionSummary {
   awaitingInputCount: number
 }
 
-export interface PipelineDurationSummary {
-  average: number
-  median: number
-  p95: number
-  sampleSize: number
-}
-
-export interface PipelineTransitionConversion {
-  from: Phase
-  to: Phase
-  count: number
-  denominator: number
-  rate: number
-}
-
-export interface PipelineModelReworkRow {
-  model: string
-  completedTaskCount: number
-  reworkedTaskCount: number
-  reworkRate: number
-}
-
-export interface WorkspacePipelineStats {
-  generatedAt: string
-  taskCount: number
-  funnel: {
-    phaseCounts: Record<Phase, number>
-    phaseTransitions: Record<Phase, { in: number; out: number }>
-    conversionRates: {
-      backlogToReady: PipelineTransitionConversion
-      readyToExecuting: PipelineTransitionConversion
-      executingToComplete: PipelineTransitionConversion
-      completeToArchived: PipelineTransitionConversion
-    }
-  }
-  rework: {
-    completeToReadyTransitionCount: number
-    tasksReworkedAtLeastOnce: number
-    completedTaskCount: number
-    reworkRate: number
-    planningModels: PipelineModelReworkRow[]
-    executionModels: PipelineModelReworkRow[]
-  }
-  flow: {
-    completedTasksWithTimestamp: number
-    throughputPerDay: number
-    cycleTime: PipelineDurationSummary
-    leadTime: PipelineDurationSummary
-  }
-}
-
 export type TaskListScope = 'all' | 'active' | 'archived'
 
 export type PiProviderAuthState = 'none' | 'api_key' | 'oauth' | 'external'
@@ -377,15 +326,6 @@ export const api = {
         : `Failed to open archive in file explorer (${res.status})`
       throw new Error(message)
     }
-  },
-
-  async getWorkspacePipelineStats(workspaceId: string): Promise<WorkspacePipelineStats> {
-    const res = await fetch(`/api/workspaces/${workspaceId}/pipeline-stats`)
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: 'Failed to load pipeline stats' }))
-      throw new Error(err.error || `Failed to load pipeline stats (${res.status})`)
-    }
-    return res.json()
   },
   async getActivity(workspaceId: string, limit = 100): Promise<ActivityEntry[]> {
     const res = await fetch(`/api/workspaces/${workspaceId}/activity?limit=${limit}`)

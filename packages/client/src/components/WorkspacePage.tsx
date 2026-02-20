@@ -1978,7 +1978,6 @@ export function WorkspacePage() {
                 />
               ) : (
                 <ShelfPane
-                  workspaceId={workspaceId || ''}
                   activeArtifact={selectedArtifact}
                   onCloseArtifact={handleCloseArtifact}
                 />

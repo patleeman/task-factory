@@ -2,16 +2,13 @@ import { X } from 'lucide-react'
 import type { Artifact } from '@task-factory/shared'
 import { AppIcon } from './AppIcon'
 import { ArtifactViewer } from './ArtifactViewer'
-import { WorkspacePipelineDashboard } from './WorkspacePipelineDashboard'
 
 interface ShelfPaneProps {
-  workspaceId: string
   activeArtifact: Artifact | null
   onCloseArtifact: () => void
 }
 
 export function ShelfPane({
-  workspaceId,
   activeArtifact,
   onCloseArtifact,
 }: ShelfPaneProps) {
@@ -44,7 +41,12 @@ export function ShelfPane({
             </div>
           </div>
         ) : (
-          <WorkspacePipelineDashboard workspaceId={workspaceId} />
+          <div className="h-full flex items-center justify-center text-slate-400 px-6 text-center">
+            <div>
+              <p className="text-sm font-medium text-slate-500 mb-1">No artifact selected</p>
+              <p className="text-xs">Create or reopen an inline artifact from Foreman chat to render it here.</p>
+            </div>
+          </div>
         )}
       </div>
 
