@@ -38,6 +38,7 @@ The foreman is a special agent scoped to a workspace that helps you plan tasks a
 The foreman can:
 - Help you ideate and then break the task down that you can add to your queue.
 - Generate artifacts (web pages) to help give you a visual guide, design mockups, etc.
+- Show a workspace pipeline dashboard (funnel, rework, throughput, and cycle/lead-time summaries) in the Foreman workspace pane when no artifact is open.
 
 If you need help coming up with ideas or using Task Factory, ask the Foreman.
 

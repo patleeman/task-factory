@@ -74,6 +74,7 @@ import { logTaskStateTransition } from './state-transition.js';
 import { buildWorkspaceAttentionSummary } from './workspace-attention.js';
 import { openInFileExplorer } from './file-explorer.js';
 import { getTaskFactoryAuthPath } from './taskfactory-home.js';
+import { buildWorkspacePipelineStats } from './pipeline-stats-service.js';
 import {
   PI_MIGRATION_CATEGORIES,
   getPiMigrationStatus,
@@ -522,6 +523,29 @@ app.get('/api/workspaces/:id/tasks/archived/count', async (req, res) => {
     res.json({ archivedCount });
   } catch (err) {
     logger.error('Failed to count archived tasks', {
+      workspaceId: req.params.id,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// Workspace pipeline statistics
+app.get('/api/workspaces/:id/pipeline-stats', async (req, res) => {
+  const workspace = await getWorkspaceById(req.params.id);
+
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return;
+  }
+
+  try {
+    const tasksDir = getTasksDir(workspace);
+    const tasks = discoverTasks(tasksDir, { scope: 'all' });
+    const stats = buildWorkspacePipelineStats(tasks);
+    res.json(stats);
+  } catch (err) {
+    logger.error('Failed to compute pipeline stats', {
       workspaceId: req.params.id,
       error: err instanceof Error ? err.message : String(err),
     });
