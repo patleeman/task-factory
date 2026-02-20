@@ -26,7 +26,7 @@ import { ExecutionPipelineEditor } from './ExecutionPipelineEditor'
 import { PostExecutionSummary, GenerateSummaryButton } from './PostExecutionSummary'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { api } from '../api'
+import { api, type WorkspaceSkill } from '../api'
 import { isPreviewableImageMimeType } from '../attachment-preview'
 
 const REMARK_PLUGINS = [remarkGfm]
@@ -41,6 +41,22 @@ interface TaskDetailPaneProps {
   onClose: () => void
   onMove: (phase: Phase) => void
   onDelete?: () => void
+}
+
+function toPipelineSkill(skill: WorkspaceSkill): PostExecutionSkill {
+  return {
+    id: skill.id,
+    name: skill.name,
+    description: skill.description,
+    type: 'follow-up',
+    maxIterations: 1,
+    doneSignal: 'HOOK_DONE',
+    promptTemplate: '',
+    path: skill.path || '',
+    source: (skill.source === 'starter' || skill.source === 'user') ? skill.source : 'user',
+    metadata: {},
+    configSchema: [],
+  }
 }
 
 export function TaskDetailPane({
@@ -93,13 +109,17 @@ export function TaskDetailPane({
     moveError?.toLowerCase().includes('acceptance criteria') &&
     frontmatter.acceptanceCriteria.length === 0
 
-  // Fetch available execution skills
+  // Fetch available workspace-enabled skills
   useEffect(() => {
-    fetch('/api/factory/skills')
-      .then(r => r.json())
-      .then(setAvailableSkills)
+    api.getWorkspaceSkillCatalog(workspaceId)
+      .then((catalog) => {
+        const enabledSkills = catalog.skills
+          .filter((skill) => skill.enabled !== false)
+          .map(toPipelineSkill)
+        setAvailableSkills(enabledSkills)
+      })
       .catch(err => console.error('Failed to load execution skills:', err))
-  }, [])
+  }, [workspaceId])
 
   // Reset edit state when task changes
   useEffect(() => {

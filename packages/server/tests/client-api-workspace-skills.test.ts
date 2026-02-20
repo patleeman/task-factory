@@ -9,20 +9,14 @@ afterEach(() => {
 });
 
 describe('client api getWorkspaceSkillCatalog', () => {
-  it('merges workspace and execution skills into one slash skill catalog', async () => {
+  it('returns canonical catalog and uses enabled entries for slash commands', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ([
-          { id: 'tdd-feature', name: 'TDD Feature', description: 'Build features with tests first' },
-          { id: 'checkpoint', name: '', description: '   ' },
-        ]),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ([
-          { id: 'code-review', name: 'Code Review', description: 'Review changed code', hooks: ['post'] },
+          { id: 'tdd-feature', name: 'TDD Feature', description: 'Build features with tests first', source: 'workspace', provider: 'workspace', enabled: true },
+          { id: 'checkpoint', name: '', description: '   ', source: 'starter', provider: 'starter', enabled: false },
         ]),
       });
 
@@ -30,29 +24,29 @@ describe('client api getWorkspaceSkillCatalog', () => {
 
     const catalog = await api.getWorkspaceSkillCatalog('workspace-1');
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/workspaces/workspace-1/skills');
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/factory/skills');
     expect(catalog).toEqual({
+      skills: [
+        { id: 'tdd-feature', name: 'TDD Feature', description: 'Build features with tests first', source: 'workspace', provider: 'workspace', path: undefined, enabled: true },
+        { id: 'checkpoint', name: 'checkpoint', description: '', source: 'starter', provider: 'starter', path: undefined, enabled: false },
+      ],
       slashSkills: [
-        { id: 'tdd-feature', name: 'TDD Feature', description: 'Build features with tests first' },
-        { id: 'checkpoint', name: 'checkpoint', description: '' },
-        { id: 'code-review', name: 'Code Review', description: 'Review changed code' },
+        { id: 'tdd-feature', name: 'TDD Feature', description: 'Build features with tests first', source: 'workspace', provider: 'workspace', path: undefined, enabled: true },
       ],
     });
   });
 
-  it('gracefully handles unavailable fallback registry', async () => {
+  it('returns empty catalog payload safely', async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ skills: [] }) })
-      .mockResolvedValueOnce({ ok: false, status: 503, json: async () => ({ error: 'offline' }) });
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ skills: [] }) });
 
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
     const catalog = await api.getWorkspaceSkillCatalog('workspace-1');
 
-    expect(catalog).toEqual({ slashSkills: [] });
+    expect(catalog).toEqual({ skills: [], slashSkills: [] });
   });
 
   it('throws server-provided workspace errors', async () => {
@@ -70,11 +64,11 @@ describe('client api getWorkspaceSkillCatalog', () => {
   it('retains getWorkspaceSkills compatibility helper', async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce({ ok: true, json: async () => [] })
       .mockResolvedValueOnce({
         ok: true,
         json: async () => [
-          { id: 'react-best-practices', name: 'React Best Practices', description: 'React performance patterns' },
+          { id: 'react-best-practices', name: 'React Best Practices', description: 'React performance patterns', enabled: true },
+          { id: 'security-review', name: 'Security Review', description: 'Audit', enabled: false },
         ],
       });
 
@@ -83,7 +77,7 @@ describe('client api getWorkspaceSkillCatalog', () => {
     const skills = await api.getWorkspaceSkills('workspace-1');
 
     expect(skills).toEqual([
-      { id: 'react-best-practices', name: 'React Best Practices', description: 'React performance patterns' },
+      { id: 'react-best-practices', name: 'React Best Practices', description: 'React performance patterns', source: undefined, provider: undefined, path: undefined, enabled: true },
     ]);
   });
 });

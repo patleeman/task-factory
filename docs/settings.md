@@ -40,11 +40,13 @@ How Task Factory stores and resolves global + workspace settings, including firs
 | `<workspace>/.taskfactory/skills/` | Repo-local skills created via `create_skill destination: repo-local` |
 | `<workspace>/.taskfactory/extensions/` | Repo-local extensions created via `create_extension destination: repo-local` |
 
-Workspace skill discovery for agent availability now reads local `SKILL.md` files from:
-- `<workspace>/skills/`
-- `<workspace>/.taskfactory/skills/`
+Workspace skill discovery for agent availability merges:
+- Workspace-local skills: `<workspace>/skills/` and `<workspace>/.taskfactory/skills/`
+- External execution skills: starter skills + `~/.taskfactory/skills/`
 
-Workspace Configuration only manages skill enable/disable state; extensions are configured globally.
+The canonical workspace skill catalog (`GET /api/workspaces/:workspaceId/skills`) includes source attribution (`source`, `provider`, optional `path`) and resolved `enabled` state per skill.
+
+Workspace Configuration manages workspace skill enable/disable state (including provider-scope toggles); extensions remain globally configured.
 
 ### Precedence summary
 

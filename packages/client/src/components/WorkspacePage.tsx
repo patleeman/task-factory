@@ -438,7 +438,7 @@ export function WorkspacePage() {
       api.getPlanningMessages(workspaceId),
       api.getWorkspaceSkillCatalog(workspaceId).catch((err) => {
         console.warn('Failed to load workspace skills:', err)
-        return { slashSkills: [] }
+        return { skills: [], slashSkills: [] }
       }),
       api.getIdeaBacklog(workspaceId).catch((err) => {
         console.warn('Failed to load idea backlog:', err)

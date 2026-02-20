@@ -14,7 +14,7 @@ import { buildCreateTaskFormDefaults } from './task-default-form'
 import { clearStoredWhiteboardScene, createWhiteboardAttachmentFilename, exportWhiteboardPngFile, hasWhiteboardContent, loadStoredWhiteboardScene, persistWhiteboardScene, type WhiteboardSceneSnapshot } from './whiteboard'
 import { InlineWhiteboardPanel } from './InlineWhiteboardPanel'
 import { useLocalStorageDraft } from '../hooks/useLocalStorageDraft'
-import { api } from '../api'
+import { api, type WorkspaceSkill } from '../api'
 import { isPreviewableImageMimeType } from '../attachment-preview'
 import type { PostExecutionSkill } from '../types/pi'
 
@@ -68,6 +68,22 @@ function cloneModelConfig(modelConfig: ModelConfig | undefined): ModelConfig | u
     provider: modelConfig.provider,
     modelId: modelConfig.modelId,
     thinkingLevel: modelConfig.thinkingLevel,
+  }
+}
+
+function toPipelineSkill(skill: WorkspaceSkill): PostExecutionSkill {
+  return {
+    id: skill.id,
+    name: skill.name,
+    description: skill.description,
+    type: 'follow-up',
+    maxIterations: 1,
+    doneSignal: 'HOOK_DONE',
+    promptTemplate: '',
+    path: skill.path || '',
+    source: (skill.source === 'starter' || skill.source === 'user') ? skill.source : 'user',
+    metadata: {},
+    configSchema: [],
   }
 }
 
@@ -195,12 +211,16 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
   const appliedPrefillIdRef = useRef<string | null>(prefillRequest?.id ?? null)
 
   useEffect(() => {
-    fetch('/api/factory/skills')
-      .then(r => r.json())
-      .then(setAvailableSkills)
+    api.getWorkspaceSkillCatalog(workspaceId)
+      .then((catalog) => {
+        const enabledSkills = catalog.skills
+          .filter((skill) => skill.enabled !== false)
+          .map(toPipelineSkill)
+        setAvailableSkills(enabledSkills)
+      })
       .catch(err => console.error('Failed to load skills:', err))
 
-  }, [])
+  }, [workspaceId])
 
   useEffect(() => {
     Promise.all([

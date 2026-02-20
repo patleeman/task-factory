@@ -41,8 +41,8 @@ Conventions:
 | GET | `/api/workspaces/:workspaceId/pipeline-stats` | Workspace pipeline metrics (funnel, rework, flow timing + throughput) |
 | GET | `/api/workspaces/:workspaceId/pi-config` | Read workspace Pi config (skill enablement overrides) |
 | POST | `/api/workspaces/:workspaceId/pi-config` | Save workspace Pi config |
-| GET | `/api/workspaces/:workspaceId/skills/discovered` | List all workspace-discovered `SKILL.md` skills (unfiltered) |
-| GET | `/api/workspaces/:workspaceId/skills` | List enabled workspace skills after applying saved toggles |
+| GET | `/api/workspaces/:workspaceId/skills/discovered` | List all workspace-discovered `SKILL.md` skills from workspace-local directories (unfiltered, workspace source only) |
+| GET | `/api/workspaces/:workspaceId/skills` | Canonical workspace skill catalog across workspace + starter + user sources with `{ id, name, description, source, provider, path?, enabled }` |
 
 ### Task endpoints
 

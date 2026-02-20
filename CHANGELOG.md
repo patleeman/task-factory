@@ -26,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New Task default model resolution now follows: explicit form state → workspace default profile → global default profile → manual model defaults.
 - Model profiles now support ordered planning/execution fallback model arrays. Planning and execution automatically fail over through those chains on retryable provider errors (rate limits and 5xx-style instability), and failover attempts are recorded in task activity.
 - Skill availability contracts were fully simplified: per-skill `hooks` metadata is no longer part of shared/server/client skill models or `create_skill` inputs. Any known skill can now be assigned to pre-planning, pre-execution, or post-execution lanes; unknown IDs are still rejected per lane.
-- Workspace/task slash skill discovery now uses one unified skill catalog without hook-scope labels or split hook-skill lists.
+- Workspace/task slash skill discovery and task-lane skill pickers now use one canonical workspace skill catalog (`GET /api/workspaces/:workspaceId/skills`) that includes source/provider/path attribution plus resolved `enabled` state; external auto-discovered skills are visible but disabled by default unless selected via global/workspace settings.
 
 ### Fixed
 - `workspace list` now shows full workspace IDs that can be copied directly into workspace-scoped commands. Workspace ID resolution now consistently accepts unique prefixes across workspace/task/queue CLI flows with clear ambiguous-ID errors, and stale workspace registry entries are automatically pruned during discovery.

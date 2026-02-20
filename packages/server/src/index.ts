@@ -185,9 +185,11 @@ function validateKnownSkillIds(
   return null;
 }
 
-function validateTaskHookSelection(
+async function validateTaskHookSelection(
   request: Pick<CreateTaskRequest, 'prePlanningSkills' | 'preExecutionSkills' | 'postExecutionSkills'>,
-): { ok: true } | { ok: false; error: string } {
+  workspaceId?: string,
+  workspacePath?: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
   const parsedPrePlanning = normalizeSkillIdList(request.prePlanningSkills, 'prePlanningSkills');
   if (!parsedPrePlanning.ok) return parsedPrePlanning;
 
@@ -201,8 +203,16 @@ function validateTaskHookSelection(
   request.preExecutionSkills = parsedPreExecution.value;
   request.postExecutionSkills = parsedPostExecution.value;
 
-  const skills = discoverPostExecutionSkills();
-  const knownSkillIds = new Set(skills.map((skill) => skill.id));
+  let knownSkillIds: Set<string>;
+
+  if (workspaceId && workspacePath) {
+    const enabledCatalog = discoverWorkspaceSkillCatalog(workspaceId, workspacePath)
+      .filter((skill) => skill.enabled);
+    knownSkillIds = new Set(enabledCatalog.map((skill) => skill.id));
+  } else {
+    const skills = discoverPostExecutionSkills();
+    knownSkillIds = new Set(skills.map((skill) => skill.id));
+  }
 
   const prePlanningValidation = validateKnownSkillIds(
     'pre-planning skills',
@@ -566,7 +576,7 @@ app.post('/api/workspaces/:id/tasks', async (req, res) => {
   const request = req.body as CreateTaskRequest;
 
   try {
-    const hookValidation = validateTaskHookSelection(request);
+    const hookValidation = await validateTaskHookSelection(request, workspace.id, workspace.path);
     if (!hookValidation.ok) {
       res.status(400).json({ error: hookValidation.error });
       return;
@@ -665,7 +675,11 @@ app.patch('/api/workspaces/:workspaceId/tasks/:taskId', async (req, res) => {
   try {
     const request = req.body as UpdateTaskRequest;
 
-    const hookValidation = validateTaskHookSelection(request as Pick<CreateTaskRequest, 'prePlanningSkills' | 'preExecutionSkills' | 'postExecutionSkills'>);
+    const hookValidation = await validateTaskHookSelection(
+      request as Pick<CreateTaskRequest, 'prePlanningSkills' | 'preExecutionSkills' | 'postExecutionSkills'>,
+      workspace.id,
+      workspace.path,
+    );
     if (!hookValidation.ok) {
       res.status(400).json({ error: hookValidation.error });
       return;
@@ -1552,7 +1566,7 @@ import {
   loadWorkspacePiConfig,
   saveWorkspacePiConfig,
   discoverWorkspacePiSkills,
-  getEnabledSkillsForWorkspace,
+  discoverWorkspaceSkillCatalog,
   getEnabledExtensionsForWorkspace,
   loadForemanSettings,
   saveForemanSettings,
@@ -1660,6 +1674,7 @@ async function handleSaveTaskDefaults(
   req: express.Request,
   res: express.Response,
   saveDefaults: (defaults: TaskDefaults) => TaskDefaults = saveTaskDefaults,
+  resolveAvailableSkillIds?: () => string[],
 ): Promise<void> {
   const parsed = parseTaskDefaultsPayload(req.body);
   if (!parsed.ok) {
@@ -1673,10 +1688,14 @@ async function handleSaveTaskDefaults(
       Promise.resolve(discoverPostExecutionSkills()),
     ]);
 
+    const availableSkillIds = resolveAvailableSkillIds
+      ? resolveAvailableSkillIds()
+      : availableSkills.map((skill) => skill.id);
+
     const validation = validateTaskDefaults(
       parsed.value,
       availableModels,
-      availableSkills.map((skill) => ({ id: skill.id })),
+      availableSkillIds.map((id) => ({ id })),
     );
 
     if (!validation.ok) {
@@ -1730,7 +1749,14 @@ async function handleSaveWorkspaceTaskDefaults(req: express.Request, res: expres
     return;
   }
 
-  await handleSaveTaskDefaults(req, res, (defaults) => saveWorkspaceTaskDefaults(workspace.id, defaults));
+  await handleSaveTaskDefaults(
+    req,
+    res,
+    (defaults) => saveWorkspaceTaskDefaults(workspace.id, defaults),
+    () => discoverWorkspaceSkillCatalog(workspace.id, workspace.path)
+      .filter((skill) => skill.enabled)
+      .map((skill) => skill.id),
+  );
 }
 
 app.post('/api/workspaces/:workspaceId/task-defaults', (req, res) => {
@@ -1810,7 +1836,7 @@ app.get('/api/workspaces/:workspaceId/skills/discovered', async (req, res) => {
   res.json(skills);
 });
 
-// Get enabled skills for workspace
+// Get canonical workspace skill catalog (all discovered skills + resolved enabled state)
 app.get('/api/workspaces/:workspaceId/skills', async (req, res) => {
   const workspace = await getWorkspaceById(req.params.workspaceId);
 
@@ -1819,7 +1845,7 @@ app.get('/api/workspaces/:workspaceId/skills', async (req, res) => {
     return;
   }
 
-  const skills = getEnabledSkillsForWorkspace(req.params.workspaceId, workspace.path);
+  const skills = discoverWorkspaceSkillCatalog(req.params.workspaceId, workspace.path);
   res.json(skills);
 });
 
@@ -3064,8 +3090,13 @@ app.post('/api/workspaces/:workspaceId/task-form/open', async (req, res) => {
       return registry.getAvailable();
     },
     getAvailableSkills: () => {
-      const { discoverPostExecutionSkills } = require('./post-execution-skills.js');
-      return discoverPostExecutionSkills();
+      const catalog = discoverWorkspaceSkillCatalog(workspace.id, workspace.path)
+        .filter((skill) => skill.enabled);
+      return catalog.map((skill) => ({
+        id: skill.id,
+        name: skill.name,
+        description: skill.description,
+      }));
     },
   });
 

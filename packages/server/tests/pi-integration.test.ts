@@ -75,6 +75,16 @@ function writeWorkspaceSkill(workspacePath: string, skillId: string, content = '
   );
 }
 
+function writeUserExecutionSkill(homePath: string, skillId: string, content = 'Execution skill body'): void {
+  const skillDir = join(homePath, '.taskfactory', 'skills', skillId);
+  mkdirSync(skillDir, { recursive: true });
+  writeFileSync(
+    join(skillDir, 'SKILL.md'),
+    `---\nname: ${skillId}\ndescription: ${skillId} description\n---\n\n${content}\n`,
+    'utf-8',
+  );
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
   vi.resetModules();
@@ -183,6 +193,56 @@ describe('workspace skill discovery + enablement', () => {
     expect(enabled.map((skill) => skill.id)).toEqual(['skill-b']);
   });
 
+  it('includes external skills in canonical catalog but keeps them disabled by default', async () => {
+    const homePath = setTempHome();
+    const workspaceId = 'ws-catalog-defaults';
+    const workspacePath = createTempDir('pi-factory-workspace-');
+
+    registerWorkspace(homePath, workspaceId, workspacePath);
+    writeWorkspaceSkill(workspacePath, 'workspace-skill');
+    writeUserExecutionSkill(homePath, 'external-skill');
+
+    const { discoverWorkspaceSkillCatalog } = await import('../src/pi-integration.js');
+
+    const catalog = discoverWorkspaceSkillCatalog(workspaceId, workspacePath);
+
+    const workspaceSkill = catalog.find((skill) => skill.id === 'workspace-skill');
+    const externalSkill = catalog.find((skill) => skill.id === 'external-skill');
+
+    expect(workspaceSkill).toMatchObject({ source: 'workspace', provider: 'workspace', enabled: true });
+    expect(externalSkill).toMatchObject({ source: 'user', provider: 'user', enabled: false });
+  });
+
+  it('enables external skills when globally selected and allows workspace override', async () => {
+    const homePath = setTempHome();
+    const workspaceId = 'ws-catalog-overrides';
+    const workspacePath = createTempDir('pi-factory-workspace-');
+
+    registerWorkspace(homePath, workspaceId, workspacePath);
+    writeWorkspaceSkill(workspacePath, 'workspace-skill');
+    writeUserExecutionSkill(homePath, 'external-skill');
+
+    const { savePiFactorySettings, saveWorkspacePiConfig, discoverWorkspaceSkillCatalog } = await import('../src/pi-integration.js');
+
+    savePiFactorySettings({
+      skills: {
+        enabled: ['external-skill'],
+        config: {},
+      },
+    });
+
+    const globallyEnabledCatalog = discoverWorkspaceSkillCatalog(workspaceId, workspacePath);
+    expect(globallyEnabledCatalog.find((skill) => skill.id === 'external-skill')?.enabled).toBe(true);
+
+    saveWorkspacePiConfig(workspaceId, {
+      skills: { enabled: ['workspace-skill'], config: {} },
+    });
+
+    const workspaceOverriddenCatalog = discoverWorkspaceSkillCatalog(workspaceId, workspacePath);
+    expect(workspaceOverriddenCatalog.find((skill) => skill.id === 'external-skill')?.enabled).toBe(false);
+    expect(workspaceOverriddenCatalog.find((skill) => skill.id === 'workspace-skill')?.enabled).toBe(true);
+  });
+
   it('keeps explicit empty workspace selection (all skills disabled)', async () => {
     const homePath = setTempHome();
     const workspaceId = 'ws-empty';
@@ -247,6 +307,19 @@ describe('buildAgentContext global rules behavior', () => {
     const context = buildAgentContext(undefined, [], workspacePath);
 
     expect(context.globalRules).toBe('GLOBAL RULES');
+  });
+
+  it('keeps workspacePath-only skill loading behavior when workspaceId is absent', async () => {
+    setTempHome();
+    const workspacePath = createTempDir('pi-factory-workspace-');
+
+    writeWorkspaceConfig(workspacePath);
+    writeWorkspaceSkill(workspacePath, 'workspace-only');
+
+    const { getEnabledSkillsForWorkspace } = await import('../src/pi-integration.js');
+    const enabled = getEnabledSkillsForWorkspace(undefined, workspacePath);
+
+    expect(enabled.map((skill) => skill.id)).toEqual(['workspace-only']);
   });
 
   it('does not read or migrate legacy ~/.pi/factory workspace registry entries at runtime', async () => {

@@ -20,9 +20,12 @@ describe('universal skill availability regression checks', () => {
     expect(executionPipelineEditor).not.toContain('supportsHook(');
     expect(executionPipelineEditor).not.toContain('Skill does not support this hook');
 
+    expect(createTaskPane).toContain('api.getWorkspaceSkillCatalog(workspaceId)');
     expect(createTaskPane).not.toContain("skill.hooks.includes('pre-planning')");
     expect(createTaskPane).not.toContain("skill.hooks.includes('pre')");
     expect(createTaskPane).not.toContain("skill.hooks.includes('post')");
+
+    expect(taskDetailPane).toContain('api.getWorkspaceSkillCatalog(workspaceId)');
 
     expect(taskDetailPane).not.toContain("skill.hooks.includes('pre-planning')");
     expect(taskDetailPane).not.toContain("skill.hooks.includes('pre')");
@@ -32,6 +35,11 @@ describe('universal skill availability regression checks', () => {
     expect(settingsPage).not.toContain("skill.hooks.includes('pre')");
     expect(settingsPage).not.toContain("skill.hooks.includes('post')");
 
+    expect(workspaceConfigPage).toContain('api.getWorkspaceSkillCatalog(workspaceId)');
+    expect(workspaceConfigPage).toContain('Provider controls');
+    expect(workspaceConfigPage).toContain('source:');
+    expect(workspaceConfigPage).toContain('provider:');
+    expect(workspaceConfigPage).not.toContain('/api/factory/skills');
     expect(workspaceConfigPage).not.toContain("skill.hooks.includes('pre-planning')");
     expect(workspaceConfigPage).not.toContain("skill.hooks.includes('pre')");
     expect(workspaceConfigPage).not.toContain("skill.hooks.includes('post')");
@@ -47,6 +55,7 @@ describe('universal skill availability regression checks', () => {
     expect(serverIndex).not.toContain('do not support pre-planning hook');
     expect(serverIndex).not.toContain('do not support pre hook');
     expect(serverIndex).not.toContain('do not support post hook');
+    expect(serverIndex).toContain('discoverWorkspaceSkillCatalog(workspace.id, workspace.path)');
     expect(serverIndex).toContain('Unknown ${fieldName}: ${unknown.join(\', \')}');
     expect(serverIndex).toContain("'pre-planning skills'");
     expect(serverIndex).toContain("'pre-execution skills'");

@@ -11,8 +11,8 @@ import {
   type ModelProfile,
   type TaskDefaults,
 } from '@task-factory/shared'
-import type { PiSkill, PostExecutionSkill } from '../types/pi'
-import { api, type WorkflowAutomationResponse, type WorkflowAutomationUpdate } from '../api'
+import type { PostExecutionSkill } from '../types/pi'
+import { api, type WorkspaceSkill, type WorkflowAutomationResponse, type WorkflowAutomationUpdate } from '../api'
 import { AppIcon } from './AppIcon'
 import { ExecutionPipelineEditor } from './ExecutionPipelineEditor'
 
@@ -84,6 +84,22 @@ function buildWorkflowUpdateFromForm(form: WorkflowOverridesForm): WorkflowAutom
   }
 }
 
+function toPipelineSkill(skill: WorkspaceSkill): PostExecutionSkill {
+  return {
+    id: skill.id,
+    name: skill.name,
+    description: skill.description,
+    type: 'follow-up',
+    maxIterations: 1,
+    doneSignal: 'HOOK_DONE',
+    promptTemplate: '',
+    path: skill.path || '',
+    source: (skill.source === 'starter' || skill.source === 'user') ? skill.source : 'user',
+    metadata: {},
+    configSchema: [],
+  }
+}
+
 function cloneModelConfig(modelConfig: ModelConfig | undefined): ModelConfig | undefined {
   if (!modelConfig) {
     return undefined
@@ -133,7 +149,7 @@ function normalizeModelProfiles(rawProfiles: unknown): ModelProfile[] {
 export function WorkspaceConfigPage() {
   const { workspaceId } = useParams<{ workspaceId: string }>()
   const navigate = useNavigate()
-  const [allSkills, setAllSkills] = useState<PiSkill[]>([])
+  const [allSkills, setAllSkills] = useState<WorkspaceSkill[]>([])
   const [taskSkills, setTaskSkills] = useState<PostExecutionSkill[]>([])
   const [modelProfiles, setModelProfiles] = useState<ModelProfile[]>([])
   const [taskDefaults, setTaskDefaults] = useState<TaskDefaults>({ ...EMPTY_TASK_DEFAULTS })
@@ -172,8 +188,7 @@ export function WorkspaceConfigPage() {
     setSkillsTouched(false)
 
     Promise.all([
-      fetch(`/api/workspaces/${workspaceId}/skills/discovered`).then(r => r.json()),
-      fetch('/api/factory/skills').then(r => r.json() as Promise<PostExecutionSkill[]>),
+      api.getWorkspaceSkillCatalog(workspaceId),
       fetch(`/api/workspaces/${workspaceId}/pi-config`).then(r => r.json()),
       api.getWorkspace(workspaceId),
       api.getWorkspaceTaskDefaults(workspaceId),
@@ -181,8 +196,7 @@ export function WorkspaceConfigPage() {
       api.getPiFactorySettings(),
     ])
       .then(([
-        skillsData,
-        taskSkillsData,
+        workspaceSkillCatalog,
         configData,
         workspace,
         workspaceTaskDefaults,
@@ -191,14 +205,17 @@ export function WorkspaceConfigPage() {
       ]) => {
         if (cancelled) return
 
-        const discoveredSkillIds = Array.isArray(skillsData)
-          ? skillsData.map((skill: PiSkill) => skill.id)
-          : []
+        const allDiscoveredSkills = workspaceSkillCatalog.skills
+        const enabledSkillIdsFromCatalog = allDiscoveredSkills
+          .filter((skill) => skill.enabled !== false)
+          .map((skill) => skill.id)
 
-        setAllSkills(Array.isArray(skillsData) ? skillsData : [])
-        setTaskSkills(taskSkillsData)
+        setAllSkills(allDiscoveredSkills)
+        setTaskSkills(allDiscoveredSkills
+          .filter((skill) => skill.enabled !== false)
+          .map(toPipelineSkill))
 
-        const knownSkillIds = new Set(taskSkillsData.map((skill) => skill.id))
+        const knownSkillIds = new Set(enabledSkillIdsFromCatalog)
         const normalizedProfiles = normalizeModelProfiles(settings.modelProfiles)
         const validProfileIds = new Set(normalizedProfiles.map((profile) => profile.id))
         setModelProfiles(normalizedProfiles)
@@ -216,7 +233,7 @@ export function WorkspaceConfigPage() {
         const hasSavedSkillSelection = Array.isArray(configData?.skills?.enabled)
         const enabledSkillIds = hasSavedSkillSelection
           ? configData.skills.enabled
-          : discoveredSkillIds
+          : enabledSkillIdsFromCatalog
 
         setHasSavedSkillSelection(hasSavedSkillSelection)
 
@@ -284,6 +301,39 @@ export function WorkspaceConfigPage() {
         enabled: [],
       },
     }))
+    setSkillsTouched(true)
+    setSaveStatus('idle')
+    setSaveError('')
+  }
+
+  const providerGroups = allSkills.reduce<Record<string, WorkspaceSkill[]>>((acc, skill) => {
+    const providerId = skill.provider || skill.source || 'unknown'
+    if (!acc[providerId]) {
+      acc[providerId] = []
+    }
+    acc[providerId].push(skill)
+    return acc
+  }, {})
+
+  const setProviderEnabled = (providerId: string, enabled: boolean) => {
+    const providerSkillIds = (providerGroups[providerId] || []).map((skill) => skill.id)
+    setConfig((prev) => {
+      const nextEnabled = new Set(prev.skills.enabled)
+
+      if (enabled) {
+        for (const skillId of providerSkillIds) nextEnabled.add(skillId)
+      } else {
+        for (const skillId of providerSkillIds) nextEnabled.delete(skillId)
+      }
+
+      return {
+        ...prev,
+        skills: {
+          ...prev.skills,
+          enabled: Array.from(nextEnabled),
+        },
+      }
+    })
     setSkillsTouched(true)
     setSaveStatus('idle')
     setSaveError('')
@@ -481,33 +531,66 @@ export function WorkspaceConfigPage() {
                 </div>
               </div>
 
+              {Object.entries(providerGroups).length > 0 && (
+                <div className="rounded-lg border border-slate-200 bg-white p-3">
+                  <p className="text-xs font-medium text-slate-600 mb-2">Provider controls</p>
+                  <div className="flex flex-wrap gap-2">
+                    {Object.entries(providerGroups).map(([providerId, providerSkills]) => {
+                      const enabledCount = providerSkills.filter((skill) => config.skills.enabled.includes(skill.id)).length
+                      const allEnabled = enabledCount === providerSkills.length && providerSkills.length > 0
+
+                      return (
+                        <div key={providerId} className="inline-flex items-center gap-1 rounded-full border border-slate-200 px-2 py-1 text-xs">
+                          <span className="font-medium text-slate-700">{providerId}</span>
+                          <span className="text-slate-500">{enabledCount}/{providerSkills.length}</span>
+                          <button
+                            type="button"
+                            onClick={() => setProviderEnabled(providerId, !allEnabled)}
+                            className="ml-1 rounded px-1.5 py-0.5 text-[11px] text-blue-600 hover:bg-blue-50"
+                          >
+                            {allEnabled ? 'Disable' : 'Enable'}
+                          </button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
               {allSkills.map(skill => {
                 const isEnabled = config.skills.enabled.includes(skill.id)
                 return (
                   <div
                     key={skill.id}
                     onClick={() => toggleSkill(skill.id)}
-                    className={`flex items-center justify-between p-3 rounded-lg border cursor-pointer transition-colors ${
+                    className={`p-3 rounded-lg border cursor-pointer transition-colors ${
                       isEnabled
                         ? 'border-safety-orange bg-orange-50'
                         : 'border-slate-200 bg-white hover:border-slate-300'
                     }`}
                   >
-                    <div className="flex items-center gap-3">
-                      <span className="text-xs font-semibold text-slate-400 uppercase">Skill</span>
-                      <div>
-                        <div className="font-medium text-slate-800">{skill.name}</div>
-                        <div className="text-xs text-slate-500">{skill.id}</div>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <span className="text-xs font-semibold text-slate-400 uppercase">Skill</span>
+                        <div>
+                          <div className="font-medium text-slate-800">{skill.name}</div>
+                          <div className="text-xs text-slate-500">{skill.id}</div>
+                        </div>
+                      </div>
+                      <div
+                        className={`w-5 h-5 rounded border flex items-center justify-center ${
+                          isEnabled
+                            ? 'bg-safety-orange border-safety-orange text-white'
+                            : 'border-slate-300'
+                        }`}
+                      >
+                        {isEnabled && <AppIcon icon={Check} size="xs" className="text-white" />}
                       </div>
                     </div>
-                    <div
-                      className={`w-5 h-5 rounded border flex items-center justify-center ${
-                        isEnabled
-                          ? 'bg-safety-orange border-safety-orange text-white'
-                          : 'border-slate-300'
-                      }`}
-                    >
-                      {isEnabled && <AppIcon icon={Check} size="xs" className="text-white" />}
+                    <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-slate-500">
+                      <span className="rounded bg-slate-100 px-2 py-0.5">source: {skill.source || 'unknown'}</span>
+                      <span className="rounded bg-slate-100 px-2 py-0.5">provider: {skill.provider || 'unknown'}</span>
+                      {skill.path && <span className="rounded bg-slate-100 px-2 py-0.5">path: {skill.path}</span>}
                     </div>
                   </div>
                 )
@@ -515,7 +598,7 @@ export function WorkspaceConfigPage() {
 
               {allSkills.length === 0 && (
                 <p className="text-sm text-slate-400 text-center py-8">
-                  No workspace SKILL.md files found.
+                  No discovered skills found for this workspace.
                 </p>
               )}
             </div>

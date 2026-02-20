@@ -13,6 +13,8 @@ import {
 import { join, dirname } from 'path';
 import { homedir } from 'os';
 import type { TaskDefaults, PlanningGuardrails, WorkflowDefaultsConfig, ForemanSettings, ModelProfile, NotificationSettings } from '@task-factory/shared';
+import type { PostExecutionSkill as ExecutionSkill } from '@task-factory/shared';
+import { discoverPostExecutionSkills } from './post-execution-skills.js';
 import {
   getTaskFactoryAgentDir,
   getTaskFactoryGlobalExtensionsDir,
@@ -255,6 +257,18 @@ export interface PiSkill {
   path: string;
 }
 
+export type WorkspaceSkillSource = 'workspace' | 'starter' | 'user';
+
+export interface WorkspaceSkillCatalogEntry {
+  id: string;
+  name: string;
+  description: string;
+  source: WorkspaceSkillSource;
+  provider: string;
+  path?: string;
+  enabled: boolean;
+}
+
 function parsePiSkillFromContent(skillId: string, skillPath: string, content: string): PiSkill {
   const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
 
@@ -360,6 +374,103 @@ export function loadPiSkill(skillId: string): PiSkill | null {
     console.error(`Failed to load skill ${skillId}:`, err);
     return null;
   }
+}
+
+function normalizeEnabledSkillIds(raw: unknown): string[] {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+
+  return raw
+    .filter((skillId): skillId is string => typeof skillId === 'string')
+    .map((skillId) => skillId.trim())
+    .filter(Boolean);
+}
+
+function toProviderForSource(source: WorkspaceSkillSource): string {
+  if (source === 'workspace') return 'workspace';
+  if (source === 'starter') return 'starter';
+  return 'user';
+}
+
+function skillSourcePriority(source: WorkspaceSkillSource): number {
+  if (source === 'workspace') return 3;
+  if (source === 'user') return 2;
+  return 1;
+}
+
+function toWorkspaceSkillCatalogEntryFromPiSkill(skill: PiSkill): WorkspaceSkillCatalogEntry {
+  return {
+    id: skill.id,
+    name: skill.name,
+    description: skill.description,
+    source: 'workspace',
+    provider: 'workspace',
+    path: skill.path,
+    enabled: false,
+  };
+}
+
+function toWorkspaceSkillCatalogEntryFromExecutionSkill(skill: ExecutionSkill): WorkspaceSkillCatalogEntry {
+  const source: WorkspaceSkillSource = skill.source === 'starter' ? 'starter' : 'user';
+
+  return {
+    id: skill.id,
+    name: skill.name,
+    description: skill.description,
+    source,
+    provider: toProviderForSource(source),
+    path: skill.path,
+    enabled: false,
+  };
+}
+
+export function discoverWorkspaceSkillCatalog(
+  workspaceId: string,
+  workspacePath: string,
+): WorkspaceSkillCatalogEntry[] {
+  const workspaceSkills = discoverWorkspacePiSkills(workspacePath).map(toWorkspaceSkillCatalogEntryFromPiSkill);
+  const executionSkills = discoverPostExecutionSkills().map(toWorkspaceSkillCatalogEntryFromExecutionSkill);
+
+  const deduped = new Map<string, WorkspaceSkillCatalogEntry>();
+
+  for (const skill of [...executionSkills, ...workspaceSkills]) {
+    const existing = deduped.get(skill.id);
+    if (!existing || skillSourcePriority(skill.source) >= skillSourcePriority(existing.source)) {
+      deduped.set(skill.id, skill);
+    }
+  }
+
+  const workspaceConfig = loadWorkspacePiConfig(workspaceId);
+  const hasExplicitWorkspaceSelection = Array.isArray(workspaceConfig?.skills?.enabled);
+  const enabledByWorkspace = new Set(normalizeEnabledSkillIds(workspaceConfig?.skills?.enabled));
+
+  const factorySettings = loadPiFactorySettings();
+  const enabledByGlobal = new Set(normalizeEnabledSkillIds(factorySettings?.skills?.enabled));
+
+  const catalog = Array.from(deduped.values()).map((skill) => {
+    const enabled = hasExplicitWorkspaceSelection
+      ? enabledByWorkspace.has(skill.id)
+      : skill.source === 'workspace' || enabledByGlobal.has(skill.id);
+
+    return {
+      ...skill,
+      enabled,
+    };
+  });
+
+  return catalog.sort((left, right) => left.id.localeCompare(right.id));
+}
+
+function toPiSkillFromExecutionSkill(skill: ExecutionSkill): PiSkill {
+  return {
+    id: skill.id,
+    name: skill.name,
+    description: skill.description,
+    allowedTools: [],
+    content: skill.promptTemplate,
+    path: skill.path,
+  };
 }
 
 // =============================================================================
@@ -503,10 +614,6 @@ export function saveForemanSettings(workspaceId: string, settings: ForemanSettin
 // Enabled Skills for Workspace
 // =============================================================================
 
-function hasExplicitWorkspaceSkillSelection(workspaceConfig: WorkspacePiConfig | null): boolean {
-  return Array.isArray(workspaceConfig?.skills?.enabled);
-}
-
 export function getEnabledSkillsForWorkspace(workspaceId?: string, workspacePath?: string): PiSkill[] {
   if (workspaceId || workspacePath) {
     const resolvedWorkspacePath = workspacePath || (workspaceId ? loadWorkspacePathFromRegistry(workspaceId) : undefined);
@@ -514,26 +621,41 @@ export function getEnabledSkillsForWorkspace(workspaceId?: string, workspacePath
       return [];
     }
 
-    const allWorkspaceSkills = discoverWorkspacePiSkills(resolvedWorkspacePath);
-    const workspaceConfig = workspaceId ? loadWorkspacePiConfig(workspaceId) : null;
-
-    if (hasExplicitWorkspaceSkillSelection(workspaceConfig)) {
-      const enabledIds = workspaceConfig?.skills?.enabled ?? [];
-      return allWorkspaceSkills.filter((skill) => enabledIds.includes(skill.id));
+    if (!workspaceId) {
+      // Without a workspace ID we cannot resolve workspace-specific toggles,
+      // so keep legacy behavior: return discovered workspace-local skills.
+      return discoverWorkspacePiSkills(resolvedWorkspacePath);
     }
 
-    // Default behavior: if no saved workspace selection exists, all discovered
-    // workspace skills are enabled.
-    return allWorkspaceSkills;
+    const workspaceSkillsById = new Map(discoverWorkspacePiSkills(resolvedWorkspacePath).map((skill) => [skill.id, skill]));
+    const executionSkillsById = new Map(discoverPostExecutionSkills().map((skill) => [skill.id, skill]));
+
+    const catalog = discoverWorkspaceSkillCatalog(workspaceId, resolvedWorkspacePath);
+    return catalog
+      .filter((skill) => skill.enabled)
+      .map((skill) => {
+        const workspaceSkill = workspaceSkillsById.get(skill.id);
+        if (workspaceSkill) {
+          return workspaceSkill;
+        }
+
+        const executionSkill = executionSkillsById.get(skill.id);
+        if (executionSkill) {
+          return toPiSkillFromExecutionSkill(executionSkill);
+        }
+
+        return null;
+      })
+      .filter((skill): skill is PiSkill => skill !== null);
   }
 
   // Non-workspace contexts keep global behavior.
   const allSkills = discoverPiSkills();
   const factorySettings = loadPiFactorySettings();
-  const enabledIds = factorySettings?.skills?.enabled;
+  const enabledIds = new Set(normalizeEnabledSkillIds(factorySettings?.skills?.enabled));
 
-  return enabledIds
-    ? allSkills.filter((skill) => enabledIds.includes(skill.id))
+  return enabledIds.size > 0
+    ? allSkills.filter((skill) => enabledIds.has(skill.id))
     : allSkills;
 }
 
