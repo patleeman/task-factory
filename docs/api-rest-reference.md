@@ -38,6 +38,7 @@ Conventions:
 | DELETE | `/api/workspaces/:workspaceId` | Delete workspace |
 | GET | `/api/workspaces/attention` | Workspace awaiting-input counts |
 | POST | `/api/workspaces/:workspaceId/archive/open-in-explorer` | Open task archive folder in file explorer |
+| GET | `/api/workspaces/:workspaceId/pipeline-stats` | Workspace pipeline metrics (funnel, rework, flow timing + throughput) |
 | GET | `/api/workspaces/:workspaceId/pi-config` | Read workspace Pi config (skill enablement overrides) |
 | POST | `/api/workspaces/:workspaceId/pi-config` | Save workspace Pi config |
 | GET | `/api/workspaces/:workspaceId/skills/discovered` | List all workspace-discovered `SKILL.md` skills (unfiltered) |
@@ -158,6 +159,24 @@ Use `metadata.signal` + `metadata.outcome` + `metadata.sessionId`/`turnId` to bu
 Notes:
 - `GET /api/workspaces/:workspaceId/tasks/:taskId/attachments/:storedName` uses the attachment's stored MIME metadata when available, so uncommon extensions can still be served with the correct `Content-Type`.
 - UI previews are intentionally conservative: inline thumbnails are only rendered for browser-safe image MIME types (`image/jpeg`, `image/png`, `image/gif`, `image/webp`); other image-like files are shown as downloadable file attachments.
+
+### Pipeline stats response highlights
+
+`GET /api/workspaces/:workspaceId/pipeline-stats` returns a structured payload:
+
+- `funnel`
+  - `phaseCounts` for `backlog|ready|executing|complete|archived`
+  - `phaseTransitions[phase].in/out`
+  - conversion rates for `backlog→ready`, `ready→executing`, `executing→complete`, `complete→archived`
+- `rework`
+  - `completeToReadyTransitionCount`
+  - `tasksReworkedAtLeastOnce`
+  - `reworkRate`
+  - model breakdown tables for both `planningModels` and `executionModels` with `model`, `completedTaskCount`, `reworkedTaskCount`, and `reworkRate`
+  - missing model metadata grouped under `unknown`
+- `flow`
+  - `throughputPerDay`
+  - cycle/lead summaries (`average`, `median`, `p95`, `sampleSize`)
 
 ### Common error behavior
 

@@ -36,6 +36,7 @@ Stable architectural boundaries for Task Factory.
 | Task planning/execution orchestration | `packages/server/src/agent-execution-service.ts` |
 | Workspace Foreman planning | `packages/server/src/planning-agent-service.ts` |
 | Queue automation | `packages/server/src/queue-manager.ts` |
+| Pipeline metrics aggregation | `packages/server/src/pipeline-stats-service.ts` |
 | State contract + transitions | `packages/server/src/state-contract.ts`, `state-transition.ts` |
 
 ### Persistence model
