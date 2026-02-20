@@ -494,6 +494,8 @@ export interface TaskFrontmatter {
   // Model configuration (per-task model selection)
   planningModelConfig?: ModelConfig;
   executionModelConfig?: ModelConfig;
+  planningFallbackModels?: ModelConfig[];
+  executionFallbackModels?: ModelConfig[];
   /** Legacy single-model field (treated as execution model). */
   modelConfig?: ModelConfig;
 
@@ -891,6 +893,8 @@ export interface CreateTaskRequest {
   skillConfigs?: Record<string, Record<string, string>>;
   planningModelConfig?: ModelConfig;
   executionModelConfig?: ModelConfig;
+  planningFallbackModels?: ModelConfig[];
+  executionFallbackModels?: ModelConfig[];
   /** Legacy single-model field (treated as execution model). */
   modelConfig?: ModelConfig;
 }
@@ -909,6 +913,8 @@ export interface UpdateTaskRequest {
   skillConfigs?: Record<string, Record<string, string>>;
   planningModelConfig?: ModelConfig;
   executionModelConfig?: ModelConfig;
+  planningFallbackModels?: ModelConfig[];
+  executionFallbackModels?: ModelConfig[];
   /** Legacy single-model field (treated as execution model). */
   modelConfig?: ModelConfig;
 }

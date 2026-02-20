@@ -368,7 +368,7 @@ export function createTask(
     blockedDuration: 0,
     order: nextOrder,
     acceptanceCriteria: normalizeAcceptanceCriteria(request.acceptanceCriteria),
-    plan: request.plan,
+    plan: normalizeTaskPlan(request.plan),
     testingInstructions: [],
     commits: [],
     attachments: [],
