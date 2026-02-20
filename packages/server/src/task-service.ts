@@ -427,7 +427,7 @@ export function updateTask(
   }
 
   if (request.plan !== undefined) {
-    task.frontmatter.plan = request.plan;
+    task.frontmatter.plan = normalizeTaskPlan(request.plan);
   }
 
   if (request.prePlanningSkills !== undefined) {
