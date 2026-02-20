@@ -229,7 +229,7 @@ function unregisterShelfCallbacks(workspaceId: string): void {
 // =============================================================================
 
 export interface QACallbacks {
-  askQuestions: (requestId: string, questions: { id: string; text: string; options: string[] }[]) => Promise<QAAnswer[]>;
+  askQuestions: (requestId: string, questions: { id: string; text: string; options: string[] }[], callerWorkspaceId?: string) => Promise<QAAnswer[]>;
 }
 
 declare global {
@@ -258,7 +258,13 @@ function registerQACallbacks(
 ): void {
   const registry = ensureQACallbackRegistry();
   registry.set(workspaceId, {
-    askQuestions: (requestId, questions) => {
+    askQuestions: (requestId, questions, callerWorkspaceId) => {
+      // Security: verify the caller is asking for their own workspace
+      if (callerWorkspaceId && callerWorkspaceId !== workspaceId) {
+        return Promise.reject(new Error(
+          `Workspace mismatch: callback registered for ${workspaceId} but called with ${callerWorkspaceId}`
+        ));
+      }
       return new Promise<QAAnswer[]>((resolve, reject) => {
         const qaRequest: QARequest = {
           requestId,
@@ -857,6 +863,7 @@ Parameters:
   - id (string): Unique identifier (e.g. "q1", "q2")
   - text (string): The question to ask
   - options (string[]): 2–6 concrete answer choices
+- workspaceId (string): The current workspace ID — always provide this so the questions route to the correct UI session
 
 ### web_search
 Search the web using DuckDuckGo HTML results (markdown formatted output).

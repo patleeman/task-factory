@@ -24,7 +24,7 @@ interface QAAnswer {
 
 declare global {
   var __piFactoryQACallbacks: Map<string, {
-    askQuestions: (requestId: string, questions: { id: string; text: string; options: string[] }[]) => Promise<QAAnswer[]>;
+    askQuestions: (requestId: string, questions: { id: string; text: string; options: string[] }[], callerWorkspaceId?: string) => Promise<QAAnswer[]>;
   }> | undefined;
 }
 
@@ -54,9 +54,10 @@ export default function (pi: ExtensionAPI) {
           minItems: 1,
         },
       ),
+      workspaceId: Type.Optional(Type.String({ description: 'Workspace ID for routing the question to the correct UI session' })),
     }),
     async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
-      const { questions } = params;
+      const { questions, workspaceId } = params;
       const requestId = crypto.randomUUID();
 
       const callbacks = globalThis.__piFactoryQACallbacks;
@@ -70,13 +71,34 @@ export default function (pi: ExtensionAPI) {
         };
       }
 
-      // Use the first registered callback (there should only be one active per session)
-      const [, cb] = callbacks.entries().next().value!;
+      // Extract workspaceId from context if not provided in params
+      const effectiveWorkspaceId = workspaceId || (_ctx as { workspaceId?: string })?.workspaceId;
+      if (!effectiveWorkspaceId) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: 'Q&A request failed: workspace context not available. Cannot route questions to the correct session.',
+          }],
+          details: {} as Record<string, unknown>,
+        };
+      }
+
+      // Look up the callback for the specific workspace
+      const cb = callbacks.get(effectiveWorkspaceId);
+      if (!cb) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `Q&A request failed: no callback registered for workspace ${effectiveWorkspaceId}. The session may have been reset.`,
+          }],
+          details: {} as Record<string, unknown>,
+        };
+      }
 
       try {
         // Race the QA promise against the abort signal so we don't hang
         // if the agent session is cancelled while waiting for user answers.
-        const qaPromise = cb.askQuestions(requestId, questions);
+        const qaPromise = cb.askQuestions(requestId, questions, effectiveWorkspaceId);
 
         const abortPromise = signal
           ? new Promise<never>((_resolve, reject) => {
