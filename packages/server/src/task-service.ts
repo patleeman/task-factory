@@ -173,6 +173,112 @@ function formatCriterionValue(value: unknown): string {
   return String(value).trim();
 }
 
+function normalizeStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => String(item).trim()).filter(Boolean);
+}
+
+function buildVisualPlanFromLegacyFields(plan: {
+  goal: string;
+  steps: string[];
+  validation: string[];
+  cleanup: string[];
+  generatedAt: string;
+}): Record<string, unknown> {
+  return {
+    version: '1',
+    generatedAt: plan.generatedAt,
+    sections: [
+      {
+        component: 'SummaryHero',
+        title: 'Summary',
+        problem: plan.goal,
+        insight: plan.steps[0] || 'See plan steps for implementation scope.',
+        outcome: plan.goal,
+      },
+      {
+        component: 'ChangeList',
+        title: 'Planned Changes',
+        items: plan.steps.map((step, index) => ({ area: `Step ${index + 1}`, change: step })),
+      },
+      {
+        component: 'ValidationPlan',
+        title: 'Validation',
+        checks: [...plan.validation],
+      },
+      {
+        component: 'NextSteps',
+        title: 'Next Steps',
+        items: [...plan.cleanup],
+      },
+    ],
+  };
+}
+
+function normalizeTaskPlan(plan: unknown): TaskFrontmatter['plan'] {
+  if (!plan || typeof plan !== 'object' || Array.isArray(plan)) return undefined;
+
+  const record = plan as Record<string, unknown>;
+  const generatedAt = typeof record.generatedAt === 'string' && record.generatedAt
+    ? record.generatedAt
+    : new Date().toISOString();
+
+  let goal = typeof record.goal === 'string' ? record.goal : '';
+  let steps = normalizeStringList(record.steps);
+  let validation = normalizeStringList(record.validation);
+  let cleanup = normalizeStringList(record.cleanup);
+
+  const rawVisualPlan = record.visualPlan;
+  const hasVisualPlan = rawVisualPlan && typeof rawVisualPlan === 'object' && !Array.isArray(rawVisualPlan);
+
+  const visualPlan = hasVisualPlan
+    ? rawVisualPlan
+    : (goal || steps.length > 0 || validation.length > 0 || cleanup.length > 0)
+      ? buildVisualPlanFromLegacyFields({ goal, steps, validation, cleanup, generatedAt })
+      : null;
+
+  if (!visualPlan) return undefined;
+
+  if (!goal && typeof (visualPlan as Record<string, unknown>) === 'object') {
+    const sections = Array.isArray((visualPlan as Record<string, unknown>).sections)
+      ? (visualPlan as Record<string, unknown>).sections as Array<Record<string, unknown>>
+      : [];
+
+    const summary = sections.find((section) => section.component === 'SummaryHero');
+    const changes = sections.find((section) => section.component === 'ChangeList');
+    const checks = sections.find((section) => section.component === 'ValidationPlan');
+    const next = sections.find((section) => section.component === 'NextSteps')
+      ?? sections.find((section) => section.component === 'FutureWork');
+
+    goal = typeof summary?.outcome === 'string'
+      ? String(summary.outcome)
+      : (typeof summary?.problem === 'string' ? String(summary.problem) : 'Deliver planned changes and validation scope');
+
+    if (steps.length === 0 && Array.isArray(changes?.items)) {
+      steps = changes.items
+        .map((item) => (item && typeof item === 'object' ? String((item as Record<string, unknown>).change || '').trim() : ''))
+        .filter(Boolean);
+    }
+
+    if (validation.length === 0) {
+      validation = normalizeStringList(checks?.checks);
+    }
+
+    if (cleanup.length === 0) {
+      cleanup = normalizeStringList(next?.items);
+    }
+  }
+
+  return {
+    goal,
+    steps,
+    validation,
+    cleanup,
+    visualPlan: visualPlan as any,
+    generatedAt,
+  } as any;
+}
+
 export function parseTaskFile(filePath: string): Task {
   const content = readFileSync(filePath, 'utf-8');
   return parseTaskContent(content, filePath);
@@ -224,6 +330,7 @@ function buildFrontmatter(parsed: Partial<TaskFrontmatter>): TaskFrontmatter {
   };
 
   frontmatter.acceptanceCriteria = normalizeAcceptanceCriteria(frontmatter.acceptanceCriteria);
+  frontmatter.plan = normalizeTaskPlan(parsed.plan);
   frontmatter.usageMetrics = normalizeTaskUsageMetrics(parsed.usageMetrics);
 
   return frontmatter;

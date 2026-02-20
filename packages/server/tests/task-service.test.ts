@@ -89,6 +89,7 @@ describe('createTask', () => {
 
     expect(created.frontmatter.plan).toBeDefined();
     expect(created.frontmatter.plan?.goal).toBe('Keep the supplied plan');
+    expect(created.frontmatter.plan?.visualPlan?.sections.length).toBeGreaterThan(0);
 
     const taskYaml = readFileSync(created.filePath, 'utf-8');
     expect(taskYaml).toContain('goal: Keep the supplied plan');

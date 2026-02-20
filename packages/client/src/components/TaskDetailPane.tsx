@@ -696,52 +696,7 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
               )}
 
               {isPlanExpanded && (
-                <div className="px-4 pb-4 pt-1 border-t border-blue-200/80 space-y-3">
-                  <div>
-                    <h4 className="text-xs font-semibold text-slate-600 mb-1">Goal</h4>
-                    <div className="prose prose-slate prose-sm max-w-none text-slate-800"><ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{frontmatter.plan.goal}</ReactMarkdown></div>
-                  </div>
-                  {frontmatter.plan.steps.length > 0 && (
-                    <div>
-                      <h4 className="text-xs font-semibold text-slate-600 mb-1">Steps</h4>
-                      <ol className="space-y-2">
-                        {frontmatter.plan.steps.map((step: string, i: number) => (
-                          <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
-                            <span className="text-blue-600 font-semibold shrink-0 min-w-[1.5rem] text-right">{i + 1}.</span>
-                            <div className="prose prose-slate prose-sm max-w-none min-w-0 [&>p]:m-0"><ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{step}</ReactMarkdown></div>
-                          </li>
-                        ))}
-                      </ol>
-                    </div>
-                  )}
-                  {frontmatter.plan.validation.length > 0 && (
-                    <div>
-                      <h4 className="text-xs font-semibold text-slate-600 mb-1">Validation</h4>
-                      <ul className="space-y-1.5">
-                        {frontmatter.plan.validation.map((item: string, i: number) => (
-                          <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
-                            <span className="text-green-500 shrink-0 mt-0.5">
-                              <AppIcon icon={Check} size="xs" />
-                            </span>
-                            <div className="prose prose-slate prose-sm max-w-none min-w-0 [&>p]:m-0">
-                              <ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{item}</ReactMarkdown>
-                            </div>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                  {frontmatter.plan.cleanup.length > 0 && (
-                    <div>
-                      <h4 className="text-xs font-semibold text-slate-600 mb-1">Cleanup</h4>
-                      <ul className="space-y-1.5">
-                        {frontmatter.plan.cleanup.map((item: string, i: number) => (
-                          <li key={i} className="flex items-start gap-2 text-sm text-slate-700"><span className="text-slate-400 shrink-0 mt-0.5 text-xs">—</span><div className="prose prose-slate prose-sm max-w-none min-w-0 [&>p]:m-0"><ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{item}</ReactMarkdown></div></li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                </div>
+                <VisualPlanPanel plan={frontmatter.plan} />
               )}
             </div>
           )}
@@ -1426,6 +1381,220 @@ function PostExecutionSummarySection({
 // =============================================================================
 // Helpers
 // =============================================================================
+
+type VisualPlanSection = {
+  component: string
+  [key: string]: unknown
+}
+
+type TaskPlanWithVisual = {
+  goal: string
+  steps: string[]
+  validation: string[]
+  cleanup: string[]
+  generatedAt: string
+  visualPlan?: {
+    version?: string
+    sections?: VisualPlanSection[]
+    generatedAt?: string
+  }
+}
+
+function isLikelyMermaidDiagram(code: string): boolean {
+  const normalized = code.trim().toLowerCase()
+  if (!normalized) return false
+  if (normalized.includes('<script') || normalized.includes('<iframe') || normalized.includes('</')) {
+    return false
+  }
+
+  return (
+    normalized.startsWith('graph ')
+    || normalized.startsWith('flowchart ')
+    || normalized.startsWith('sequencediagram')
+    || normalized.startsWith('classdiagram')
+    || normalized.startsWith('statediagram')
+    || normalized.startsWith('erdiagram')
+    || normalized.startsWith('journey')
+    || normalized.startsWith('gantt')
+    || normalized.startsWith('pie')
+    || normalized.startsWith('mindmap')
+    || normalized.startsWith('timeline')
+    || normalized.startsWith('quadrantchart')
+  )
+}
+
+function MermaidDiagramPanel({ title, code }: { title: string; code: string }) {
+  if (!isLikelyMermaidDiagram(code)) {
+    return (
+      <div className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-700">
+        Invalid Mermaid diagram payload. Showing raw text fallback.
+        <pre className="mt-1 overflow-x-auto whitespace-pre-wrap rounded bg-white p-2 text-[11px] text-slate-700">{code || '(empty)'}</pre>
+      </div>
+    )
+  }
+
+  return (
+    <div className="rounded-md border border-slate-200 bg-white p-2">
+      <div className="mb-1 text-[11px] font-semibold text-slate-600 uppercase tracking-wide">{title}</div>
+      <pre className="overflow-x-auto whitespace-pre rounded bg-slate-50 p-2 text-[11px] text-slate-700">{code}</pre>
+    </div>
+  )
+}
+
+function renderVisualPlanSection(section: any, index: number) {
+  const sectionKey = `${section.component}-${index}`
+
+  switch (section.component) {
+    case 'SummaryHero':
+      return (
+        <div key={sectionKey} className="space-y-1">
+          <h4 className="text-xs font-semibold text-slate-600">{section.title || 'Summary'}</h4>
+          <p className="text-sm text-slate-700"><span className="font-semibold">Problem:</span> {section.problem}</p>
+          <p className="text-sm text-slate-700"><span className="font-semibold">Insight:</span> {section.insight}</p>
+          <p className="text-sm text-slate-700"><span className="font-semibold">Outcome:</span> {section.outcome}</p>
+        </div>
+      )
+    case 'ImpactStats':
+      return (
+        <div key={sectionKey}>
+          <h4 className="text-xs font-semibold text-slate-600 mb-1">{section.title || 'Impact'}</h4>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {section.stats.map((stat: any, statIndex: number) => (
+              <div key={`${sectionKey}-stat-${statIndex}`} className="rounded border border-slate-200 bg-white p-2">
+                <div className="text-[11px] text-slate-500 uppercase tracking-wide">{stat.label}</div>
+                <div className="text-sm font-semibold text-slate-800">{stat.value}</div>
+                {stat.detail && <div className="text-xs text-slate-600">{stat.detail}</div>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )
+    case 'ArchitectureDiff':
+      return (
+        <div key={sectionKey}>
+          <h4 className="text-xs font-semibold text-slate-600 mb-1">{section.title || 'Architecture Diff'}</h4>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
+            <MermaidDiagramPanel title={section.current.label || 'Current'} code={section.current.code} />
+            <MermaidDiagramPanel title={section.planned.label || 'Planned'} code={section.planned.code} />
+          </div>
+          {section.notes && section.notes.length > 0 && (
+            <ul className="mt-2 space-y-1 text-sm text-slate-700">
+              {section.notes.map((note: string, noteIndex: number) => <li key={`${sectionKey}-note-${noteIndex}`}>• {note}</li>)}
+            </ul>
+          )}
+        </div>
+      )
+    case 'ChangeList':
+      return (
+        <div key={sectionKey}>
+          <h4 className="text-xs font-semibold text-slate-600 mb-1">{section.title || 'Changes'}</h4>
+          <ul className="space-y-1.5 text-sm text-slate-700">
+            {section.items.map((item: any, itemIndex: number) => (
+              <li key={`${sectionKey}-item-${itemIndex}`}>
+                <span className="font-semibold">{item.area}:</span> {item.change}{item.rationale ? ` (${item.rationale})` : ''}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )
+    case 'Risks':
+      return (
+        <div key={sectionKey}>
+          <h4 className="text-xs font-semibold text-slate-600 mb-1">{section.title || 'Risks'}</h4>
+          <ul className="space-y-1.5 text-sm text-slate-700">
+            {section.items.map((item: any, itemIndex: number) => (
+              <li key={`${sectionKey}-risk-${itemIndex}`}>
+                <span className="font-semibold">[{item.severity.toUpperCase()}]</span> {item.risk} — {item.mitigation}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )
+    case 'OpenQuestions':
+      return (
+        <div key={sectionKey}>
+          <h4 className="text-xs font-semibold text-slate-600 mb-1">{section.title || 'Open Questions'}</h4>
+          <ul className="space-y-1.5 text-sm text-slate-700">
+            {section.items.map((item: any, itemIndex: number) => (
+              <li key={`${sectionKey}-question-${itemIndex}`}>{item.question}</li>
+            ))}
+          </ul>
+        </div>
+      )
+    case 'ValidationPlan':
+      return (
+        <div key={sectionKey}>
+          <h4 className="text-xs font-semibold text-slate-600 mb-1">{section.title || 'Validation'}</h4>
+          <ul className="space-y-1.5">
+            {section.checks.map((check: string, checkIndex: number) => (
+              <li key={`${sectionKey}-check-${checkIndex}`} className="flex items-start gap-2 text-sm text-slate-700">
+                <span className="text-green-500 shrink-0 mt-0.5"><AppIcon icon={Check} size="xs" /></span>
+                {check}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )
+    case 'DecisionLog':
+      return (
+        <div key={sectionKey}>
+          <h4 className="text-xs font-semibold text-slate-600 mb-1">{section.title || 'Decision Log'}</h4>
+          <ul className="space-y-1.5 text-sm text-slate-700">
+            {section.entries.map((entry: any, entryIndex: number) => (
+              <li key={`${sectionKey}-decision-${entryIndex}`}>
+                <span className="font-semibold">{entry.decision}</span> — {entry.rationale}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )
+    case 'NextSteps':
+    case 'FutureWork':
+      return (
+        <div key={sectionKey}>
+          <h4 className="text-xs font-semibold text-slate-600 mb-1">{section.title || (section.component === 'NextSteps' ? 'Next Steps' : 'Future Work')}</h4>
+          <ul className="space-y-1.5 text-sm text-slate-700">
+            {section.items.map((item: any, itemIndex: number) => (
+              <li key={`${sectionKey}-next-${itemIndex}`}>— {item}</li>
+            ))}
+          </ul>
+        </div>
+      )
+    case 'Unknown':
+      return (
+        <div key={sectionKey} className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-700">
+          Unknown plan section "{section.originalComponent}" ({section.reason}).
+        </div>
+      )
+    default:
+      return (
+        <div key={sectionKey} className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-700">
+          Unsupported plan section.
+        </div>
+      )
+  }
+}
+
+export function VisualPlanPanel({ plan }: { plan: TaskPlanWithVisual }) {
+  const sections = plan.visualPlan?.sections || []
+
+  if (sections.length === 0) {
+    return (
+      <div className="px-4 pb-4 pt-1 border-t border-blue-200/80 space-y-3">
+        <div>
+          <h4 className="text-xs font-semibold text-slate-600 mb-1">Goal</h4>
+          <div className="prose prose-slate prose-sm max-w-none text-slate-800"><ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{plan.goal}</ReactMarkdown></div>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="px-4 pb-4 pt-1 border-t border-blue-200/80 space-y-4">
+      {sections.map((section: VisualPlanSection, index: number) => renderVisualPlanSection(section, index))}
+    </div>
+  )
+}
 
 function summarizePlanGoal(goal: unknown, maxLength = 180): string {
   const goalText = typeof goal === 'string' ? goal : ''

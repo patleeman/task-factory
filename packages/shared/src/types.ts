@@ -144,7 +144,7 @@ You are a planning agent. Your job is to research the codebase, generate strong 
 7. Keep wording short and scannable: goal should be 1-2 short sentences, and each step/validation/cleanup item should be a short outcome-focused line. Avoid walls of text.
 8. Steps should be short outcome-focused summaries (usually 3-6 steps). Avoid line-level implementation details, exact file paths, and low-level function-by-function instructions.
 9. Validation items must verify the acceptance criteria and overall outcome without turning into a detailed test script.
-10. Call the \`save_plan\` tool **exactly once** with taskId "{{taskId}}", acceptanceCriteria, goal, steps, validation, and cleanup.
+10. Call the \`save_plan\` tool **exactly once** with taskId "{{taskId}}", acceptanceCriteria, and a complete \`visualPlan\` payload (include goal/steps/validation/cleanup for migration compatibility).
 11. Cleanup items are post-completion tasks (pass an empty array if none needed).
 12. After calling \`save_plan\`, stop immediately. Do not run any further tools or actions.
 13. Stay within planning guardrails: at most {{maxToolCalls}} tool calls.`;
@@ -204,7 +204,7 @@ Continue the existing planning conversation for this task. Reuse prior investiga
 4. Produce 3-7 specific, testable acceptance criteria.
 5. Produce a concise high-level plan aligned to those criteria.
 6. Keep wording short and easy to scan: goal should be 1-2 short sentences, and each step/validation/cleanup item should be one short line when possible. Avoid walls of text.
-7. Call the \`save_plan\` tool exactly once with taskId "{{taskId}}", acceptanceCriteria, goal, steps, validation, and cleanup.
+7. Call the \`save_plan\` tool exactly once with taskId "{{taskId}}", acceptanceCriteria, and a complete \`visualPlan\` payload (include goal/steps/validation/cleanup for migration compatibility).
 8. After calling \`save_plan\`, stop immediately.
 9. Stay within planning guardrails: at most {{maxToolCalls}} tool calls.`;
 
@@ -525,12 +525,382 @@ export interface TaskFrontmatter {
 // Task Plan (auto-generated on task creation)
 // =============================================================================
 
+export interface VisualPlanSectionBase {
+  component: string;
+  title?: string;
+}
+
+export interface SummaryHeroSection extends VisualPlanSectionBase {
+  component: 'SummaryHero';
+  problem: string;
+  insight: string;
+  outcome: string;
+}
+
+export interface ImpactStatsSection extends VisualPlanSectionBase {
+  component: 'ImpactStats';
+  stats: Array<{ label: string; value: string; detail?: string }>;
+}
+
+export interface MermaidDiagram {
+  label: string;
+  code: string;
+}
+
+export interface ArchitectureDiffSection extends VisualPlanSectionBase {
+  component: 'ArchitectureDiff';
+  current: MermaidDiagram;
+  planned: MermaidDiagram;
+  notes?: string[];
+}
+
+export interface ChangeListSection extends VisualPlanSectionBase {
+  component: 'ChangeList';
+  items: Array<{ area: string; change: string; rationale?: string }>;
+}
+
+export interface RisksSection extends VisualPlanSectionBase {
+  component: 'Risks';
+  items: Array<{ risk: string; severity: 'low' | 'medium' | 'high'; mitigation: string }>;
+}
+
+export interface OpenQuestionsSection extends VisualPlanSectionBase {
+  component: 'OpenQuestions';
+  items: Array<{ question: string; owner?: string; status?: 'open' | 'resolved' | 'deferred' }>;
+}
+
+export interface ValidationPlanSection extends VisualPlanSectionBase {
+  component: 'ValidationPlan';
+  checks: string[];
+}
+
+export interface DecisionLogSection extends VisualPlanSectionBase {
+  component: 'DecisionLog';
+  entries: Array<{ decision: string; rationale: string; alternatives?: string[] }>;
+}
+
+export interface NextStepsSection extends VisualPlanSectionBase {
+  component: 'NextSteps';
+  items: string[];
+}
+
+export interface FutureWorkSection extends VisualPlanSectionBase {
+  component: 'FutureWork';
+  items: string[];
+}
+
+export interface UnknownVisualPlanSection extends VisualPlanSectionBase {
+  component: 'Unknown';
+  originalComponent: string;
+  reason: string;
+  raw?: string;
+}
+
+export type VisualPlanSection =
+  | SummaryHeroSection
+  | ImpactStatsSection
+  | ArchitectureDiffSection
+  | ChangeListSection
+  | RisksSection
+  | OpenQuestionsSection
+  | ValidationPlanSection
+  | DecisionLogSection
+  | NextStepsSection
+  | FutureWorkSection
+  | UnknownVisualPlanSection;
+
+export interface VisualPlan {
+  version: '1';
+  sections: VisualPlanSection[];
+  generatedAt?: string;
+}
+
+function asString(value: unknown): string {
+  if (typeof value === 'string') return value.trim();
+  if (value == null) return '';
+  return String(value).trim();
+}
+
+function asStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map(asString).filter(Boolean);
+}
+
+function buildUnknownSection(component: unknown, reason: string, raw: unknown): UnknownVisualPlanSection {
+  return {
+    component: 'Unknown',
+    originalComponent: asString(component) || 'unknown',
+    reason,
+    raw: (() => {
+      try {
+        return JSON.stringify(raw);
+      } catch {
+        return asString(raw);
+      }
+    })(),
+  };
+}
+
+export function normalizeVisualPlan(input: unknown): VisualPlan | null {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+
+  const record = input as Record<string, unknown>;
+  const sourceSections = Array.isArray(record.sections) ? record.sections : [];
+  const sections: VisualPlanSection[] = [];
+
+  for (const source of sourceSections) {
+    if (!source || typeof source !== 'object' || Array.isArray(source)) {
+      sections.push(buildUnknownSection('unknown', 'invalid-section-shape', source));
+      continue;
+    }
+
+    const item = source as Record<string, unknown>;
+    const component = asString(item.component);
+
+    switch (component) {
+      case 'SummaryHero': {
+        const problem = asString(item.problem);
+        const insight = asString(item.insight);
+        const outcome = asString(item.outcome);
+        if (!problem || !insight || !outcome) {
+          sections.push(buildUnknownSection(component, 'missing-summaryhero-fields', source));
+          continue;
+        }
+        sections.push({ component, title: asString(item.title) || undefined, problem, insight, outcome });
+        continue;
+      }
+      case 'ImpactStats': {
+        const stats = Array.isArray(item.stats)
+          ? item.stats
+            .map((stat) => {
+              if (!stat || typeof stat !== 'object' || Array.isArray(stat)) return null;
+              const s = stat as Record<string, unknown>;
+              const label = asString(s.label);
+              const value = asString(s.value);
+              if (!label || !value) return null;
+              return { label, value, detail: asString(s.detail) || undefined };
+            })
+            .filter(Boolean) as Array<{ label: string; value: string; detail?: string }>
+          : [];
+        sections.push({ component, title: asString(item.title) || undefined, stats });
+        continue;
+      }
+      case 'ArchitectureDiff': {
+        const currentRaw = item.current as Record<string, unknown> | undefined;
+        const plannedRaw = item.planned as Record<string, unknown> | undefined;
+        const current = {
+          label: asString(currentRaw?.label) || 'Current',
+          code: asString(currentRaw?.code),
+        };
+        const planned = {
+          label: asString(plannedRaw?.label) || 'Planned',
+          code: asString(plannedRaw?.code),
+        };
+
+        if (!current.code || !planned.code) {
+          sections.push(buildUnknownSection(component, 'invalid-architecture-diff', source));
+          continue;
+        }
+
+        sections.push({
+          component,
+          title: asString(item.title) || undefined,
+          current,
+          planned,
+          notes: asStringList(item.notes),
+        });
+        continue;
+      }
+      case 'ChangeList': {
+        const items = Array.isArray(item.items)
+          ? item.items
+            .map((entry) => {
+              if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
+              const record = entry as Record<string, unknown>;
+              const area = asString(record.area);
+              const change = asString(record.change);
+              if (!area || !change) return null;
+              return { area, change, rationale: asString(record.rationale) || undefined };
+            })
+            .filter(Boolean) as Array<{ area: string; change: string; rationale?: string }>
+          : [];
+        sections.push({ component, title: asString(item.title) || undefined, items });
+        continue;
+      }
+      case 'Risks': {
+        const items = Array.isArray(item.items)
+          ? item.items
+            .map((entry) => {
+              if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
+              const record = entry as Record<string, unknown>;
+              const risk = asString(record.risk);
+              const mitigation = asString(record.mitigation);
+              const severity = asString(record.severity) as 'low' | 'medium' | 'high';
+              if (!risk || !mitigation || !['low', 'medium', 'high'].includes(severity)) return null;
+              return { risk, severity, mitigation };
+            })
+            .filter(Boolean) as Array<{ risk: string; severity: 'low' | 'medium' | 'high'; mitigation: string }>
+          : [];
+        sections.push({ component, title: asString(item.title) || undefined, items });
+        continue;
+      }
+      case 'OpenQuestions': {
+        const items = Array.isArray(item.items)
+          ? item.items
+            .map((entry) => {
+              if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
+              const record = entry as Record<string, unknown>;
+              const question = asString(record.question);
+              if (!question) return null;
+              const status = asString(record.status) as 'open' | 'resolved' | 'deferred';
+              return {
+                question,
+                owner: asString(record.owner) || undefined,
+                status: ['open', 'resolved', 'deferred'].includes(status) ? status : undefined,
+              };
+            })
+            .filter(Boolean) as Array<{ question: string; owner?: string; status?: 'open' | 'resolved' | 'deferred' }>
+          : [];
+        sections.push({ component, title: asString(item.title) || undefined, items });
+        continue;
+      }
+      case 'ValidationPlan': {
+        sections.push({ component, title: asString(item.title) || undefined, checks: asStringList(item.checks) });
+        continue;
+      }
+      case 'DecisionLog': {
+        const entries = Array.isArray(item.entries)
+          ? item.entries
+            .map((entry) => {
+              if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
+              const record = entry as Record<string, unknown>;
+              const decision = asString(record.decision);
+              const rationale = asString(record.rationale);
+              if (!decision || !rationale) return null;
+              return { decision, rationale, alternatives: asStringList(record.alternatives) };
+            })
+            .filter(Boolean) as Array<{ decision: string; rationale: string; alternatives?: string[] }>
+          : [];
+        sections.push({ component, title: asString(item.title) || undefined, entries });
+        continue;
+      }
+      case 'NextSteps': {
+        sections.push({ component, title: asString(item.title) || undefined, items: asStringList(item.items) });
+        continue;
+      }
+      case 'FutureWork': {
+        sections.push({ component, title: asString(item.title) || undefined, items: asStringList(item.items) });
+        continue;
+      }
+      default:
+        sections.push(buildUnknownSection(component, 'unsupported-component', source));
+    }
+  }
+
+  if (sections.length === 0) return null;
+
+  return {
+    version: '1',
+    sections,
+    generatedAt: asString(record.generatedAt) || undefined,
+  };
+}
+
+export function buildVisualPlanFromLegacyPlan(plan: Pick<TaskPlan, 'goal' | 'steps' | 'validation' | 'cleanup' | 'generatedAt'>): VisualPlan {
+  return {
+    version: '1',
+    generatedAt: plan.generatedAt,
+    sections: [
+      {
+        component: 'SummaryHero',
+        title: 'Summary',
+        problem: plan.goal,
+        insight: plan.steps[0] || 'See plan steps for implementation scope.',
+        outcome: plan.goal,
+      },
+      {
+        component: 'ChangeList',
+        title: 'Planned Changes',
+        items: plan.steps.map((step, index) => ({
+          area: `Step ${index + 1}`,
+          change: step,
+        })),
+      },
+      {
+        component: 'ValidationPlan',
+        title: 'Validation',
+        checks: [...plan.validation],
+      },
+      {
+        component: 'NextSteps',
+        title: 'Next Steps',
+        items: [...plan.cleanup],
+      },
+    ],
+  };
+}
+
+export function buildLegacyPlanFromVisualPlan(visualPlan: VisualPlan): Pick<TaskPlan, 'goal' | 'steps' | 'validation' | 'cleanup'> {
+  const summary = visualPlan.sections.find((section): section is SummaryHeroSection => section.component === 'SummaryHero');
+  const changes = visualPlan.sections.find((section): section is ChangeListSection => section.component === 'ChangeList');
+  const validation = visualPlan.sections.find((section): section is ValidationPlanSection => section.component === 'ValidationPlan');
+  const nextSteps = visualPlan.sections.find((section): section is NextStepsSection => section.component === 'NextSteps')
+    ?? visualPlan.sections.find((section): section is FutureWorkSection => section.component === 'FutureWork');
+
+  const fallbackStep = visualPlan.sections.find((section): section is ArchitectureDiffSection => section.component === 'ArchitectureDiff');
+
+  return {
+    goal: summary?.outcome || summary?.problem || 'Deliver planned changes and validation scope',
+    steps: changes?.items.map((item) => item.change).filter(Boolean)
+      || (fallbackStep ? [`Update architecture from ${fallbackStep.current.label} to ${fallbackStep.planned.label}`] : []),
+    validation: validation?.checks || [],
+    cleanup: nextSteps?.items || [],
+  };
+}
+
 export interface TaskPlan {
   goal: string;          // High-level summary of what the agent is trying to achieve
   steps: string[];       // High-level, outcome-focused steps (not line-level implementation details)
   validation: string[];  // High-level checks for verifying the outcome
   cleanup: string[];     // Post-completion cleanup actions
+  visualPlan?: VisualPlan; // Structured primary artifact used by Task Detail renderer
   generatedAt: string;   // ISO 8601 timestamp
+}
+
+export function normalizeTaskPlan(plan: unknown): TaskPlan | undefined {
+  if (!plan || typeof plan !== 'object' || Array.isArray(plan)) return undefined;
+
+  const record = plan as Record<string, unknown>;
+  const generatedAt = asString(record.generatedAt) || new Date().toISOString();
+
+  const goal = asString(record.goal);
+  const steps = asStringList(record.steps);
+  const validation = asStringList(record.validation);
+  const cleanup = asStringList(record.cleanup);
+
+  const normalizedVisualPlan = normalizeVisualPlan(record.visualPlan);
+
+  const visualPlan = normalizedVisualPlan
+    ?? (goal || steps.length > 0 || validation.length > 0 || cleanup.length > 0
+      ? buildVisualPlanFromLegacyPlan({ goal, steps, validation, cleanup, generatedAt })
+      : null);
+
+  if (!visualPlan) {
+    return undefined;
+  }
+
+  const legacy = goal || steps.length > 0 || validation.length > 0 || cleanup.length > 0
+    ? { goal, steps, validation, cleanup }
+    : buildLegacyPlanFromVisualPlan(visualPlan);
+
+  return {
+    goal: legacy.goal,
+    steps: legacy.steps,
+    validation: legacy.validation,
+    cleanup: legacy.cleanup,
+    visualPlan,
+    generatedAt,
+  };
 }
 
 // =============================================================================
