@@ -18,13 +18,13 @@ const AVAILABLE_MODELS = [
   { provider: 'openai', id: 'gpt-4o', reasoning: false },
 ];
 
-const AVAILABLE_SKILLS: Array<{ id: string; hooks: Array<'pre-planning' | 'pre' | 'post'> }> = [
-  { id: 'plan-context', hooks: ['pre-planning'] },
-  { id: 'checkpoint', hooks: ['post'] },
-  { id: 'code-review', hooks: ['post'] },
-  { id: 'update-docs', hooks: ['post'] },
-  { id: 'security-review', hooks: ['post'] },
-  { id: 'tdd-test-first', hooks: ['pre'] },
+const AVAILABLE_SKILLS: Array<{ id: string }> = [
+  { id: 'plan-context' },
+  { id: 'checkpoint' },
+  { id: 'code-review' },
+  { id: 'update-docs' },
+  { id: 'security-review' },
+  { id: 'tdd-test-first' },
 ];
 
 describe('validateTaskDefaults', () => {

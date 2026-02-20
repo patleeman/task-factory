@@ -37,8 +37,6 @@ import { createTaskSeparator, createChatMessage, createSystemEvent } from './act
 import {
   buildAgentContext,
   loadPiFactorySettings,
-  loadWorkspaceSharedContext,
-  WORKSPACE_SHARED_CONTEXT_REL_PATH,
   type PiSkill,
 } from './pi-integration.js';
 import {
@@ -68,7 +66,6 @@ import {
   DEFAULT_WORKSPACE_TASK_LOCATION,
   loadWorkspaceConfigFromDiskSync,
   resolveExistingTasksDirFromWorkspacePath,
-  resolveWorkspaceArtifactRoot,
 } from './workspace-storage.js';
 import {
   getTaskFactoryAuthPath,
@@ -81,20 +78,6 @@ import {
   heartbeatExecutionLease,
   isExecutionLeaseTrackingEnabled,
 } from './execution-lease-service.js';
-
-// =============================================================================
-// Artifact-root–aware helpers
-// =============================================================================
-
-/**
- * Load workspace shared context from the correct artifact root.
- * Derives the artifact root from the workspace config on disk.
- */
-function loadSharedContextForWorkspacePath(workspacePath: string): string | null {
-  const config = loadWorkspaceConfigFromDiskSync(workspacePath);
-  const artifactRoot = resolveWorkspaceArtifactRoot(workspacePath, config);
-  return loadWorkspaceSharedContext(workspacePath, artifactRoot);
-}
 
 // =============================================================================
 // Repo-local Extension Discovery
@@ -1425,25 +1408,10 @@ function buildAutoRetryEndNotice(event: AutoRetryEndEvent): {
 // Build Agent Prompt
 // =============================================================================
 
-function buildWorkspaceSharedContextSection(workspaceSharedContext: string | null): string {
-  const normalized = workspaceSharedContext?.trim();
-  if (!normalized) {
-    return '';
-  }
-
-  let section = `## Workspace Shared Context\n`;
-  section += `Shared file: \`${WORKSPACE_SHARED_CONTEXT_REL_PATH}\`\n`;
-  section += `This file is collaboratively edited by the user and agent.\n\n`;
-  section += `${normalized}\n\n`;
-
-  return section;
-}
-
 function buildTaskPrompt(
   task: Task,
   skills: PiSkill[],
   attachmentSection: string,
-  workspaceSharedContext: string | null,
   promptTemplate?: string,
 ): string {
   const { frontmatter, content } = task;
@@ -1459,7 +1427,7 @@ function buildTaskPrompt(
     : '';
 
   const description = content ? `## Description\n${content}\n` : '';
-  const sharedContext = buildWorkspaceSharedContextSection(workspaceSharedContext) ?? '';
+  const sharedContext = '';
 
   const skillsSection = skills.length > 0
     ? `## Available Skills\n${skills.map(s => `- **${s.name}**: ${s.description}${s.allowedTools.length > 0 ? `\n  - Tools: ${s.allowedTools.join(', ')}` : ''}`).join('\n')}\n`
@@ -1488,7 +1456,6 @@ function buildTaskPrompt(
 function buildReworkPrompt(
   task: Task,
   attachmentSection: string,
-  workspaceSharedContext: string | null,
   promptTemplate?: string,
 ): string {
   const { frontmatter, content } = task;
@@ -1500,7 +1467,7 @@ function buildReworkPrompt(
     : '';
 
   const description = content ? `## Description\n${content}\n` : '';
-  const sharedContext = buildWorkspaceSharedContextSection(workspaceSharedContext) ?? '';
+  const sharedContext = '';
 
   const template = promptTemplate?.trim() || DEFAULT_REWORK_PROMPT_TEMPLATE;
 
@@ -1535,7 +1502,6 @@ export async function executeTask(options: ExecuteTaskOptions): Promise<TaskSess
   // Get enabled skills for this workspace
   const agentContext = buildAgentContext(workspaceId, undefined, workspacePath);
   const skills = agentContext.availableSkills;
-  const workspaceSharedContext = loadSharedContextForWorkspacePath(workspacePath);
 
   // Load task defaults for prompt templates
   const { loadTaskDefaultsForWorkspacePath } = await import('./task-defaults-service.js');
@@ -1684,8 +1650,8 @@ export async function executeTask(options: ExecuteTaskOptions): Promise<TaskSess
 
     // Build prompt — use a rework prompt if resuming, otherwise the full task prompt
     const prompt = isResumingSession
-      ? buildReworkPrompt(task, attachmentSection, workspaceSharedContext, taskDefaults.executionPromptTemplate)
-      : buildTaskPrompt(task, skills, attachmentSection, workspaceSharedContext, taskDefaults.executionPromptTemplate);
+      ? buildReworkPrompt(task, attachmentSection, taskDefaults.executionPromptTemplate)
+      : buildTaskPrompt(task, skills, attachmentSection, taskDefaults.executionPromptTemplate);
     runAgentExecution(session, prompt, workspaceId, task, taskImages);
 
   } catch (err) {
@@ -3107,11 +3073,7 @@ export async function resumeChat(
 
     // Send the user's message as a new prompt (not followUp — there's no
     // active agent turn to follow up on since we just reopened the session).
-    const workspaceSharedContext = loadSharedContextForWorkspacePath(workspacePath);
-    const sharedContextSection = buildWorkspaceSharedContextSection(workspaceSharedContext);
-    const promptContent = sharedContextSection
-      ? `${sharedContextSection}## User Message\n${content}`
-      : content;
+    const promptContent = content;
     const promptWithState = `${buildContractReference()}\n\n${prependStateToTurn(
       promptContent,
       buildTaskStateSnapshot(task.frontmatter),
@@ -3217,11 +3179,7 @@ export async function startChat(
     broadcastTaskContextUsage(session, task.id);
 
     // Build context about the task for the initial prompt
-    const workspaceSharedContext = loadSharedContextForWorkspacePath(workspacePath);
-    const sharedContextSection = buildWorkspaceSharedContextSection(workspaceSharedContext);
-
     const taskContext =
-      (sharedContextSection || '') +
       `You are chatting about task ${task.id}: "${task.frontmatter.title}"\n` +
       (task.content ? `Task description: ${task.content}\n` : '') +
       (task.frontmatter.plan ? `This task has a plan with goal: ${task.frontmatter.plan.goal}\n` : '') +
@@ -3411,7 +3369,6 @@ function buildPlanningGraceTurnPrompt(taskId: string, reason: string): string {
 export function buildPlanningPrompt(
   task: Task,
   attachmentSection: string,
-  workspaceSharedContext: string | null,
   guardrails: PlanningGuardrails = DEFAULT_PLANNING_GUARDRAILS,
   promptTemplate?: string,
 ): string {
@@ -3427,7 +3384,7 @@ export function buildPlanningPrompt(
     : '';
 
   const description = content ? `## Task Description\n${content}\n` : '';
-  const sharedContext = buildWorkspaceSharedContextSection(workspaceSharedContext) ?? '';
+  const sharedContext = '';
 
   const template = promptTemplate?.trim() || DEFAULT_PLANNING_PROMPT_TEMPLATE;
 
@@ -3447,7 +3404,6 @@ export function buildPlanningPrompt(
 export function buildPlanningResumePrompt(
   task: Task,
   attachmentSection: string,
-  workspaceSharedContext: string | null,
   guardrails: PlanningGuardrails = DEFAULT_PLANNING_GUARDRAILS,
   promptTemplate?: string,
 ): string {
@@ -3463,7 +3419,7 @@ export function buildPlanningResumePrompt(
     : '';
 
   const description = content ? `## Task Description\n${content}\n` : '';
-  const sharedContext = buildWorkspaceSharedContextSection(workspaceSharedContext) ?? '';
+  const sharedContext = '';
 
   const template = promptTemplate?.trim() || DEFAULT_PLANNING_RESUME_PROMPT_TEMPLATE;
 
@@ -3913,10 +3869,9 @@ export async function planTask(options: PlanTaskOptions): Promise<TaskPlan | nul
     );
 
     // Send the planning prompt
-    const workspaceSharedContext = loadSharedContextForWorkspacePath(workspacePath);
     const prompt = isResumingPlanningSession
-      ? buildPlanningResumePrompt(task, planAttachmentSection, workspaceSharedContext, planningGuardrails, taskDefaults.planningPromptTemplate)
-      : buildPlanningPrompt(task, planAttachmentSection, workspaceSharedContext, planningGuardrails, taskDefaults.planningPromptTemplate);
+      ? buildPlanningResumePrompt(task, planAttachmentSection, planningGuardrails, taskDefaults.planningPromptTemplate)
+      : buildPlanningPrompt(task, planAttachmentSection, planningGuardrails, taskDefaults.planningPromptTemplate);
     const planPromptOpts = planImages.length > 0 ? { images: planImages } : undefined;
     const planningTimeoutMessage = `Planning timed out after ${Math.round(planningGuardrails.timeoutMs / 1000)} seconds`;
     await withTimeout(

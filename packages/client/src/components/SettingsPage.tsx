@@ -161,6 +161,13 @@ function getFirstAvailableModelConfig(models: AvailableModel[]): ModelConfig | u
   }
 }
 
+function normalizeModelConfigArrayForUi(models: AvailableModel[], raw: unknown): ModelConfig[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((item) => normalizeModelConfigForUi(models, item as ModelConfig | undefined))
+    .filter((mc): mc is ModelConfig => Boolean(mc))
+}
+
 function normalizeModelProfilesForUi(
   settings: PiFactorySettings | null | undefined,
   models: AvailableModel[],
@@ -189,13 +196,26 @@ function normalizeModelProfilesForUi(
       continue
     }
 
-    normalizedProfiles.push({
+    const planningFallbackModels = normalizeModelConfigArrayForUi(models, profile.planningFallbackModels)
+    const executionFallbackModels = normalizeModelConfigArrayForUi(models, profile.executionFallbackModels)
+
+    const normalized: ModelProfile = {
       id,
       name,
       planningModelConfig,
       executionModelConfig,
       modelConfig: executionModelConfig,
-    })
+    }
+
+    if (planningFallbackModels.length > 0) {
+      normalized.planningFallbackModels = planningFallbackModels
+    }
+
+    if (executionFallbackModels.length > 0) {
+      normalized.executionFallbackModels = executionFallbackModels
+    }
+
+    normalizedProfiles.push(normalized)
   }
 
   return normalizedProfiles
@@ -437,7 +457,7 @@ export function SettingsPage() {
         const finalPlanningModelConfig = planningModelConfig as ModelConfig
         const finalExecutionModelConfig = executionModelConfig as ModelConfig
 
-        return {
+        const normalizedProfile: ModelProfile = {
           id: profile.id,
           name,
           planningModelConfig: finalPlanningModelConfig,
@@ -445,6 +465,24 @@ export function SettingsPage() {
           // Keep legacy alias aligned for backward compatibility.
           modelConfig: finalExecutionModelConfig,
         }
+
+        const planningFallbacks = (profile.planningFallbackModels ?? [])
+          .map(cloneModelConfig)
+          .filter((mc): mc is ModelConfig => Boolean(mc?.provider?.trim() && mc?.modelId?.trim()))
+
+        if (planningFallbacks.length > 0) {
+          normalizedProfile.planningFallbackModels = planningFallbacks
+        }
+
+        const executionFallbacks = (profile.executionFallbackModels ?? [])
+          .map(cloneModelConfig)
+          .filter((mc): mc is ModelConfig => Boolean(mc?.provider?.trim() && mc?.modelId?.trim()))
+
+        if (executionFallbacks.length > 0) {
+          normalizedProfile.executionFallbackModels = executionFallbacks
+        }
+
+        return normalizedProfile
       })
 
       const profileIds = new Set(normalizedProfiles.map((profile) => profile.id))
@@ -1080,18 +1118,16 @@ export function SettingsPage() {
                           </button>
                         </div>
 
-                        <div className="grid gap-3 md:grid-cols-2">
-                          <div>
-                            <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">
+                        <div className="grid gap-4 md:grid-cols-2">
+                          {/* Planning model column */}
+                          <div className="space-y-2">
+                            <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide">
                               Planning Model
                             </label>
                             <ModelSelector
                               value={profile.planningModelConfig}
                               onChange={(config) => {
-                                if (!config) {
-                                  return
-                                }
-
+                                if (!config) return
                                 setModelProfilesForm((current) => current.map((candidate) => (
                                   candidate.id === profile.id
                                     ? { ...candidate, planningModelConfig: config }
@@ -1099,30 +1135,130 @@ export function SettingsPage() {
                                 )))
                               }}
                             />
+                            {/* Planning fallbacks */}
+                            {(profile.planningFallbackModels ?? []).map((fallback, fbIdx) => (
+                              <div key={fbIdx} className="flex items-start gap-1">
+                                <div className="flex-1">
+                                  <div className="text-xs text-slate-400 mb-1">Fallback {fbIdx + 1}</div>
+                                  <ModelSelector
+                                    value={fallback}
+                                    onChange={(config) => {
+                                      if (!config) return
+                                      setModelProfilesForm((current) => current.map((candidate) => {
+                                        if (candidate.id !== profile.id) return candidate
+                                        const updated = [...(candidate.planningFallbackModels ?? [])]
+                                        updated[fbIdx] = config
+                                        return { ...candidate, planningFallbackModels: updated }
+                                      }))
+                                    }}
+                                  />
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setModelProfilesForm((current) => current.map((candidate) => {
+                                      if (candidate.id !== profile.id) return candidate
+                                      const updated = [...(candidate.planningFallbackModels ?? [])]
+                                      updated.splice(fbIdx, 1)
+                                      return { ...candidate, planningFallbackModels: updated }
+                                    }))
+                                  }}
+                                  className="mt-5 text-xs text-red-500 hover:text-red-700 shrink-0"
+                                  title="Remove planning fallback"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            ))}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const fallbackModel = cloneModelConfig(profile.planningModelConfig)
+                                  ?? getFirstAvailableModelConfig(models)
+                                if (!fallbackModel) return
+                                setModelProfilesForm((current) => current.map((candidate) => {
+                                  if (candidate.id !== profile.id) return candidate
+                                  return {
+                                    ...candidate,
+                                    planningFallbackModels: [...(candidate.planningFallbackModels ?? []), fallbackModel],
+                                  }
+                                }))
+                              }}
+                              className="text-xs text-blue-600 hover:text-blue-800"
+                            >
+                              + Add planning fallback
+                            </button>
                           </div>
 
-                          <div>
-                            <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">
+                          {/* Execution model column */}
+                          <div className="space-y-2">
+                            <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide">
                               Execution Model
                             </label>
                             <ModelSelector
                               value={profile.executionModelConfig ?? profile.modelConfig}
                               onChange={(config) => {
-                                if (!config) {
-                                  return
-                                }
-
+                                if (!config) return
                                 setModelProfilesForm((current) => current.map((candidate) => (
                                   candidate.id === profile.id
-                                    ? {
-                                        ...candidate,
-                                        executionModelConfig: config,
-                                        modelConfig: config,
-                                      }
+                                    ? { ...candidate, executionModelConfig: config, modelConfig: config }
                                     : candidate
                                 )))
                               }}
                             />
+                            {/* Execution fallbacks */}
+                            {(profile.executionFallbackModels ?? []).map((fallback, fbIdx) => (
+                              <div key={fbIdx} className="flex items-start gap-1">
+                                <div className="flex-1">
+                                  <div className="text-xs text-slate-400 mb-1">Fallback {fbIdx + 1}</div>
+                                  <ModelSelector
+                                    value={fallback}
+                                    onChange={(config) => {
+                                      if (!config) return
+                                      setModelProfilesForm((current) => current.map((candidate) => {
+                                        if (candidate.id !== profile.id) return candidate
+                                        const updated = [...(candidate.executionFallbackModels ?? [])]
+                                        updated[fbIdx] = config
+                                        return { ...candidate, executionFallbackModels: updated }
+                                      }))
+                                    }}
+                                  />
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setModelProfilesForm((current) => current.map((candidate) => {
+                                      if (candidate.id !== profile.id) return candidate
+                                      const updated = [...(candidate.executionFallbackModels ?? [])]
+                                      updated.splice(fbIdx, 1)
+                                      return { ...candidate, executionFallbackModels: updated }
+                                    }))
+                                  }}
+                                  className="mt-5 text-xs text-red-500 hover:text-red-700 shrink-0"
+                                  title="Remove execution fallback"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            ))}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const fallbackModel = cloneModelConfig(profile.executionModelConfig ?? profile.modelConfig)
+                                  ?? getFirstAvailableModelConfig(models)
+                                if (!fallbackModel) return
+                                setModelProfilesForm((current) => current.map((candidate) => {
+                                  if (candidate.id !== profile.id) return candidate
+                                  return {
+                                    ...candidate,
+                                    executionFallbackModels: [...(candidate.executionFallbackModels ?? []), fallbackModel],
+                                  }
+                                }))
+                              }}
+                              className="text-xs text-blue-600 hover:text-blue-800"
+                            >
+                              + Add execution fallback
+                            </button>
                           </div>
                         </div>
                       </div>
@@ -1291,7 +1427,7 @@ export function SettingsPage() {
                   <h4 className="text-sm font-semibold text-slate-800">Planning Prompt Template</h4>
                   <p className="text-xs text-slate-500 mt-0.5">
                     {'Custom prompt template for planning tasks. Available variables: {{taskId}}, {{title}}, {{stateBlock}}, {{contractReference}},'}
-                    {' {{acceptanceCriteria}}, {{description}}, {{sharedContext}}, {{attachments}}, {{maxToolCalls}}'}
+                    {' {{acceptanceCriteria}}, {{description}}, {{attachments}}, {{maxToolCalls}}'}
                   </p>
                 </div>
                 <textarea
@@ -1319,7 +1455,7 @@ export function SettingsPage() {
                   <h4 className="text-sm font-semibold text-slate-800">Execution Prompt Template</h4>
                   <p className="text-xs text-slate-500 mt-0.5">
                     {'Custom prompt template for task execution. Available variables: {{taskId}}, {{title}}, {{stateBlock}}, {{contractReference}},'}
-                    {' {{acceptanceCriteria}}, {{testingInstructions}}, {{description}}, {{sharedContext}},'}
+                    {' {{acceptanceCriteria}}, {{testingInstructions}}, {{description}},'}
                     {' {{attachments}}, {{skills}}'}
                   </p>
                 </div>

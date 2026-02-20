@@ -39,11 +39,7 @@ import { getWorkspaceById } from './workspace-service.js';
 import { discoverTasks } from './task-service.js';
 import { getTasksDir } from './workspace-service.js';
 import { getRepoExtensionPaths, hasLiveExecutionSession } from './agent-execution-service.js';
-import {
-  loadWorkspaceSharedContext,
-  WORKSPACE_SHARED_CONTEXT_REL_PATH,
-  loadForemanSettings,
-} from './pi-integration.js';
+import { loadForemanSettings } from './pi-integration.js';
 import {
   startQueueProcessing,
   stopQueueProcessing,
@@ -819,19 +815,6 @@ export async function buildPlanningSystemPrompt(workspacePath: string, workspace
     } catch { /* ignore */ }
   }
 
-  // Shared workspace context edited by user + agents
-  const workspaceArtifactRoot = workspace
-    ? resolveWorkspaceArtifactRoot(workspace.path, workspace.config)
-    : undefined;
-  const workspaceSharedContext = loadWorkspaceSharedContext(workspacePath, workspaceArtifactRoot);
-  let sharedContextSummary = '';
-  if (workspaceSharedContext && workspaceSharedContext.trim().length > 0) {
-    sharedContextSummary =
-      `\n## Workspace Shared Context\n` +
-      `Source: \`${WORKSPACE_SHARED_CONTEXT_REL_PATH}\`\n\n` +
-      `${workspaceSharedContext.trim()}\n`;
-  }
-
   const stateContractSection = buildContractReference();
 
   return `You are the Foreman — the Task Factory planning agent. You help the user plan, research, and decompose work into tasks.
@@ -846,7 +829,7 @@ export async function buildPlanningSystemPrompt(workspacePath: string, workspace
 
 ## Workspace
 - Path: ${workspacePath}
-${taskSummary}${sharedContextSummary}
+${taskSummary}
 
 ${stateContractSection}
 
@@ -2393,11 +2376,10 @@ declare global {
       name: string;
       description: string;
       type?: 'follow-up' | 'loop' | 'subagent';
-      hooks: ('pre-planning' | 'pre' | 'post')[];
       content: string;
       destination?: 'global' | 'repo-local';
     }) => Promise<{ success: boolean; skillId?: string; path?: string; error?: string }>;
-    listSkills: () => Promise<Array<{ id: string; name: string; description: string; hooks: string[] }>>;
+    listSkills: () => Promise<Array<{ id: string; name: string; description: string }>>;
   }> | undefined;
 }
 
@@ -2406,11 +2388,10 @@ function ensureCreateSkillCallbackRegistry(): Map<string, {
     name: string;
     description: string;
     type?: 'follow-up' | 'loop' | 'subagent';
-    hooks: ('pre-planning' | 'pre' | 'post')[];
     content: string;
     destination?: 'global' | 'repo-local';
   }) => Promise<{ success: boolean; skillId?: string; path?: string; error?: string }>;
-  listSkills: () => Promise<Array<{ id: string; name: string; description: string; hooks: string[] }>>;
+  listSkills: () => Promise<Array<{ id: string; name: string; description: string }>>;
 }> {
   if (!globalThis.__piFactoryCreateSkillCallbacks) {
     globalThis.__piFactoryCreateSkillCallbacks = new Map();
@@ -2444,7 +2425,6 @@ function registerCreateSkillCallbacks(workspaceId: string): void {
           id: payload.name,
           description: payload.description,
           type: payload.type ?? 'follow-up',
-          hooks: payload.hooks,
           promptTemplate: payload.content,
           maxIterations: 1,
         };
@@ -2475,7 +2455,6 @@ function registerCreateSkillCallbacks(workspaceId: string): void {
         id: skill.id,
         name: skill.name,
         description: skill.description,
-        hooks: skill.hooks,
       }));
     },
   });

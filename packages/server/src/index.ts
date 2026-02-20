@@ -883,6 +883,29 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/move', async (req, res) => 
     }
 
     res.json(task);
+
+    // When a task is dragged directly into executing (from any other phase),
+    // start the agent immediately. Without this, the task sits in executing
+    // with no live session and the queue manager's orphan recovery would push
+    // it back to ready on its next poll tick instead of running it.
+    if (toPhase === 'executing' && fromPhase !== 'executing') {
+      const executingTask = task;
+      void executeTask({
+        task: executingTask,
+        workspaceId: workspace.id,
+        workspacePath: workspace.path,
+        broadcastToWorkspace: (event) => broadcastToWorkspace(workspace.id, event),
+        onOutput: () => {},
+        onComplete: makeOnCompleteHandler(
+          executingTask.id,
+          workspace.id,
+          tasksDir,
+          (event) => broadcastToWorkspace(workspace.id, event),
+        ),
+      }).catch((err) => {
+        logger.error(`Failed to start execution for ${executingTask.id} after move to executing:`, err);
+      });
+    }
   } catch (err) {
     logger.error('Error moving task', err);
     res.status(500).json({ error: 'Internal Server Error' });
@@ -1462,7 +1485,7 @@ app.get('/api/pi/themes', (_req, res) => {
   res.json(themes);
 });
 
-// Get AGENTS.md + workspace shared context (combined prompt rules)
+// Get AGENTS.md prompt rules
 app.get('/api/pi/agents-md', async (req, res) => {
   const workspaceId = req.query.workspace as string | undefined;
 
@@ -1507,10 +1530,6 @@ import {
   discoverWorkspacePiSkills,
   getEnabledSkillsForWorkspace,
   getEnabledExtensionsForWorkspace,
-  getWorkspaceSharedContextPath,
-  loadWorkspaceSharedContext,
-  saveWorkspaceSharedContext,
-  WORKSPACE_SHARED_CONTEXT_REL_PATH,
   loadForemanSettings,
   saveForemanSettings,
   type PiFactorySettings,
@@ -1633,7 +1652,7 @@ async function handleSaveTaskDefaults(
     const validation = validateTaskDefaults(
       parsed.value,
       availableModels,
-      availableSkills.map((skill) => ({ id: skill.id, hooks: skill.hooks })),
+      availableSkills.map((skill) => ({ id: skill.id })),
     );
 
     if (!validation.ok) {
@@ -1754,56 +1773,6 @@ app.put('/api/workspaces/:workspaceId/foreman-model', (req, res) => {
   }
 });
 
-// Get workspace shared context (user + agent collaboration store)
-app.get('/api/workspaces/:workspaceId/shared-context', async (req, res) => {
-  const workspace = await getWorkspaceById(req.params.workspaceId);
-
-  if (!workspace) {
-    res.status(404).json({ error: 'Workspace not found' });
-    return;
-  }
-
-  const artifactRoot = resolveWorkspaceArtifactRoot(workspace.path, workspace.config);
-  const content = loadWorkspaceSharedContext(workspace.path, artifactRoot) || '';
-  const absolutePath = getWorkspaceSharedContextPath(workspace.path, artifactRoot);
-
-  res.json({
-    relativePath: WORKSPACE_SHARED_CONTEXT_REL_PATH,
-    absolutePath,
-    content,
-  });
-});
-
-// Save workspace shared context (last write wins)
-app.put('/api/workspaces/:workspaceId/shared-context', async (req, res) => {
-  const workspace = await getWorkspaceById(req.params.workspaceId);
-
-  if (!workspace) {
-    res.status(404).json({ error: 'Workspace not found' });
-    return;
-  }
-
-  const content = (req.body as { content?: unknown }).content;
-  if (typeof content !== 'string') {
-    res.status(400).json({ error: 'content must be a string' });
-    return;
-  }
-
-  try {
-    const artifactRoot = resolveWorkspaceArtifactRoot(workspace.path, workspace.config);
-    saveWorkspaceSharedContext(workspace.path, content, artifactRoot);
-
-    res.json({
-      success: true,
-      relativePath: WORKSPACE_SHARED_CONTEXT_REL_PATH,
-      absolutePath: getWorkspaceSharedContextPath(workspace.path, artifactRoot),
-      content,
-    });
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
-});
-
 // Get discovered workspace skills (unfiltered)
 app.get('/api/workspaces/:workspaceId/skills/discovered', async (req, res) => {
   const workspace = await getWorkspaceById(req.params.workspaceId);
@@ -1910,6 +1879,65 @@ app.patch('/api/workspaces/:workspaceId/artifact-dir', async (req, res) => {
     res.status(500).json({ error: String(err) });
   }
 });
+
+// =============================================================================
+// Execution Session Helper
+// =============================================================================
+
+/**
+ * Creates the standard onComplete callback for agent execution sessions.
+ * Handles auto-move to complete, state transition logging, broadcast, and
+ * queue kick. Shared by the /execute endpoint and the move endpoint when a
+ * task is dragged directly into executing.
+ */
+function makeOnCompleteHandler(
+  taskId: string,
+  workspaceId: string,
+  tasksDir: string,
+  broadcast: (event: ServerEvent) => void,
+): (success: boolean) => void {
+  return (success: boolean) => {
+    const latestTasks = discoverTasks(tasksDir);
+    const latestTask = latestTasks.find((candidate) => candidate.id === taskId);
+
+    // Task may have been deleted while running.
+    if (!latestTask) {
+      kickQueue(workspaceId);
+      return;
+    }
+
+    const taskForBroadcast = latestTask;
+
+    if (success) {
+      const fromState = buildTaskStateSnapshot(latestTask.frontmatter);
+
+      // Auto-move to complete
+      moveTaskToPhase(latestTask, 'complete', 'system', 'Execution completed', latestTasks);
+
+      void logTaskStateTransition({
+        workspaceId,
+        taskId: latestTask.id,
+        from: fromState,
+        to: buildTaskStateSnapshot(latestTask.frontmatter),
+        source: 'task:execute:on-complete',
+        reason: 'Execution completed',
+        broadcastToWorkspace: broadcast,
+      }).catch((stateErr) => {
+        logger.error('Failed to log execution completion state transition', stateErr);
+      });
+    }
+
+    broadcast({
+      type: 'task:moved',
+      task: taskForBroadcast,
+      from: 'executing',
+      to: success ? 'complete' : 'executing',
+    });
+
+    // Kick queue manager — there's now capacity for the next task
+    kickQueue(workspaceId);
+  };
+}
 
 // =============================================================================
 // Task Execution API
@@ -2025,49 +2053,14 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/execute', async (req, res) 
       onOutput: (_output) => {
         // Output callback is for legacy/simulation only
       },
-      onComplete: (success) => {
-        const latestTasks = discoverTasks(tasksDir);
-        const latestTask = latestTasks.find((candidate) => candidate.id === task.id);
-
-        // Task may have been deleted while running.
-        if (!latestTask) {
-          kickQueue(workspace.id);
-          return;
-        }
-
-        let taskForBroadcast = latestTask;
-
-        if (success) {
-          const fromState = buildTaskStateSnapshot(latestTask.frontmatter);
-
-          // Auto-move to complete
-          moveTaskToPhase(latestTask, 'complete', 'system', 'Execution completed', latestTasks);
-
-          void logTaskStateTransition({
-            workspaceId: workspace.id,
-            taskId: latestTask.id,
-            from: fromState,
-            to: buildTaskStateSnapshot(latestTask.frontmatter),
-            source: 'task:execute:on-complete',
-            reason: 'Execution completed',
-            broadcastToWorkspace: (event) => broadcastToWorkspace(workspace.id, event),
-          }).catch((stateErr) => {
-            logger.error('Failed to log execution completion state transition', stateErr);
-          });
-        }
-
-        broadcastToWorkspace(workspace.id, {
-          type: 'task:moved',
-          task: taskForBroadcast,
-          from: 'executing',
-          to: success ? 'complete' : 'executing',
-        });
-
-        // Kick queue manager — there's now capacity for the next task
-        kickQueue(workspace.id);
-      },
+      onComplete: makeOnCompleteHandler(
+        task.id,
+        workspace.id,
+        tasksDir,
+        (event) => broadcastToWorkspace(workspace.id, event),
+      ),
     });
-    
+
     res.json({ sessionId: session.id, status: session.status });
   } catch (err) {
     logger.error('Error starting execution', err);

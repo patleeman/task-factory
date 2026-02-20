@@ -9,7 +9,7 @@ function extractResultText(result: any): string {
     .join('\n');
 }
 
-describe('manage_new_task extension - planning/execution hook support', () => {
+describe('manage_new_task extension - planning/execution lane skill support', () => {
   let tool: any;
   let mockCallbacks: any;
 
@@ -115,6 +115,30 @@ describe('manage_new_task extension - planning/execution hook support', () => {
         selectedPrePlanningSkillIds: ['plan-context', 'scan-context'],
       }),
     );
+  });
+
+  it('labels available skills without hook wording', async () => {
+    mockCallbacks.getFormState.mockReturnValue({
+      content: 'Test',
+      selectedSkillIds: [],
+      selectedPreSkillIds: [],
+      selectedPrePlanningSkillIds: [],
+    });
+    mockCallbacks.getAvailableSkills.mockReturnValue([
+      { id: 'checkpoint', name: 'checkpoint', description: 'Save progress' },
+    ]);
+
+    const result = await tool.execute(
+      'tool-call-4a',
+      { action: 'get' },
+      undefined,
+      undefined,
+      {} as any,
+    );
+
+    const text = extractResultText(result);
+    expect(text).toContain('## Available Skills');
+    expect(text).not.toContain('## Available Hook Skills');
   });
 
   it('shows empty state for skills when none selected', async () => {

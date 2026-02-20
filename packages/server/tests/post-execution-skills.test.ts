@@ -27,26 +27,24 @@ afterEach(() => {
 });
 
 describe('execution skill discovery', () => {
-  it('discovers starter skills with universal hook metadata and prompt content', () => {
+  it('discovers starter skills and prompt content without hook contracts', () => {
     const skills = reloadPostExecutionSkills();
     const captureScreenshot = skills.find((skill) => skill.id === 'capture-screenshot');
 
     expect(captureScreenshot).toBeDefined();
     expect(captureScreenshot?.source).toBe('starter');
     expect(captureScreenshot?.type).toBe('follow-up');
-    expect(captureScreenshot?.hooks).toEqual(['pre-planning', 'pre', 'post']);
     expect(captureScreenshot?.promptTemplate).toContain('attach_task_file');
     expect(captureScreenshot?.promptTemplate).toContain('agent-browser screenshot');
   });
 
-  it('discovers update-docs as a starter universal hook skill with documentation guidance', () => {
+  it('discovers update-docs starter skill with documentation guidance', () => {
     const skills = reloadPostExecutionSkills();
     const updateDocs = skills.find((skill) => skill.id === 'update-docs');
 
     expect(updateDocs).toBeDefined();
     expect(updateDocs?.source).toBe('starter');
     expect(updateDocs?.type).toBe('follow-up');
-    expect(updateDocs?.hooks).toEqual(['pre-planning', 'pre', 'post']);
 
     const prompt = updateDocs?.promptTemplate ?? '';
     expect(prompt).toContain('README.md');
@@ -55,13 +53,12 @@ describe('execution skill discovery', () => {
     expect(prompt).toContain('No documentation updates were needed for this task.');
   });
 
-  it('discovers tdd skills as a paired workflow with universal hooks', () => {
+  it('discovers tdd skills as a paired workflow', () => {
     const skills = reloadPostExecutionSkills();
 
     const tddPre = skills.find((skill) => skill.id === 'tdd-test-first');
     expect(tddPre).toBeDefined();
     expect(tddPre?.type).toBe('follow-up');
-    expect(tddPre?.hooks).toEqual(['pre-planning', 'pre', 'post']);
     expect(tddPre?.workflowId).toBe('tdd');
     expect(tddPre?.pairedSkillId).toBe('tdd-verify-tests');
 
@@ -73,7 +70,6 @@ describe('execution skill discovery', () => {
     const tddPost = skills.find((skill) => skill.id === 'tdd-verify-tests');
     expect(tddPost).toBeDefined();
     expect(tddPost?.type).toBe('follow-up');
-    expect(tddPost?.hooks).toEqual(['pre-planning', 'pre', 'post']);
     expect(tddPost?.workflowId).toBe('tdd');
     expect(tddPost?.pairedSkillId).toBe('tdd-test-first');
 
@@ -115,7 +111,6 @@ Spawn a subagent to complete this task.
 
     expect(skill).toBeDefined();
     expect(skill?.type).toBe('subagent');
-    expect(skill?.hooks).toEqual(['post']);
     expect(skill?.source).toBe('user');
   });
 

@@ -9,7 +9,7 @@ import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import YAML from 'yaml';
-import type { PostExecutionSkill, SkillConfigField, SkillHook, SkillSource } from '@task-factory/shared';
+import type { PostExecutionSkill, SkillConfigField, SkillSource } from '@task-factory/shared';
 import { createSystemEvent } from './activity-service.js';
 import { resolveTaskFactoryHomePath } from './taskfactory-home.js';
 
@@ -17,9 +17,6 @@ import { resolveTaskFactoryHomePath } from './taskfactory-home.js';
 // Skill Discovery
 // =============================================================================
 
-const DEFAULT_SKILL_HOOKS: SkillHook[] = ['pre-planning', 'pre', 'post'];
-const SUPPORTED_SKILL_HOOKS: SkillHook[] = ['pre-planning', 'pre', 'post'];
-const SKILL_HOOK_SET = new Set<SkillHook>(SUPPORTED_SKILL_HOOKS);
 const USER_SKILLS_DIR = resolveTaskFactoryHomePath('skills');
 
 /** Cached skills (discovered once, reloaded on demand) */
@@ -45,29 +42,6 @@ function findStarterSkillsDir(): string | null {
 
 export function getFactoryUserSkillsDir(): string {
   return USER_SKILLS_DIR;
-}
-
-function parseSkillHooks(metadata: Record<string, string>, skillId: string): SkillHook[] {
-  const rawHooks = metadata.hooks ?? metadata.hook;
-  if (!rawHooks) {
-    console.warn(`[Skills] ${skillId} missing metadata.hooks; defaulting to pre-planning,pre,post`);
-    return [...DEFAULT_SKILL_HOOKS];
-  }
-
-  const parsedHooks = rawHooks
-    .split(/[\s,]+/)
-    .map((value) => value.trim().toLowerCase())
-    .filter(Boolean)
-    .filter((value): value is SkillHook => SKILL_HOOK_SET.has(value as SkillHook));
-
-  const dedupedHooks = Array.from(new Set(parsedHooks));
-
-  if (dedupedHooks.length === 0) {
-    console.warn(`[Skills] ${skillId} has invalid metadata.hooks="${rawHooks}"; defaulting to pre-planning,pre,post`);
-    return [...DEFAULT_SKILL_HOOKS];
-  }
-
-  return dedupedHooks;
 }
 
 function parseWorkflowId(metadata: Record<string, string>): string | undefined {
@@ -126,7 +100,6 @@ function parseSkillFile(skillDir: string, dirName: string, source: SkillSource):
       metadata.type === 'loop' ? 'loop' :
       metadata.type === 'subagent' ? 'subagent' :
       'follow-up';
-    const hooks = parseSkillHooks(metadata, dirName);
     const maxIterations = parseInt(metadata['max-iterations'] || '1', 10) || 1;
     const doneSignal = metadata['done-signal'] || 'HOOK_DONE';
 
@@ -159,7 +132,6 @@ function parseSkillFile(skillDir: string, dirName: string, source: SkillSource):
       name,
       description,
       type,
-      hooks,
       workflowId: parseWorkflowId(metadata),
       pairedSkillId: parsePairedSkillId(metadata),
       maxIterations,
@@ -262,24 +234,24 @@ interface SkillSession {
   messages?: any[];
 }
 
-function toHookDisplayName(hookLabel: 'pre-planning' | 'pre-execution'): string {
-  if (hookLabel === 'pre-planning') return 'Pre-planning';
+function toLaneDisplayName(laneLabel: 'pre-planning' | 'pre-execution'): string {
+  if (laneLabel === 'pre-planning') return 'Pre-planning';
   return 'Pre-execution';
 }
 
-async function runFailFastPreHookSkills(
+async function runFailFastPreLaneSkills(
   piSession: SkillSession,
   skillIds: string[],
   ctx: RunSkillsContext,
-  hookLabel: 'pre-planning' | 'pre-execution',
+  laneLabel: 'pre-planning' | 'pre-execution',
 ): Promise<void> {
   const { taskId, workspaceId, broadcastToWorkspace, skillConfigs } = ctx;
-  const hookDisplay = toHookDisplayName(hookLabel);
+  const laneDisplay = toLaneDisplayName(laneLabel);
 
   for (const skillId of skillIds) {
     let skill = getPostExecutionSkill(skillId);
     if (!skill) {
-      const errMsg = `${hookDisplay} skill "${skillId}" not found`;
+      const errMsg = `${laneDisplay} skill "${skillId}" not found`;
       console.warn(`[Skills] ${errMsg}`);
       const notFoundEntry = await createSystemEvent(
         workspaceId,
@@ -300,7 +272,7 @@ async function runFailFastPreHookSkills(
       workspaceId,
       taskId,
       'phase-change',
-      `Running ${hookLabel} skill: ${skill.name}`,
+      `Running ${laneLabel} skill: ${skill.name}`,
       { skillId: skill.id, skillType: skill.type }
     );
     broadcastToWorkspace?.({ type: 'activity:entry', entry: startEntry });
@@ -312,24 +284,24 @@ async function runFailFastPreHookSkills(
         await runFollowUpSkill(piSession, skill, ctx);
       }
     } catch (err) {
-      console.error(`[Skills] ${hookDisplay} skill "${skillId}" failed:`, err);
+      console.error(`[Skills] ${laneDisplay} skill "${skillId}" failed:`, err);
       const errEntry = await createSystemEvent(
         workspaceId,
         taskId,
         'phase-change',
-        `${hookDisplay} skill "${skill.name}" failed: ${err}`,
+        `${laneDisplay} skill "${skill.name}" failed: ${err}`,
         { skillId: skill.id, error: String(err) }
       );
       broadcastToWorkspace?.({ type: 'activity:entry', entry: errEntry });
       // Throw to prevent the main phase prompt from running.
-      throw new Error(`${hookDisplay} skill "${skill.name}" failed: ${err}`);
+      throw new Error(`${laneDisplay} skill "${skill.name}" failed: ${err}`);
     }
 
     const doneEntry = await createSystemEvent(
       workspaceId,
       taskId,
       'phase-change',
-      `${hookDisplay} skill completed: ${skill.name}`,
+      `${laneDisplay} skill completed: ${skill.name}`,
       { skillId: skill.id }
     );
     broadcastToWorkspace?.({ type: 'activity:entry', entry: doneEntry });
@@ -345,7 +317,7 @@ export async function runPrePlanningSkills(
   skillIds: string[],
   ctx: RunSkillsContext,
 ): Promise<void> {
-  await runFailFastPreHookSkills(piSession, skillIds, ctx, 'pre-planning');
+  await runFailFastPreLaneSkills(piSession, skillIds, ctx, 'pre-planning');
 }
 
 /**
@@ -357,7 +329,7 @@ export async function runPreExecutionSkills(
   skillIds: string[],
   ctx: RunSkillsContext,
 ): Promise<void> {
-  await runFailFastPreHookSkills(piSession, skillIds, ctx, 'pre-execution');
+  await runFailFastPreLaneSkills(piSession, skillIds, ctx, 'pre-execution');
 }
 
 /**

@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import YAML from 'yaml';
-import type { SkillConfigField, SkillHook } from '@task-factory/shared';
+import type { SkillConfigField } from '@task-factory/shared';
 import { resolveTaskFactoryHomePath } from './taskfactory-home.js';
 
 const RESERVED_METADATA_KEYS = new Set(['type', 'hooks', 'max-iterations', 'done-signal', 'workflow-id', 'pairs-with']);
@@ -10,16 +10,12 @@ const CONFIG_FIELD_KEY_PATTERN = /^[a-zA-Z0-9_-]+$/;
 const ALLOWED_CONFIG_TYPES = new Set<SkillConfigField['type']>(['string', 'number', 'boolean', 'select']);
 
 const DEFAULT_DONE_SIGNAL = 'HOOK_DONE';
-const DEFAULT_SKILL_HOOKS: SkillHook[] = ['pre-planning', 'pre', 'post'];
-const SUPPORTED_SKILL_HOOKS: SkillHook[] = ['pre-planning', 'pre', 'post'];
-const SKILL_HOOK_SET = new Set<SkillHook>(SUPPORTED_SKILL_HOOKS);
 const DEFAULT_FACTORY_SKILLS_DIR = resolveTaskFactoryHomePath('skills');
 
 interface NormalizedSkillDefinition {
   id: string;
   description: string;
   type: 'follow-up' | 'loop' | 'subagent';
-  hooks: SkillHook[];
   workflowId?: string;
   pairedSkillId?: string;
   maxIterations: number;
@@ -269,30 +265,6 @@ function parseType(raw: unknown): 'follow-up' | 'loop' | 'subagent' {
   throw new Error('type must be "follow-up", "loop", or "subagent"');
 }
 
-function parseHooks(raw: unknown, fieldName = 'hooks'): SkillHook[] {
-  if (raw === undefined || raw === null || raw === '') {
-    return [...DEFAULT_SKILL_HOOKS];
-  }
-
-  const rawValues = Array.isArray(raw)
-    ? raw.map((value) => String(value).trim().toLowerCase()).filter(Boolean)
-    : String(raw)
-      .split(/[\s,]+/)
-      .map((value) => value.trim().toLowerCase())
-      .filter(Boolean);
-
-  if (rawValues.length === 0) {
-    throw new Error(`${fieldName} must include at least one of: pre-planning, pre, post`);
-  }
-
-  const invalid = rawValues.filter((value) => !SKILL_HOOK_SET.has(value as SkillHook));
-  if (invalid.length > 0) {
-    throw new Error(`${fieldName} contains unsupported hook(s): ${invalid.join(', ')}`);
-  }
-
-  return Array.from(new Set(rawValues as SkillHook[]));
-}
-
 function parseOptionalText(raw: unknown): string | undefined {
   if (typeof raw !== 'string') return undefined;
   const value = raw.trim();
@@ -344,7 +316,6 @@ function normalizeSkillDefinition(raw: unknown): NormalizedSkillDefinition {
     : DEFAULT_DONE_SIGNAL;
 
   const metadataRaw = normalizeStringRecord(payload.metadata);
-  const hooks = parseHooks(payload.hooks ?? metadataRaw.hooks, 'hooks');
   const workflowId = parseOptionalText(payload.workflowId ?? metadataRaw['workflow-id']);
   const pairedSkillId = parseOptionalPairedSkillId(payload.pairedSkillId ?? metadataRaw['pairs-with']);
 
@@ -355,7 +326,6 @@ function normalizeSkillDefinition(raw: unknown): NormalizedSkillDefinition {
     id,
     description,
     type,
-    hooks,
     workflowId,
     pairedSkillId,
     maxIterations,
@@ -397,7 +367,6 @@ export function parseImportedSkillMarkdown(content: string): NormalizedSkillDefi
     metadataRaw.type === 'loop' ? 'loop' :
     metadataRaw.type === 'subagent' ? 'subagent' :
     'follow-up';
-  const hooks = parseHooks(metadataRaw.hooks, 'metadata.hooks');
   const workflowId = parseOptionalText(metadataRaw['workflow-id']);
   const pairedSkillId = parseOptionalPairedSkillId(metadataRaw['pairs-with']);
   const maxIterations = parsePositiveInteger(metadataRaw['max-iterations'], 'metadata.max-iterations', 1);
@@ -415,7 +384,6 @@ export function parseImportedSkillMarkdown(content: string): NormalizedSkillDefi
     id,
     description,
     type,
-    hooks,
     workflowId,
     pairedSkillId,
     maxIterations,
@@ -430,7 +398,6 @@ export function buildSkillMarkdown(definition: NormalizedSkillDefinition): strin
   const metadata: Record<string, string> = {
     ...definition.metadata,
     type: definition.type,
-    hooks: definition.hooks.join(','),
   };
 
   if (definition.workflowId) {

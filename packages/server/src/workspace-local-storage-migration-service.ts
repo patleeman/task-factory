@@ -184,7 +184,6 @@ export async function moveWorkspaceLocalStorage(
     { from: join(localRoot, 'planning-sessions'), to: join(targetRoot, 'planning-sessions') },
     { from: join(localRoot, 'shelf.json'), to: join(targetRoot, 'shelf.json') },
     { from: join(localRoot, 'idea-backlog.json'), to: join(targetRoot, 'idea-backlog.json') },
-    { from: join(localRoot, 'workspace-context.md'), to: join(targetRoot, 'workspace-context.md') },
     { from: join(localRoot, 'factory'), to: join(targetRoot, 'factory') },
     { from: join(localRoot, 'skills'), to: join(targetRoot, 'skills') },
     { from: join(localRoot, 'extensions'), to: join(targetRoot, 'extensions') },
@@ -194,7 +193,6 @@ export async function moveWorkspaceLocalStorage(
   const legacyRoot = getLegacyWorkspaceStoragePath(workspacePath);
   const legacyArtifacts: Array<{ from: string; to: string }> = [
     { from: join(legacyRoot, 'tasks'), to: join(targetRoot, 'tasks') },
-    { from: join(legacyRoot, 'workspace-context.md'), to: join(targetRoot, 'workspace-context.md') },
   ];
 
   for (const { from, to } of [...artifacts, ...legacyArtifacts]) {

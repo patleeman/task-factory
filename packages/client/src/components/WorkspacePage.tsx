@@ -3,7 +3,7 @@ import { ArrowLeft, Bot, ChevronLeft, Lightbulb, Plus, Power } from 'lucide-reac
 import { useParams, useNavigate, useMatch, useOutletContext } from 'react-router-dom'
 import type { Task, Workspace, ActivityEntry, Phase, QueueStatus, PlanningMessage, QAAnswer, AgentExecutionStatus, WorkspaceWorkflowSettings, Artifact, DraftTask, IdeaBacklog, IdeaBacklogItem, NewTaskFormState } from '@task-factory/shared'
 import { DEFAULT_WORKFLOW_SETTINGS } from '@task-factory/shared'
-import { api, type WorkflowAutomationResponse, type WorkspaceSkill, type WorkspaceHookSkill, type WorkspaceStorageMigrationStatus } from '../api'
+import { api, type WorkflowAutomationResponse, type WorkspaceSkill, type WorkspaceStorageMigrationStatus } from '../api'
 import { WorkspaceStorageMigrationPrompt } from './WorkspaceStorageMigrationPrompt'
 import { AppIcon } from './AppIcon'
 import { PipelineBar } from './PipelineBar'
@@ -20,7 +20,7 @@ import { usePlanningStreaming, PLANNING_TASK_ID } from '../hooks/usePlanningStre
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts'
 import { useForemanModel } from '../hooks/useForemanModel'
 import { DEFAULT_VOICE_INPUT_HOTKEY, normalizeVoiceInputHotkey } from '../voiceHotkey'
-import { TaskChat, type SlashCommandOption, type HookSkillOption } from './TaskChat'
+import { TaskChat, type SlashCommandOption } from './TaskChat'
 import { QADialog } from './QADialog'
 import { isFactoryRunningState, syncAutomationSettingsWithQueue } from './workflow-automation'
 
@@ -49,23 +49,6 @@ function buildSkillSlashCommands(skills: WorkspaceSkill[]): SlashCommandOption[]
     command: `/skill:${skill.id}`,
     description: skill.description.trim() || `Run skill ${skill.name}`,
   }))
-}
-
-function buildHookSkillOptions(skills: WorkspaceHookSkill[]): HookSkillOption[] {
-  const deduped = new Map<string, HookSkillOption>()
-
-  for (const skill of [...skills].sort((a, b) => a.id.localeCompare(b.id))) {
-    if (!deduped.has(skill.id)) {
-      deduped.set(skill.id, {
-        id: skill.id,
-        name: skill.name,
-        description: skill.description,
-        hooks: [...skill.hooks],
-      })
-    }
-  }
-
-  return Array.from(deduped.values())
 }
 
 function buildForemanSlashCommands(skills: WorkspaceSkill[]): SlashCommandOption[] {
@@ -183,7 +166,6 @@ export function WorkspacePage() {
   const [planningMessages, setPlanningMessages] = useState<PlanningMessage[]>([])
   const [foremanSlashCommands, setForemanSlashCommands] = useState<SlashCommandOption[]>(BASE_FOREMAN_SLASH_COMMANDS)
   const [taskSlashCommands, setTaskSlashCommands] = useState<SlashCommandOption[]>(BASE_TASK_SLASH_COMMANDS)
-  const [hookSkillOptions, setHookSkillOptions] = useState<HookSkillOption[]>([])
   const [agentTaskFormUpdates, setAgentTaskFormUpdates] = useState<Partial<NewTaskFormState> | null>(null)
   const [newTaskPrefill, setNewTaskPrefill] = useState<{ id: string; formState: Partial<NewTaskFormState>; sourceDraftId?: string } | null>(null)
   const [draftTaskStates, setDraftTaskStates] = useState<Record<string, { status: 'created' | 'dismissed'; taskId?: string }>>({})
@@ -424,7 +406,6 @@ export function WorkspacePage() {
     setActiveForemanPane('workspace')
     setForemanSlashCommands(BASE_FOREMAN_SLASH_COMMANDS)
     setTaskSlashCommands(BASE_TASK_SLASH_COMMANDS)
-    setHookSkillOptions([])
     setPlanningMessages([])
     setAgentTaskFormUpdates(null)
     setNewTaskPrefill(null)
@@ -457,7 +438,7 @@ export function WorkspacePage() {
       api.getPlanningMessages(workspaceId),
       api.getWorkspaceSkillCatalog(workspaceId).catch((err) => {
         console.warn('Failed to load workspace skills:', err)
-        return { slashSkills: [], hookSkills: [] }
+        return { slashSkills: [] }
       }),
       api.getIdeaBacklog(workspaceId).catch((err) => {
         console.warn('Failed to load idea backlog:', err)
@@ -527,7 +508,6 @@ export function WorkspacePage() {
         setPlanningMessages(planningMsgs)
         setForemanSlashCommands(buildForemanSlashCommands(workspaceSkillCatalog.slashSkills))
         setTaskSlashCommands(buildTaskSlashCommands(workspaceSkillCatalog.slashSkills))
-        setHookSkillOptions(buildHookSkillOptions(workspaceSkillCatalog.hookSkills))
         setIdeaBacklog(ideaBacklogData)
         if (migrationStatusData) {
           setStorageMigrationStatus(migrationStatusData)
@@ -1836,7 +1816,6 @@ export function WorkspacePage() {
                 title="Foreman"
                 emptyState={{ title: 'Foreman', subtitle: 'Ask me to research, plan, or decompose work into tasks. Try /help for slash commands.' }}
                 slashCommands={foremanSlashCommands}
-                hookSkills={hookSkillOptions}
                 headerSlot={
                   <ModelSelector
                     value={foremanModelConfig ?? undefined}
@@ -1899,7 +1878,6 @@ export function WorkspacePage() {
                         onStop={() => handleStopTaskExecution(subagentView.taskId)}
                         isStopping={stoppingTaskIds.has(subagentView.taskId)}
                         slashCommands={taskSlashCommands}
-                        hookSkills={hookSkillOptions}
                         isVoiceHotkeyPressed={isVoiceHotkeyPressed}
                         onVoiceDictationStateChange={handleVoiceDictationStateChange}
                         emptyState={{ title: 'Subagent Chat', subtitle: 'No activity yet for this subagent task.' }}
@@ -1939,7 +1917,6 @@ export function WorkspacePage() {
                           onStop={() => handleStopTaskExecution(selectedTask.id)}
                           isStopping={stoppingTaskIds.has(selectedTask.id)}
                           slashCommands={taskSlashCommands}
-                          hookSkills={hookSkillOptions}
                           isVoiceHotkeyPressed={isVoiceHotkeyPressed}
                           onVoiceDictationStateChange={handleVoiceDictationStateChange}
                           onOpenSubagent={handleOpenSubagent}

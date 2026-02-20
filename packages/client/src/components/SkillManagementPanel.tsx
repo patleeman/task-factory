@@ -313,8 +313,6 @@ export function SkillManagementPanel({ skills, onSkillsChange }: SkillManagement
       return
     }
 
-    const hooks: Array<'pre-planning' | 'pre' | 'post'> = ['pre-planning', 'pre', 'post']
-
     const parsedMaxIterations = Number.parseInt(form.maxIterations, 10)
     if (!Number.isInteger(parsedMaxIterations) || parsedMaxIterations <= 0) {
       setSaveError('Max iterations must be a positive integer')
@@ -331,7 +329,6 @@ export function SkillManagementPanel({ skills, onSkillsChange }: SkillManagement
       id: skillId,
       description: form.description.trim(),
       type: form.type,
-      hooks,
       workflowId: form.workflowId.trim() || undefined,
       pairedSkillId: form.pairedSkillId.trim() || undefined,
       maxIterations: parsedMaxIterations,

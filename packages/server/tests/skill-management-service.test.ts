@@ -100,7 +100,7 @@ describe('skill-management-service', () => {
     const initialContent = readFileSync(skillMdPath, 'utf-8');
     expect(initialContent).toContain('name: custom-review');
     expect(initialContent).toContain('description: Review output using {{style}} tone.');
-    expect(initialContent).toContain('hooks: pre-planning,pre,post');
+    expect(initialContent).not.toContain('hooks:');
 
     const updatedId = updateFactorySkill(
       'custom-review',
@@ -121,12 +121,12 @@ describe('skill-management-service', () => {
     const updatedContent = readFileSync(skillMdPath, 'utf-8');
     expect(updatedContent).toContain('description: Updated description');
     expect(updatedContent).toContain('type: loop');
-    expect(updatedContent).toContain('hooks: pre-planning,pre,post');
+    expect(updatedContent).not.toContain('hooks:');
     expect(updatedContent).toContain('max-iterations: "3"');
     expect(updatedContent).toContain('done-signal: DONE_NOW');
   });
 
-  it('creates a skill with pre-planning hook metadata', () => {
+  it('creates skills without persisting hook metadata', () => {
     const skillsDir = createTempSkillsDir();
 
     const createdId = createFactorySkill(
@@ -134,7 +134,6 @@ describe('skill-management-service', () => {
         id: 'plan-context',
         description: 'Collect context before planning',
         type: 'follow-up',
-        hooks: ['pre-planning'],
         maxIterations: 1,
         doneSignal: 'HOOK_DONE',
         promptTemplate: 'Collect context before planning.',
@@ -147,7 +146,7 @@ describe('skill-management-service', () => {
 
     const skillMdPath = join(skillsDir, 'plan-context', 'SKILL.md');
     const content = readFileSync(skillMdPath, 'utf-8');
-    expect(content).toContain('hooks: pre-planning');
+    expect(content).not.toContain('hooks:');
   });
 
   it('imports SKILL.md content and normalizes the skill id from name', () => {
@@ -182,7 +181,7 @@ Use {{style}} tone.
 
     const importedContent = readFileSync(importedPath, 'utf-8');
     expect(importedContent).toContain('name: imported-skill');
-    expect(importedContent).toContain('hooks: pre-planning,pre,post');
+    expect(importedContent).not.toContain('hooks:');
     expect(importedContent).toContain('done-signal: FINISHED');
     expect(importedContent).toContain('Use {{style}} tone.');
   });
@@ -229,7 +228,7 @@ Use {{style}} tone.
     expect(existsSync(join(skillsDir, 'legacy-review', 'SKILL.md'))).toBe(false);
   });
 
-  it('parses pre-planning hook metadata from imported skills', () => {
+  it('tolerates legacy hook metadata from imported skills', () => {
     const parsed = parseImportedSkillMarkdown(`---
 name: plan-context
 description: Gather planning context
@@ -241,7 +240,7 @@ Collect planning context before starting.
 `);
 
     expect(parsed.id).toBe('plan-context');
-    expect(parsed.hooks).toEqual(['pre-planning', 'pre']);
+    expect(parsed.metadata.hooks).toBeUndefined();
   });
 
   it('validates imported markdown shape', () => {

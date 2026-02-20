@@ -58,14 +58,25 @@ describe('delete running task regression checks', () => {
   });
 
   it('does not resurrect deleted tasks in manual execute completion callback', () => {
+    // The onComplete logic lives in makeOnCompleteHandler, which is shared by
+    // both the /execute endpoint and the move-to-executing path. Check there.
+    const onCompleteHelper = sliceSection(
+      indexSource,
+      'function makeOnCompleteHandler(',
+      '// =============================================================================\n// Task Execution API',
+    );
+
+    expect(onCompleteHelper).toContain('const latestTask = latestTasks.find((candidate) => candidate.id === taskId);');
+    expect(onCompleteHelper).toContain('if (!latestTask) {');
+    expect(onCompleteHelper).not.toContain('find((candidate) => candidate.id === taskId) || task');
+
+    // The /execute endpoint itself must delegate to makeOnCompleteHandler
+    // (not inline the callback) so both trigger paths get the same guard.
     const executeRoute = sliceSection(
       indexSource,
       "app.post('/api/workspaces/:workspaceId/tasks/:taskId/execute'",
       '// Stop task execution',
     );
-
-    expect(executeRoute).toContain('const latestTask = latestTasks.find((candidate) => candidate.id === task.id);');
-    expect(executeRoute).toContain('if (!latestTask) {');
-    expect(executeRoute).not.toContain('find((candidate) => candidate.id === task.id) || task');
+    expect(executeRoute).toContain('makeOnCompleteHandler(');
   });
 });

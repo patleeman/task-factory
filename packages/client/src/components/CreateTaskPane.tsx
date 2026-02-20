@@ -26,6 +26,10 @@ export interface CreateTaskData {
   skillConfigs?: Record<string, Record<string, string>>
   planningModelConfig?: ModelConfig
   executionModelConfig?: ModelConfig
+  /** Ordered fallback models tried when the primary planning model fails. */
+  planningFallbackModels?: ModelConfig[]
+  /** Ordered fallback models tried when the primary execution model fails. */
+  executionFallbackModels?: ModelConfig[]
   pendingFiles?: File[]
   /** When opened from an inline draft card, identifies that source draft. */
   sourceDraftId?: string
@@ -67,6 +71,11 @@ function cloneModelConfig(modelConfig: ModelConfig | undefined): ModelConfig | u
   }
 }
 
+function cloneModelConfigArray(arr: ModelConfig[] | undefined): ModelConfig[] {
+  if (!Array.isArray(arr)) return []
+  return arr.map(cloneModelConfig).filter((mc): mc is ModelConfig => Boolean(mc))
+}
+
 function normalizeModelProfiles(rawProfiles: unknown): ModelProfile[] {
   if (!Array.isArray(rawProfiles)) {
     return []
@@ -90,13 +99,29 @@ function normalizeModelProfiles(rawProfiles: unknown): ModelProfile[] {
         return null
       }
 
-      return {
+      const normalized: ModelProfile = {
         id,
         name,
         planningModelConfig,
         executionModelConfig,
         modelConfig: executionModelConfig,
       }
+
+      const planningFallbacks = cloneModelConfigArray(
+        (profile as { planningFallbackModels?: ModelConfig[] }).planningFallbackModels,
+      )
+      if (planningFallbacks.length > 0) {
+        normalized.planningFallbackModels = planningFallbacks
+      }
+
+      const executionFallbacks = cloneModelConfigArray(
+        (profile as { executionFallbackModels?: ModelConfig[] }).executionFallbackModels,
+      )
+      if (executionFallbacks.length > 0) {
+        normalized.executionFallbackModels = executionFallbacks
+      }
+
+      return normalized
     })
     .filter((profile): profile is ModelProfile => profile !== null)
 }
@@ -468,6 +493,13 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
         ? cloneModelConfig(selectedModelProfile.executionModelConfig ?? selectedModelProfile.modelConfig)
         : executionModelConfig
 
+      const resolvedPlanningFallbackModels = selectedModelProfile
+        ? cloneModelConfigArray(selectedModelProfile.planningFallbackModels)
+        : []
+      const resolvedExecutionFallbackModels = selectedModelProfile
+        ? cloneModelConfigArray(selectedModelProfile.executionFallbackModels)
+        : []
+
       await onSubmit({
         content,
         prePlanningSkills: sanitizedPrePlanningSkillIds,
@@ -476,6 +508,8 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
         skillConfigs: hasSkillConfigs ? skillConfigs : undefined,
         planningModelConfig: resolvedPlanningModelConfig,
         executionModelConfig: resolvedExecutionModelConfig,
+        planningFallbackModels: resolvedPlanningFallbackModels.length > 0 ? resolvedPlanningFallbackModels : undefined,
+        executionFallbackModels: resolvedExecutionFallbackModels.length > 0 ? resolvedExecutionFallbackModels : undefined,
         pendingFiles: pendingFiles.length > 0 ? pendingFiles : undefined,
         sourceDraftId: prefillRequest?.sourceDraftId,
         skipPlanning: !enablePlanning,
@@ -685,8 +719,6 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
         onPostSkillsChange={setSelectedSkillIds}
         skillConfigs={skillConfigs}
         onSkillConfigChange={setSkillConfigs}
-        enablePlanning={enablePlanning}
-        onEnablePlanningChange={setEnablePlanning}
       />
     </div>
   )

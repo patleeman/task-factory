@@ -202,134 +202,51 @@ describe('workspace skill discovery + enablement', () => {
   });
 });
 
-describe('workspace shared context', () => {
-  it('loads content from .taskfactory/workspace-context.md when present', async () => {
-    setTempHome();
-    const workspacePath = createTempDir('pi-factory-workspace-');
-
-    const { saveWorkspaceSharedContext, loadWorkspaceSharedContext } = await import('../src/pi-integration.js');
-    saveWorkspaceSharedContext(workspacePath, 'workspace context');
-
-    const loaded = loadWorkspaceSharedContext(workspacePath);
-    expect(loaded).toBe('workspace context');
-  });
-
-  it('falls back to legacy .pi/workspace-context.md when .taskfactory file is absent', async () => {
-    setTempHome();
-    const workspacePath = createTempDir('pi-factory-workspace-');
-    const legacyContextPath = join(workspacePath, '.pi', 'workspace-context.md');
-
-    mkdirSync(join(workspacePath, '.pi'), { recursive: true });
-    writeFileSync(legacyContextPath, 'legacy context', 'utf-8');
-
-    const { loadWorkspaceSharedContext } = await import('../src/pi-integration.js');
-
-    expect(loadWorkspaceSharedContext(workspacePath)).toBe('legacy context');
-  });
-
-  it('returns null and warns when shared context path is unreadable', async () => {
-    setTempHome();
-    const workspacePath = createTempDir('pi-factory-workspace-');
-
-    const { getWorkspaceSharedContextPath, loadWorkspaceSharedContext } = await import('../src/pi-integration.js');
-    const contextPath = getWorkspaceSharedContextPath(workspacePath);
-    mkdirSync(contextPath, { recursive: true }); // directory where file should be
-
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
-    const loaded = loadWorkspaceSharedContext(workspacePath);
-
-    expect(loaded).toBeNull();
-    expect(warnSpy).toHaveBeenCalled();
-  });
-
-  it('saveWorkspaceSharedContext creates missing directories and overwrites content', async () => {
-    setTempHome();
-    const workspacePath = createTempDir('pi-factory-workspace-');
-
-    const { saveWorkspaceSharedContext, loadWorkspaceSharedContext } = await import('../src/pi-integration.js');
-
-    saveWorkspaceSharedContext(workspacePath, 'v1');
-    expect(loadWorkspaceSharedContext(workspacePath)).toBe('v1');
-
-    saveWorkspaceSharedContext(workspacePath, 'v2');
-    expect(loadWorkspaceSharedContext(workspacePath)).toBe('v2');
-  });
-});
-
-describe('buildAgentContext shared context merge behavior', () => {
-  it('merges workspace shared context after global AGENTS.md when workspaceId resolves via registry', async () => {
+describe('buildAgentContext global rules behavior', () => {
+  it('returns global AGENTS.md rules when workspaceId resolves via registry', async () => {
     const homePath = setTempHome();
-    const workspaceId = 'ws-merge';
+    const workspaceId = 'ws-global-rules';
     const workspacePath = createTempDir('pi-factory-workspace-');
 
     writeGlobalAgentsMd(homePath, 'GLOBAL RULES');
-    writeWorkspaceConfig(workspacePath);
-    registerWorkspace(homePath, workspaceId, workspacePath);
-
-    const { saveWorkspaceSharedContext, buildAgentContext } = await import('../src/pi-integration.js');
-    saveWorkspaceSharedContext(workspacePath, 'SHARED CONTEXT RULES');
-
-    const context = buildAgentContext(workspaceId, []);
-
-    expect(context.globalRules).toContain('GLOBAL RULES');
-    expect(context.globalRules).toContain('SHARED CONTEXT RULES');
-    expect(context.globalRules.indexOf('GLOBAL RULES')).toBeLessThan(
-      context.globalRules.indexOf('SHARED CONTEXT RULES'),
-    );
-  });
-
-  it('merges using workspacePath when workspaceId is not provided', async () => {
-    const homePath = setTempHome();
-    const workspacePath = createTempDir('pi-factory-workspace-');
-
-    writeGlobalAgentsMd(homePath, 'GLOBAL RULES');
-    writeWorkspaceConfig(workspacePath);
-
-    const { saveWorkspaceSharedContext, buildAgentContext } = await import('../src/pi-integration.js');
-    saveWorkspaceSharedContext(workspacePath, 'SHARED CONTEXT RULES');
-
-    const context = buildAgentContext(undefined, [], workspacePath);
-
-    expect(context.globalRules).toContain('GLOBAL RULES');
-    expect(context.globalRules).toContain('SHARED CONTEXT RULES');
-  });
-
-  it('falls back to global AGENTS.md when no shared context file is present', async () => {
-    const homePath = setTempHome();
-    const workspaceId = 'ws-global-only';
-    const workspacePath = createTempDir('pi-factory-workspace-');
-
-    writeGlobalAgentsMd(homePath, 'GLOBAL ONLY RULES');
     writeWorkspaceConfig(workspacePath);
     registerWorkspace(homePath, workspaceId, workspacePath);
 
     const { buildAgentContext } = await import('../src/pi-integration.js');
     const context = buildAgentContext(workspaceId, []);
 
-    expect(context.globalRules).toBe('GLOBAL ONLY RULES');
+    expect(context.globalRules).toBe('GLOBAL RULES');
   });
 
-  it('reloads workspace shared context from disk on each call without restart', async () => {
+  it('ignores workspace-context.md files and keeps only global AGENTS.md rules', async () => {
     const homePath = setTempHome();
-    const workspaceId = 'ws-reload';
+    const workspaceId = 'ws-ignores-context-file';
     const workspacePath = createTempDir('pi-factory-workspace-');
 
     writeGlobalAgentsMd(homePath, 'GLOBAL RULES');
     writeWorkspaceConfig(workspacePath);
     registerWorkspace(homePath, workspaceId, workspacePath);
 
-    const { saveWorkspaceSharedContext, buildAgentContext } = await import('../src/pi-integration.js');
+    mkdirSync(join(workspacePath, '.taskfactory'), { recursive: true });
+    writeFileSync(join(workspacePath, '.taskfactory', 'workspace-context.md'), 'SHARED CONTEXT RULES', 'utf-8');
 
-    saveWorkspaceSharedContext(workspacePath, 'SHARED CONTEXT V1');
-    const first = buildAgentContext(workspaceId, [], workspacePath).globalRules;
-    expect(first).toContain('SHARED CONTEXT V1');
+    const { buildAgentContext } = await import('../src/pi-integration.js');
+    const context = buildAgentContext(workspaceId, []);
 
-    saveWorkspaceSharedContext(workspacePath, 'SHARED CONTEXT V2');
-    const second = buildAgentContext(workspaceId, [], workspacePath).globalRules;
+    expect(context.globalRules).toBe('GLOBAL RULES');
+  });
 
-    expect(second).toContain('SHARED CONTEXT V2');
-    expect(second).not.toContain('SHARED CONTEXT V1');
+  it('uses global rules when workspacePath is provided without workspaceId', async () => {
+    const homePath = setTempHome();
+    const workspacePath = createTempDir('pi-factory-workspace-');
+
+    writeGlobalAgentsMd(homePath, 'GLOBAL RULES');
+    writeWorkspaceConfig(workspacePath);
+
+    const { buildAgentContext } = await import('../src/pi-integration.js');
+    const context = buildAgentContext(undefined, [], workspacePath);
+
+    expect(context.globalRules).toBe('GLOBAL RULES');
   });
 
   it('does not read or migrate legacy ~/.pi/factory workspace registry entries at runtime', async () => {

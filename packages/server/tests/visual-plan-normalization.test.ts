@@ -47,6 +47,28 @@ describe('visual plan normalization', () => {
     });
   });
 
+  it('accepts recommendation/rationale aliases for SummaryHero sections', () => {
+    const normalized = normalizeVisualPlan({
+      version: '1',
+      sections: [
+        {
+          component: 'SummaryHero',
+          recommendation: 'Enable provider gating by default',
+          rationale: 'Reduce surprise auto-enablement and improve trust',
+          outcome: 'Users opt in explicitly at provider level',
+        },
+      ],
+    });
+
+    expect(normalized).not.toBeNull();
+    expect(normalized?.sections[0]).toMatchObject({
+      component: 'SummaryHero',
+      problem: 'Enable provider gating by default',
+      insight: 'Reduce surprise auto-enablement and improve trust',
+      outcome: 'Users opt in explicitly at provider level',
+    });
+  });
+
   it('backfills visualPlan from legacy plan fields', () => {
     const plan = normalizeTaskPlan({
       goal: 'Ship visual plan support',

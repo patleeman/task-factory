@@ -64,7 +64,6 @@ describe('planning prompt guardrail guidance', () => {
         content: 'Avoid long planning loops.',
       } as any,
       '',
-      null,
       {
         timeoutMs: 120_000,
         maxToolCalls: 9,
@@ -87,7 +86,6 @@ describe('planning prompt guardrail guidance', () => {
         content: 'Avoid long planning loops.',
       } as any,
       '',
-      null,
       {
         timeoutMs: 120_000,
         maxToolCalls: 9,

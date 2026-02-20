@@ -70,7 +70,6 @@ export interface SkillConfigField {
   };
 }
 
-export type SkillHook = 'pre-planning' | 'pre' | 'post'
 export type SkillSource = 'starter' | 'user'
 
 export interface PostExecutionSkill {
@@ -78,7 +77,6 @@ export interface PostExecutionSkill {
   name: string;
   description: string;
   type: 'follow-up' | 'loop' | 'subagent';
-  hooks: SkillHook[];
   workflowId?: string;
   pairedSkillId?: string;
   maxIterations: number;

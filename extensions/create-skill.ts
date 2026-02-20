@@ -13,11 +13,10 @@ declare global {
       name: string;
       description: string;
       type?: 'follow-up' | 'loop' | 'subagent';
-      hooks: ('pre-planning' | 'pre' | 'post')[];
       content: string;
       destination?: 'global' | 'repo-local';
     }) => Promise<{ success: boolean; skillId?: string; path?: string; error?: string }>;
-    listSkills: () => Promise<Array<{ id: string; name: string; description: string; hooks: string[] }>>;
+    listSkills: () => Promise<Array<{ id: string; name: string; description: string }>>;
   }> | undefined;
 }
 
@@ -46,7 +45,7 @@ export default function (pi: ExtensionAPI) {
     name: 'create_skill',
     label: 'Create Skill',
     description:
-      'Create a new hook skill that can be used by tasks. ' +
+      'Create a new skill that can be used by tasks. ' +
       'Skills are stored as SKILL.md files with YAML frontmatter. ' +
       'The skill will be available immediately after creation.',
     parameters: Type.Object({
@@ -63,10 +62,7 @@ export default function (pi: ExtensionAPI) {
       ], {
         description: 'Execution type: follow-up (single-turn, default), loop (repeat until done-signal), or subagent (delegates to a subagent conversation)',
       })),
-      hooks: Type.Array(
-        Type.Union([Type.Literal('pre-planning'), Type.Literal('pre'), Type.Literal('post')]),
-        { description: 'When the skill runs: pre-planning (before planning), pre (before execution), and/or post (after execution)' }
-      ),
+
       content: Type.String({
         description: 'Markdown content for the skill (the prompt template that will be sent to the agent)',
       }),
@@ -78,7 +74,7 @@ export default function (pi: ExtensionAPI) {
       })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      const { name, description, type, hooks, content, destination } = params;
+      const { name, description, type, content, destination } = params;
 
       const callbacks = globalThis.__piFactoryCreateSkillCallbacks;
       if (!callbacks || callbacks.size === 0) {
@@ -105,16 +101,6 @@ export default function (pi: ExtensionAPI) {
         };
       }
 
-      // Validate hooks
-      if (!hooks || hooks.length === 0) {
-        return {
-          content: [{
-            type: 'text' as const,
-            text: 'Error: At least one hook (pre-planning, pre, or post) must be specified.',
-          }],
-          details: { error: 'No hooks specified' },
-        };
-      }
 
       // Validate description
       if (!description || description.trim().length === 0) {
@@ -145,7 +131,6 @@ export default function (pi: ExtensionAPI) {
           name: name.trim().toLowerCase(),
           description: description.trim(),
           type,
-          hooks,
           content: content.trim(),
           destination,
         });
@@ -164,7 +149,6 @@ export default function (pi: ExtensionAPI) {
               skillId: result.skillId, 
               path: result.path,
               type: type ?? 'follow-up',
-              hooks,
               destination: resolvedDestination,
             },
           };

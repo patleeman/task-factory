@@ -3,7 +3,7 @@
  *
  * Registers a `manage_new_task` tool that lets the planning agent read and
  * modify the "New Task" form in the UI. The agent can set the task description,
- * select a model, and configure planning/execution hook skills and their order.
+ * select a model, and configure planning/execution skills and their order.
  *
  * Communication: the server registers callbacks on
  * `globalThis.__piFactoryTaskFormCallbacks` when the create-task pane is open.
@@ -27,7 +27,7 @@ export default function (pi: ExtensionAPI) {
     description:
       'Read or update the New Task form that the user is currently editing. ' +
       'Use action "get" to see the current form state and available options. ' +
-      'Use action "update" to set the task description, model, or planning/execution hook skills.',
+      'Use action "update" to set the task description, model, or planning/execution skills.',
     parameters: Type.Object({
       action: Type.Union([
         Type.Literal('get'),
@@ -146,7 +146,7 @@ export default function (pi: ExtensionAPI) {
         }
 
         if (availableSkills.length > 0) {
-          lines.push('\n## Available Hook Skills\n');
+          lines.push('\n## Available Skills\n');
           for (const s of availableSkills) {
             lines.push(`- \`${s.id}\` — ${s.name}: ${s.description}`);
           }

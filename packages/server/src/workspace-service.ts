@@ -228,10 +228,6 @@ async function migrateLegacyWorkspaceStorage(workspacePath: string): Promise<voi
       to: getWorkspaceStoragePath(workspacePath, 'idea-backlog.json'),
     },
     {
-      from: getLegacyWorkspaceStoragePath(workspacePath, 'workspace-context.md'),
-      to: getWorkspaceStoragePath(workspacePath, 'workspace-context.md'),
-    },
-    {
       from: getLegacyWorkspaceStoragePath(workspacePath, 'factory', 'activity.jsonl'),
       to: getWorkspaceStoragePath(workspacePath, 'factory', 'activity.jsonl'),
     },
@@ -547,7 +543,6 @@ export async function deleteWorkspace(id: string): Promise<boolean> {
     getLegacyWorkspaceStoragePath(entry.path, 'planning-session-id.txt'),
     getLegacyWorkspaceStoragePath(entry.path, 'planning-messages.json'),
     getLegacyWorkspaceStoragePath(entry.path, 'planning-sessions'),
-    getLegacyWorkspaceStoragePath(entry.path, 'workspace-context.md'),
   ];
 
   // Also remove the global artifact root when it differs from the local dir.

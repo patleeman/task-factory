@@ -12,7 +12,7 @@ How to safely customize Task Factory with repo extensions (`extensions/`) and ex
 
 ## Quick start
 
-1. Decide whether your change belongs in an extension (tool) or skill (prompt hook).
+1. Decide whether your change belongs in an extension (tool) or skill (prompt behavior).
 2. Keep business policy in server code; keep extension code as adapter glue.
 3. Reload extensions/skills and run server tests before merge.
 
@@ -23,7 +23,7 @@ How to safely customize Task Factory with repo extensions (`extensions/`) and ex
 | Surface | Location | Runtime role |
 |---|---|---|
 | Repo extension | `extensions/<id>.ts` or `extensions/<id>/index.ts` | Registers Pi tools for sessions |
-| Execution skill | `skills/<id>/SKILL.md` and `~/.taskfactory/skills/<id>/SKILL.md` | Reusable prompt behavior assignable to pre-planning / pre / post lanes |
+| Execution skill | `skills/<id>/SKILL.md` and `~/.taskfactory/skills/<id>/SKILL.md` | Reusable prompt behavior assignable to pre-planning / pre-execution / post-execution lanes |
 
 ### Extension discovery and audience scoping
 
@@ -42,7 +42,8 @@ How to safely customize Task Factory with repo extensions (`extensions/`) and ex
 | Merge rule | User skill with same ID overrides starter skill |
 | Required file | `SKILL.md` with YAML frontmatter + markdown body |
 | Required fields | `name`, `description` (`name` must match directory ID) |
-| Hook metadata | `hooks` supports `pre-planning`, `pre`, `post` (stored for compatibility; lane assignment controls execution) |
+| Optional metadata | `type`, `max-iterations`, `done-signal`, `workflow-id`, `pairs-with` |
+| Legacy compatibility | `metadata.hooks` is tolerated on import/discovery but ignored for lane execution |
 
 ### Tool destination options (`create_skill` / `create_extension`)
 
@@ -70,7 +71,6 @@ name: delegate-task
 description: Delegates work to a subagent
 metadata:
   type: subagent
-  hooks: post
 ---
 
 Use the message_agent tool to start a subagent conversation and delegate the remaining work.
@@ -78,15 +78,15 @@ Use the message_agent tool to start a subagent conversation and delegate the rem
 
 Unknown `type` values are silently coerced to `follow-up` during discovery (SKILL.md import), keeping existing skills backward-compatible. The `create_skill` tool and the REST API reject unknown types with a validation error.
 
-### Hook execution semantics
+### Lane execution semantics
 
-Execution is lane-driven: if a skill is assigned to a lane, it runs in that lane regardless of `metadata.hooks`.
+Execution is lane-driven: if a known skill ID is assigned to a lane, it runs in that lane.
 
-| Hook | Behavior |
+| Lane | Behavior |
 |---|---|
 | `pre-planning` | Runs before task planning prompt; failure aborts planning |
-| `pre` | Runs before execution prompt; failure aborts execution |
-| `post` | Runs after `task_complete`; failure is logged and next post hook continues |
+| `pre-execution` | Runs before execution prompt; failure aborts execution |
+| `post-execution` | Runs after `task_complete`; failure is logged and next post-execution skill continues |
 
 ### Starter post-execution skills
 
@@ -102,7 +102,7 @@ Built-in post-execution order for new tasks (when no global/workspace/task overr
 2. `code-review`
 3. `update-docs`
 
-### Customizing hook order (global/workspace/task)
+### Customizing lane skill order (global/workspace/task)
 
 | Scope | Where to change it | Fields |
 |---|---|---|
@@ -125,7 +125,7 @@ Example global default override:
 
 - Apply least-privilege tool design.
 - Validate all extension tool inputs.
-- Avoid destructive defaults in hooks.
+- Avoid destructive defaults in reusable skills.
 - Never hardcode secrets in extensions/skills.
 
 ## Examples

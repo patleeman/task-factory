@@ -34,7 +34,6 @@ describe('create_skill extension', () => {
       {
         name: 'repo-skill',
         description: 'Repo-local test skill',
-        hooks: ['post'],
         content: 'Use repo-local destination',
         destination: 'repo-local',
       },
@@ -46,7 +45,6 @@ describe('create_skill extension', () => {
     expect(createSkill).toHaveBeenCalledWith({
       name: 'repo-skill',
       description: 'Repo-local test skill',
-      hooks: ['post'],
       content: 'Use repo-local destination',
       destination: 'repo-local',
     });
@@ -70,7 +68,6 @@ describe('create_skill extension', () => {
       {
         name: 'global-skill',
         description: 'Global test skill',
-        hooks: ['pre'],
         content: 'Use global destination',
       },
       undefined,
@@ -81,7 +78,6 @@ describe('create_skill extension', () => {
     expect(createSkill).toHaveBeenCalledWith({
       name: 'global-skill',
       description: 'Global test skill',
-      hooks: ['pre'],
       content: 'Use global destination',
       destination: undefined,
     });
@@ -106,7 +102,6 @@ describe('create_skill extension', () => {
         name: 'my-subagent',
         description: 'Delegates to a subagent',
         type: 'subagent',
-        hooks: ['post'],
         content: 'Use message_agent to delegate.',
       },
       undefined,

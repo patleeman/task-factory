@@ -27,6 +27,24 @@ describe('save_plan extension', () => {
     delete globalObj.__piFactoryPlanCallbacks;
   });
 
+  it('declares a strongly typed visualPlan section schema', () => {
+    const sectionItems = tool.parameters?.properties?.visualPlan?.properties?.sections?.items;
+
+    expect(Array.isArray(sectionItems?.anyOf)).toBe(true);
+    expect(sectionItems.anyOf.length).toBeGreaterThanOrEqual(10);
+
+    const componentLiterals = sectionItems.anyOf
+      .map((schema: any) => schema?.properties?.component?.const)
+      .filter(Boolean);
+
+    const componentSet = new Set(componentLiterals);
+    expect(componentSet.has('SummaryHero')).toBe(true);
+    expect(componentSet.has('ChangeList')).toBe(true);
+    expect(componentSet.has('ValidationPlan')).toBe(true);
+    expect(componentSet.has('ArchitectureDiff')).toBe(true);
+    expect(componentSet.has('NextSteps')).toBe(true);
+  });
+
   it('returns error when callback is unavailable (planning not active)', async () => {
     const result = await tool.execute(
       'tool-call-1',
@@ -102,7 +120,7 @@ describe('save_plan extension', () => {
     expect(savePlanCallback).not.toHaveBeenCalled();
   });
 
-  it('returns error when neither visualPlan nor legacy fields are provided', async () => {
+  it('returns error when visualPlan is missing', async () => {
     const savePlanCallback = vi.fn().mockResolvedValue(undefined);
 
     (globalThis as any).__piFactoryPlanCallbacks = new Map([
@@ -121,7 +139,7 @@ describe('save_plan extension', () => {
     );
 
     expect(result.isError).toBe(true);
-    expect(extractResultText(result)).toContain('requires a valid visualPlan payload or valid legacy');
+    expect(extractResultText(result)).toContain('requires a valid visualPlan payload with at least one section');
     expect(savePlanCallback).not.toHaveBeenCalled();
   });
 
@@ -148,7 +166,65 @@ describe('save_plan extension', () => {
     );
 
     expect(result.isError).toBe(true);
-    expect(extractResultText(result)).toContain('requires a valid visualPlan payload or valid legacy');
+    expect(extractResultText(result)).toContain('requires a valid visualPlan payload with at least one section');
+    expect(savePlanCallback).not.toHaveBeenCalled();
+  });
+
+  it('returns error when visualPlan is missing SummaryHero', async () => {
+    const savePlanCallback = vi.fn().mockResolvedValue(undefined);
+
+    (globalThis as any).__piFactoryPlanCallbacks = new Map([
+      ['TASK-123', savePlanCallback],
+    ]);
+
+    const result = await tool.execute(
+      'tool-call-5b',
+      {
+        taskId: 'TASK-123',
+        acceptanceCriteria: ['Criterion one'],
+        visualPlan: {
+          version: '1',
+          sections: [
+            { component: 'ChangeList', items: [{ area: 'Server', change: 'Do work' }] },
+          ],
+        },
+      },
+      undefined,
+      undefined,
+      {} as any,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(extractResultText(result)).toContain('requires a SummaryHero section');
+    expect(savePlanCallback).not.toHaveBeenCalled();
+  });
+
+  it('returns error when SummaryHero fields are duplicated', async () => {
+    const savePlanCallback = vi.fn().mockResolvedValue(undefined);
+
+    (globalThis as any).__piFactoryPlanCallbacks = new Map([
+      ['TASK-123', savePlanCallback],
+    ]);
+
+    const result = await tool.execute(
+      'tool-call-5c',
+      {
+        taskId: 'TASK-123',
+        acceptanceCriteria: ['Criterion one'],
+        visualPlan: {
+          version: '1',
+          sections: [
+            { component: 'SummaryHero', problem: 'Same text', insight: 'Same text', outcome: 'Same text' },
+          ],
+        },
+      },
+      undefined,
+      undefined,
+      {} as any,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(extractResultText(result)).toContain('SummaryHero fields must be distinct');
     expect(savePlanCallback).not.toHaveBeenCalled();
   });
 
@@ -198,7 +274,7 @@ describe('save_plan extension', () => {
     expect(callArg.plan.cleanup).toEqual(['Deploy']);
   });
 
-  it('successfully saves with legacy fields when visualPlan is absent', async () => {
+  it('returns error when visualPlan is absent even if legacy fields are provided', async () => {
     const savePlanCallback = vi.fn().mockResolvedValue(undefined);
 
     (globalThis as any).__piFactoryPlanCallbacks = new Map([
@@ -214,29 +290,18 @@ describe('save_plan extension', () => {
         steps: ['Step one', 'Step two'],
         validation: ['Validate one'],
         cleanup: ['Cleanup one'],
-      },
+      } as any,
       undefined,
       undefined,
       {} as any,
     );
 
-    expect(result.isError).toBeFalsy();
-
-    expect(savePlanCallback).toHaveBeenCalledTimes(1);
-    const callArg = savePlanCallback.mock.calls[0][0];
-
-    expect(callArg.acceptanceCriteria).toEqual(['Legacy criterion']);
-    expect(callArg.plan.goal).toBe('Legacy goal');
-    expect(callArg.plan.steps).toEqual(['Step one', 'Step two']);
-    expect(callArg.plan.validation).toEqual(['Validate one']);
-    expect(callArg.plan.cleanup).toEqual(['Cleanup one']);
-
-    // Visual plan should be built from legacy fields
-    expect(callArg.plan.visualPlan).toBeDefined();
-    expect(callArg.plan.visualPlan.sections.length).toBeGreaterThan(0);
+    expect(result.isError).toBe(true);
+    expect(extractResultText(result)).toContain('requires a valid visualPlan payload with at least one section');
+    expect(savePlanCallback).not.toHaveBeenCalled();
   });
 
-  it('merges legacy fields with visualPlan when both are provided', async () => {
+  it('derives legacy plan fields from visualPlan even when extra legacy-shaped fields are present', async () => {
     const savePlanCallback = vi.fn().mockResolvedValue(undefined);
 
     (globalThis as any).__piFactoryPlanCallbacks = new Map([
@@ -248,15 +313,16 @@ describe('save_plan extension', () => {
       {
         taskId: 'TASK-ABC',
         acceptanceCriteria: ['Mixed criterion'],
-        goal: 'Explicit legacy goal',
-        steps: ['Explicit step'],
+        goal: 'Ignored legacy goal',
+        steps: ['Ignored legacy step'],
         visualPlan: {
           version: '1',
           sections: [
-            { component: 'SummaryHero', problem: 'Problem', insight: 'Insight', outcome: 'Outcome from visual' },
+            { component: 'SummaryHero', problem: 'Recommendation', insight: 'Rationale', outcome: 'Outcome from visual' },
+            { component: 'ChangeList', items: [{ area: 'Server', change: 'Ship visual-plan-only save path' }] },
           ],
         },
-      },
+      } as any,
       undefined,
       undefined,
       {} as any,
@@ -266,9 +332,8 @@ describe('save_plan extension', () => {
 
     const callArg = savePlanCallback.mock.calls[0][0];
 
-    // Legacy fields should take precedence when explicitly provided
-    expect(callArg.plan.goal).toBe('Explicit legacy goal');
-    expect(callArg.plan.steps).toEqual(['Explicit step']);
+    expect(callArg.plan.goal).toBe('Outcome from visual');
+    expect(callArg.plan.steps).toEqual(['Ship visual-plan-only save path']);
   });
 
   it('normalizes acceptance criteria by trimming whitespace', async () => {
@@ -285,7 +350,7 @@ describe('save_plan extension', () => {
         acceptanceCriteria: ['  First criterion  ', '  ', '\tSecond criterion\t'],
         visualPlan: {
           version: '1',
-          sections: [{ component: 'SummaryHero', problem: 'Test', insight: 'Test', outcome: 'Test' }],
+          sections: [{ component: 'SummaryHero', problem: 'Recommendation', insight: 'Rationale', outcome: 'Expected outcome' }],
         },
       },
       undefined,
@@ -311,7 +376,7 @@ describe('save_plan extension', () => {
         acceptanceCriteria: ['Criterion'],
         visualPlan: {
           version: '1',
-          sections: [{ component: 'SummaryHero', problem: 'Test', insight: 'Test', outcome: 'Test' }],
+          sections: [{ component: 'SummaryHero', problem: 'Recommendation', insight: 'Rationale', outcome: 'Expected outcome' }],
         },
       },
       undefined,
@@ -340,6 +405,12 @@ describe('save_plan extension', () => {
           version: '1',
           sections: [
             {
+              component: 'SummaryHero',
+              problem: 'Recommendation',
+              insight: 'Rationale',
+              outcome: 'Outcome',
+            },
+            {
               component: 'ArchitectureDiff',
               current: { label: 'Current', code: '' },
               planned: { label: 'Planned', code: 'graph TD\nA-->B' },
@@ -353,8 +424,9 @@ describe('save_plan extension', () => {
     );
 
     const callArg = savePlanCallback.mock.calls[0][0];
-    const section = callArg.plan.visualPlan.sections[0];
+    const section = callArg.plan.visualPlan.sections.find((entry: any) => entry.originalComponent === 'ArchitectureDiff');
 
+    expect(section).toBeDefined();
     expect(section.component).toBe('Unknown');
     expect(section.originalComponent).toBe('ArchitectureDiff');
     expect(section.reason).toBe('invalid-architecture-diff');
@@ -376,6 +448,12 @@ describe('save_plan extension', () => {
           version: '1',
           sections: [
             {
+              component: 'SummaryHero',
+              problem: 'Recommendation',
+              insight: 'Rationale',
+              outcome: 'Outcome',
+            },
+            {
               component: 'ArchitectureDiff',
               current: { label: 'Before', code: 'graph TD\nA-->B' },
               planned: { label: 'After', code: 'graph TD\nA-->C' },
@@ -389,8 +467,9 @@ describe('save_plan extension', () => {
     );
 
     const callArg = savePlanCallback.mock.calls[0][0];
-    const section = callArg.plan.visualPlan.sections[0];
+    const section = callArg.plan.visualPlan.sections.find((entry: any) => entry.component === 'ArchitectureDiff');
 
+    expect(section).toBeDefined();
     expect(section.component).toBe('ArchitectureDiff');
     expect(section.current.code).toBe('graph TD\nA-->B');
     expect(section.planned.code).toBe('graph TD\nA-->C');

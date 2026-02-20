@@ -25,7 +25,7 @@ How Task Factory stores and resolves global + workspace settings, including firs
 | `~/.taskfactory/settings.json` | Global Task Factory settings (theme, task defaults, reusable model profiles, workflow automation defaults) |
 | `~/.taskfactory/agent/auth.json` | Provider credentials used by Task Factory runtime |
 | `~/.taskfactory/agent/skills/` | Global Pi-style skills migrated from legacy Pi data |
-| `~/.taskfactory/skills/` | Global execution hook skills (`pre-planning`, `pre`, `post`) |
+| `~/.taskfactory/skills/` | Global execution skills (lane-assignable to pre-planning, pre-execution, or post-execution) |
 | `~/.taskfactory/extensions/` | Global TypeScript extensions |
 | `~/.taskfactory/workspaces.json` | Registered workspace list |
 | `~/.taskfactory/pi-migration-state.json` | One-time legacy migration decision (`pending`/`migrated`/`skipped`/`not_needed`) |

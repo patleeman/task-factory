@@ -9,7 +9,6 @@ import {
   type CreateTaskRequest,
   type ModelConfig,
   type TaskDefaults,
-  type SkillHook,
 } from '@task-factory/shared';
 import {
   loadPiFactorySettings,
@@ -26,7 +25,6 @@ export interface AvailableModelForDefaults {
 
 export interface AvailableSkillForDefaults {
   id: string;
-  hooks: SkillHook[];
 }
 
 export const ALLOWED_THINKING_LEVELS: ReadonlyArray<NonNullable<ModelConfig['thinkingLevel']>> = [
@@ -732,7 +730,7 @@ export function parseTaskDefaultsPayload(raw: unknown): { ok: true; value: TaskD
     return { ok: false, error: 'defaultModelProfileId must be a string when provided' };
   }
 
-  // pre-planning/execution hooks default to empty arrays if not provided
+  // Pre-planning and pre-execution skill arrays default to empty when not provided
   const prePlanningSkills: string[] = Array.isArray(payload.prePlanningSkills)
     ? [...payload.prePlanningSkills]
     : [];

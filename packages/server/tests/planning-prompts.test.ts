@@ -14,7 +14,6 @@ describe('planning prompt guidance', () => {
         content: 'Plans are too detailed.',
       } as any,
       '',
-      null,
     );
 
     expect(prompt).toContain('high-level task summary for humans');

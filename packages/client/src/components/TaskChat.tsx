@@ -28,14 +28,6 @@ export interface SlashCommandOption {
   description: string
 }
 
-export type HookSkillPhase = 'pre-planning' | 'pre' | 'post'
-
-export interface HookSkillOption {
-  id: string
-  name: string
-  description: string
-  hooks: HookSkillPhase[]
-}
 
 interface TaskChatProps {
   taskId?: string
@@ -61,8 +53,6 @@ interface TaskChatProps {
   emptyState?: { title: string; subtitle: string }
   /** Optional slash command options for autocomplete in the composer. */
   slashCommands?: SlashCommandOption[]
-  /** Optional execution hook skills shown as informational autocomplete context. */
-  hookSkills?: HookSkillOption[]
   /** Optional element rendered in the header bar, next to reset button */
   headerSlot?: React.ReactNode
   /** Optional element rendered above the input area (e.g. QADialog) */
@@ -223,27 +213,6 @@ function fuzzyMatchScore(query: string, candidate: string): number | null {
   return gapPenalty * 2 + (span - query.length)
 }
 
-function isHookSkillPhase(value: unknown): value is HookSkillPhase {
-  return value === 'pre-planning' || value === 'pre' || value === 'post'
-}
-
-function formatHookSkillPhase(phase: HookSkillPhase): string {
-  if (phase === 'pre-planning') return 'pre-planning'
-  if (phase === 'pre') return 'pre-execution'
-  return 'post-execution'
-}
-
-function formatHookSkillSummary(hooks: HookSkillPhase[]): string {
-  if (hooks.length === 0) return 'hook scope unavailable'
-  return hooks.map((hook) => formatHookSkillPhase(hook)).join(' · ')
-}
-
-function buildHookSkillSlashDescription(skill: HookSkillOption): string {
-  const base = skill.description || skill.name
-  const scope = formatHookSkillSummary(skill.hooks)
-  if (!base) return `Execution hook skill · ${scope}`
-  return `${base} · ${scope}`
-}
 
 // Try to guess tool name + detail from content when metadata is missing (old entries)
 function guessToolInfo(content: string): { prefix: string; detail: string } | null {
@@ -763,7 +732,6 @@ export function TaskChat({
   title,
   emptyState,
   slashCommands,
-  hookSkills,
   headerSlot,
   bottomSlot,
   onOpenArtifact,
@@ -887,54 +855,10 @@ export function TaskChat({
     return Array.from(deduped.values())
   }, [slashCommands])
 
-  const normalizedHookSkills = useMemo(() => {
-    if (!hookSkills || hookSkills.length === 0) {
-      return []
-    }
-
-    const deduped = new Map<string, HookSkillOption>()
-
-    for (const skill of hookSkills) {
-      const id = skill.id.trim()
-      if (!id) continue
-
-      if (deduped.has(id)) continue
-
-      const hooks = Array.isArray(skill.hooks)
-        ? Array.from(new Set(skill.hooks.filter((hook): hook is HookSkillPhase => isHookSkillPhase(hook))))
-        : []
-
-      deduped.set(id, {
-        id,
-        name: skill.name.trim() || id,
-        description: skill.description.trim(),
-        hooks,
-      })
-    }
-
-    return Array.from(deduped.values()).sort((a, b) => a.id.localeCompare(b.id))
-  }, [hookSkills])
-
   const slashAutocomplete = useMemo(() => {
     const empty = { visible: false, suggestions: [] as SlashCommandOption[] }
 
-    const slashCatalog = new Map<string, SlashCommandOption>()
-
-    for (const option of normalizedSlashCommands) {
-      slashCatalog.set(option.command, option)
-    }
-
-    for (const skill of normalizedHookSkills) {
-      const command = `/skill:${skill.id}`
-      if (!slashCatalog.has(command)) {
-        slashCatalog.set(command, {
-          command,
-          description: buildHookSkillSlashDescription(skill),
-        })
-      }
-    }
-
-    const allSlashCommands = Array.from(slashCatalog.values())
+    const allSlashCommands = normalizedSlashCommands
     if (allSlashCommands.length === 0) {
       return empty
     }
@@ -985,7 +909,7 @@ export function TaskChat({
       visible: true,
       suggestions: ranked.slice(0, 8).map((entry) => entry.option),
     }
-  }, [input, normalizedHookSkills, normalizedSlashCommands])
+  }, [input, normalizedSlashCommands])
 
   const slashSuggestions = slashAutocomplete.suggestions
   const showSlashAutocomplete = slashAutocomplete.visible

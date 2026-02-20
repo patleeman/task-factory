@@ -8,7 +8,6 @@ function createSkill(): PostExecutionSkill {
     name: 'templated-skill',
     description: 'Template test skill',
     type: 'loop',
-    hooks: ['post'],
     maxIterations: 2,
     doneSignal: 'HOOK_DONE',
     promptTemplate: 'Use {{style}} tone. Max {{max-iterations}} tries. End with {{done-signal}}.',

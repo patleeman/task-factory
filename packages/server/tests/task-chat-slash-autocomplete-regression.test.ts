@@ -11,12 +11,12 @@ const taskChatSource = readFileSync(taskChatPath, 'utf-8');
 const workspacePageSource = readFileSync(workspacePagePath, 'utf-8');
 
 describe('task chat slash autocomplete regression checks', () => {
-  it('accepts slash command and hook skill options with combined slash catalog data', () => {
+  it('accepts slash command options from a unified skill catalog', () => {
     expect(taskChatSource).toContain('export interface SlashCommandOption');
-    expect(taskChatSource).toContain('export interface HookSkillOption');
     expect(taskChatSource).toContain('slashCommands?: SlashCommandOption[]');
-    expect(taskChatSource).toContain('hookSkills?: HookSkillOption[]');
-    expect(taskChatSource).toContain('const slashCatalog = new Map<string, SlashCommandOption>()');
+    expect(taskChatSource).toContain('const allSlashCommands = normalizedSlashCommands');
+    expect(taskChatSource).not.toContain('HookSkillOption');
+    expect(taskChatSource).not.toContain('hookSkills?:');
   });
 
   it('supports keyboard navigation and tab completion for slash suggestions', () => {
@@ -33,23 +33,20 @@ describe('task chat slash autocomplete regression checks', () => {
     expect(taskChatSource).toContain('if (a.score !== b.score) return a.score - b.score');
   });
 
-  it('renders a flat slash list with no section headers and clickable /skill entries', () => {
-    expect(taskChatSource).toContain('buildHookSkillSlashDescription(skill)');
-    expect(taskChatSource).toContain('const command = `/skill:${skill.id}`');
+  it('renders a flat slash list with clickable command entries', () => {
     expect(taskChatSource).toContain('onClick={() => applySlashCommand(option.command)}');
     expect(taskChatSource).not.toContain('command autocomplete');
     expect(taskChatSource).not.toContain('slash commands · tab to autocomplete');
     expect(taskChatSource).not.toContain('execution hook skills · informational only');
   });
 
-  it('wires split skill catalog data for both foreman and task chats', () => {
+  it('wires unified skill catalog data for both foreman and task chats', () => {
     expect(workspacePageSource).toContain('const BASE_TASK_SLASH_COMMANDS');
     expect(workspacePageSource).toContain('buildTaskSlashCommands');
-    expect(workspacePageSource).toContain('buildHookSkillOptions');
     expect(workspacePageSource).toContain('api.getWorkspaceSkillCatalog(workspaceId)');
-    expect(workspacePageSource).toContain('setHookSkillOptions(buildHookSkillOptions(workspaceSkillCatalog.hookSkills))');
-    expect(workspacePageSource).toContain('hookSkills={hookSkillOptions}');
     expect(workspacePageSource).toContain('slashCommands={taskSlashCommands}');
     expect(workspacePageSource).toContain('slashCommands={foremanSlashCommands}');
+    expect(workspacePageSource).not.toContain('buildHookSkillOptions');
+    expect(workspacePageSource).not.toContain('hookSkills={');
   });
 });

@@ -50,6 +50,8 @@ describe('TaskDetail visual plan rendering', () => {
       },
     });
 
+    expect(markup).toContain('Recommendation:');
+    expect(markup).toContain('Rationale:');
     expect(markup).toContain('Problem');
     expect(markup).toContain('Files');
     expect(markup).toContain('Current');

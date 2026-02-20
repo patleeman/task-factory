@@ -140,10 +140,8 @@ export function WorkspaceConfigPage() {
   const [config, setConfig] = useState<WorkspaceConfig>({
     skills: { enabled: [], config: {} },
   })
-  const [sharedContext, setSharedContext] = useState('')
-  const [sharedContextPath, setSharedContextPath] = useState('.taskfactory/workspace-context.md')
   const [workflowForm, setWorkflowForm] = useState<WorkflowOverridesForm | null>(null)
-  const [activeTab, setActiveTab] = useState<'skills' | 'task-defaults' | 'workflow' | 'shared-context' | 'storage'>('skills')
+  const [activeTab, setActiveTab] = useState<'skills' | 'task-defaults' | 'workflow' | 'storage'>('skills')
   const [artifactRoot, setArtifactRoot] = useState<string>('')
   const [artifactRootInput, setArtifactRootInput] = useState<string>('')
   const [artifactRootSaving, setArtifactRootSaving] = useState(false)
@@ -177,7 +175,6 @@ export function WorkspaceConfigPage() {
       fetch(`/api/workspaces/${workspaceId}/skills/discovered`).then(r => r.json()),
       fetch('/api/factory/skills').then(r => r.json() as Promise<PostExecutionSkill[]>),
       fetch(`/api/workspaces/${workspaceId}/pi-config`).then(r => r.json()),
-      fetch(`/api/workspaces/${workspaceId}/shared-context`).then(r => r.json()),
       api.getWorkspace(workspaceId),
       api.getWorkspaceTaskDefaults(workspaceId),
       api.getWorkflowAutomation(workspaceId),
@@ -187,7 +184,6 @@ export function WorkspaceConfigPage() {
         skillsData,
         taskSkillsData,
         configData,
-        sharedContextData,
         workspace,
         workspaceTaskDefaults,
         workflowSettings,
@@ -231,8 +227,6 @@ export function WorkspaceConfigPage() {
           },
         })
         setWorkflowForm(buildWorkflowOverridesForm(workflowSettings))
-        setSharedContext(sharedContextData.content || '')
-        setSharedContextPath(sharedContextData.relativePath || '.taskfactory/workspace-context.md')
         // Use folder name from path as the display name
         const folderName = workspace.path.split('/').filter(Boolean).pop() || workspace.name
         setWorkspaceName(folderName)
@@ -324,16 +318,11 @@ export function WorkspaceConfigPage() {
         ? { skills: config.skills }
         : {}
 
-      const [configRes, sharedContextRes, savedTaskDefaults, workflowResult] = await Promise.all([
+      const [configRes, savedTaskDefaults, workflowResult] = await Promise.all([
         fetch(`/api/workspaces/${workspaceId}/pi-config`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(configPayload),
-        }),
-        fetch(`/api/workspaces/${workspaceId}/shared-context`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content: sharedContext }),
         }),
         api.saveWorkspaceTaskDefaults(workspaceId, taskDefaults),
         workflowUpdate
@@ -341,7 +330,7 @@ export function WorkspaceConfigPage() {
           : Promise.resolve<WorkflowAutomationResponse | null>(null),
       ])
 
-      if (!configRes.ok || !sharedContextRes.ok) {
+      if (!configRes.ok) {
         throw new Error('Save failed')
       }
 
@@ -454,16 +443,6 @@ export function WorkspaceConfigPage() {
               }`}
             >
               Workflow
-            </button>
-            <button
-              onClick={() => setActiveTab('shared-context')}
-              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === 'shared-context'
-                  ? 'border-safety-orange text-safety-orange'
-                  : 'border-transparent text-slate-600 hover:text-slate-800'
-              }`}
-            >
-              Shared Context
             </button>
             <button
               onClick={() => setActiveTab('storage')}
@@ -619,7 +598,7 @@ export function WorkspaceConfigPage() {
                   <h4 className="text-sm font-semibold text-slate-800">Planning Prompt Template</h4>
                   <p className="text-xs text-slate-500 mt-0.5">
                     {'Custom prompt template for planning tasks in this workspace. Available variables: {{taskId}}, {{title}}, {{stateBlock}}, {{contractReference}},'}
-                    {' {{acceptanceCriteria}}, {{description}}, {{sharedContext}}, {{attachments}}, {{maxToolCalls}}'}
+                    {' {{acceptanceCriteria}}, {{description}}, {{attachments}}, {{maxToolCalls}}'}
                   </p>
                 </div>
                 <textarea
@@ -650,7 +629,7 @@ export function WorkspaceConfigPage() {
                   <h4 className="text-sm font-semibold text-slate-800">Execution Prompt Template</h4>
                   <p className="text-xs text-slate-500 mt-0.5">
                     {'Custom prompt template for task execution in this workspace. Available variables: {{taskId}}, {{title}}, {{stateBlock}}, {{contractReference}},'}
-                    {' {{acceptanceCriteria}}, {{testingInstructions}}, {{description}}, {{sharedContext}},'}
+                    {' {{acceptanceCriteria}}, {{testingInstructions}}, {{description}},'}
                     {' {{attachments}}, {{skills}}'}
                   </p>
                 </div>
@@ -892,32 +871,6 @@ export function WorkspaceConfigPage() {
                   )}
                 </div>
               </div>
-            </div>
-          )}
-
-          {activeTab === 'shared-context' && (
-            <div className="space-y-3">
-              <div className="rounded-lg border border-slate-200 bg-white p-4">
-                <p className="text-sm text-slate-600 mb-2">
-                  Shared markdown context included in every agent run for this workspace.
-                  Both you and the agent can update this file.
-                </p>
-                <p className="text-xs text-slate-500 font-mono bg-slate-50 border border-slate-200 rounded px-2 py-1 inline-block">
-                  {sharedContextPath}
-                </p>
-              </div>
-
-              <textarea
-                value={sharedContext}
-                onChange={(e) => {
-                  setSharedContext(e.target.value)
-                  setSaveStatus('idle')
-                  setSaveError('')
-                }}
-                placeholder="Add persistent workspace notes, constraints, architecture decisions, or conventions..."
-                className="w-full min-h-[360px] p-3 text-sm border border-slate-300 bg-white text-slate-800 placeholder-slate-400 rounded-lg focus:outline-none focus:ring-2 focus:ring-safety-orange focus:border-safety-orange font-mono"
-                spellCheck={false}
-              />
             </div>
           )}
 
