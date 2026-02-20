@@ -29,6 +29,8 @@ export interface CreateTaskData {
   pendingFiles?: File[]
   /** When opened from an inline draft card, identifies that source draft. */
   sourceDraftId?: string
+  /** Skip the planning phase and go straight to execution. */
+  skipPlanning?: boolean
 }
 
 interface CreateTaskPaneProps {
@@ -161,6 +163,7 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
   })
   const [isDragOver, setIsDragOver] = useState(false)
   const [isWide, setIsWide] = useState(false)
+  const [skipPlanning, setSkipPlanning] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const whiteboardSceneRef = useRef<WhiteboardSceneSnapshot | null>(initialWhiteboardScene)
@@ -371,6 +374,7 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
     whiteboardSceneRef.current = null
     setInitialWhiteboardScene(null)
     clearStoredWhiteboardScene(whiteboardStorageKey)
+    setSkipPlanning(false)
     clearDraft()
   }, [clearDraft, taskDefaults, whiteboardStorageKey])
 
@@ -474,6 +478,7 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
         executionModelConfig: resolvedExecutionModelConfig,
         pendingFiles: pendingFiles.length > 0 ? pendingFiles : undefined,
         sourceDraftId: prefillRequest?.sourceDraftId,
+        skipPlanning,
       })
 
       whiteboardSceneRef.current = null
@@ -647,6 +652,23 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
     </div>
   )
 
+  const skipPlanningSection = (
+    <div className="shrink-0">
+      <label className="flex items-center gap-2 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={skipPlanning}
+          onChange={(e) => setSkipPlanning(e.target.checked)}
+          className="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500"
+        />
+        <span className="text-sm text-slate-700">Skip planning and start execution</span>
+      </label>
+      <p className="text-xs text-slate-400 mt-1 ml-6">
+        Bypass the planning phase and go straight into execution after creation.
+      </p>
+    </div>
+  )
+
   const executionPipelineSection = (
     <div className="shrink-0">
       <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
@@ -734,6 +756,7 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
           {/* Right panel — configuration */}
           <div className="flex-1 min-w-0 p-5 space-y-5 overflow-y-auto">
             {modelSection}
+            {skipPlanningSection}
             {executionPipelineSection}
             {attachmentsSection}
           </div>
@@ -743,6 +766,7 @@ export function CreateTaskPane({ workspaceId, onCancel, onSubmit, agentFormUpdat
         <div className="flex-1 flex flex-col min-h-0 p-5 gap-4 overflow-y-auto">
           {descriptionSection}
           {modelSection}
+          {skipPlanningSection}
           {executionPipelineSection}
           {attachmentsSection}
         </div>

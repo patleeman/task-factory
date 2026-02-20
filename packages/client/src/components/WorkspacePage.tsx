@@ -840,7 +840,7 @@ export function WorkspacePage() {
     const createWorkspaceId = workspaceId
 
     try {
-      const { pendingFiles, sourceDraftId, ...taskData } = data
+      const { pendingFiles, sourceDraftId, skipPlanning, ...taskData } = data
       const task = await api.createTask(createWorkspaceId, taskData)
       if (pendingFiles && pendingFiles.length > 0) {
         try {
@@ -867,6 +867,16 @@ export function WorkspacePage() {
         }
         return [task, ...prev]
       })
+
+      // If skipPlanning is enabled, auto-start execution
+      if (skipPlanning) {
+        try {
+          await api.moveTask(createWorkspaceId, task.id, 'executing')
+        } catch (moveErr) {
+          console.error('Failed to auto-start execution:', moveErr)
+          // Don't block navigation on move failure - task is still created
+        }
+      }
 
       setNewTaskPrefill(null)
       setAgentTaskFormUpdates(null)

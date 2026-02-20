@@ -1267,6 +1267,8 @@ export interface CreateTaskRequest {
   executionFallbackModels?: ModelConfig[];
   /** Legacy single-model field (treated as execution model). */
   modelConfig?: ModelConfig;
+  /** Skip the planning phase and go straight to execution. */
+  skipPlanning?: boolean;
 }
 
 export interface UpdateTaskRequest {

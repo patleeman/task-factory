@@ -42,6 +42,7 @@ import {
   reorderTasks,
   shouldResumeInterruptedPlanning,
   getTaskFilePath,
+  saveTaskFile,
 } from './task-service.js';
 import { prepareTaskUpdateRequest } from './task-update-service.js';
 import {
@@ -494,6 +495,12 @@ app.post('/api/workspaces/:id/tasks', async (req, res) => {
 
     const task = createTask(workspace.path, tasksDir, request, title);
 
+    // If skipPlanning is enabled, mark planning as completed so it won't be resumed by recovery
+    if (request.skipPlanning) {
+      task.frontmatter.planningStatus = 'completed';
+      saveTaskFile(task);
+    }
+
     // Broadcast to subscribers
     broadcastToWorkspace(workspace.id, {
       type: 'task:created',
@@ -506,7 +513,8 @@ app.post('/api/workspaces/:id/tasks', async (req, res) => {
     res.json(task);
 
     // Generate plan asynchronously using the planning agent (explores codebase)
-    if (!task.frontmatter.plan && task.content) {
+    // Skip planning when requested
+    if (!request.skipPlanning && !task.frontmatter.plan && task.content) {
       planTask({
         task,
         workspaceId: workspace.id,
