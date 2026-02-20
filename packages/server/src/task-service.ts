@@ -178,6 +178,54 @@ function normalizeStringList(value: unknown): string[] {
   return value.map((item) => String(item).trim()).filter(Boolean);
 }
 
+function normalizeVisualPlanPayload(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+
+  const record = value as Record<string, unknown>;
+  const sourceSections = Array.isArray(record.sections) ? record.sections : [];
+  const sections: Array<Record<string, unknown>> = [];
+
+  for (const sourceSection of sourceSections) {
+    if (!sourceSection || typeof sourceSection !== 'object' || Array.isArray(sourceSection)) {
+      sections.push({
+        component: 'Unknown',
+        originalComponent: 'unknown',
+        reason: 'invalid-section-shape',
+      });
+      continue;
+    }
+
+    const section = sourceSection as Record<string, unknown>;
+    const component = typeof section.component === 'string' ? section.component : '';
+
+    if (component === 'ArchitectureDiff') {
+      const current = section.current as Record<string, unknown> | undefined;
+      const planned = section.planned as Record<string, unknown> | undefined;
+      const currentCode = typeof current?.code === 'string' ? current.code.trim() : '';
+      const plannedCode = typeof planned?.code === 'string' ? planned.code.trim() : '';
+
+      if (!currentCode || !plannedCode) {
+        sections.push({
+          component: 'Unknown',
+          originalComponent: component || 'ArchitectureDiff',
+          reason: 'invalid-architecture-diff',
+        });
+        continue;
+      }
+    }
+
+    sections.push(section);
+  }
+
+  if (sections.length === 0) return null;
+
+  return {
+    version: '1',
+    generatedAt: typeof record.generatedAt === 'string' && record.generatedAt ? record.generatedAt : undefined,
+    sections,
+  };
+}
+
 function buildVisualPlanFromLegacyFields(plan: {
   goal: string;
   steps: string[];
@@ -229,10 +277,10 @@ function normalizeTaskPlan(plan: unknown): TaskFrontmatter['plan'] {
   let cleanup = normalizeStringList(record.cleanup);
 
   const rawVisualPlan = record.visualPlan;
-  const hasVisualPlan = rawVisualPlan && typeof rawVisualPlan === 'object' && !Array.isArray(rawVisualPlan);
+  const normalizedVisualPlan = normalizeVisualPlanPayload(rawVisualPlan);
 
-  const visualPlan = hasVisualPlan
-    ? rawVisualPlan
+  const visualPlan = normalizedVisualPlan
+    ? normalizedVisualPlan
     : (goal || steps.length > 0 || validation.length > 0 || cleanup.length > 0)
       ? buildVisualPlanFromLegacyFields({ goal, steps, validation, cleanup, generatedAt })
       : null;

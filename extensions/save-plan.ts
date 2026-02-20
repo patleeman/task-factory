@@ -30,9 +30,39 @@ function normalizeVisualPlan(input: unknown): VisualPlan | null {
   const record = input as Record<string, unknown>;
   if (!Array.isArray(record.sections) || record.sections.length === 0) return null;
 
-  const sections = record.sections
-    .filter((section) => section && typeof section === 'object' && !Array.isArray(section))
-    .map((section) => section as Record<string, unknown>);
+  const sections: Array<Record<string, unknown>> = [];
+
+  for (const sourceSection of record.sections) {
+    if (!sourceSection || typeof sourceSection !== 'object' || Array.isArray(sourceSection)) {
+      sections.push({
+        component: 'Unknown',
+        originalComponent: 'unknown',
+        reason: 'invalid-section-shape',
+      });
+      continue;
+    }
+
+    const section = sourceSection as Record<string, unknown>;
+    const component = typeof section.component === 'string' ? section.component : '';
+
+    if (component === 'ArchitectureDiff') {
+      const current = section.current as Record<string, unknown> | undefined;
+      const planned = section.planned as Record<string, unknown> | undefined;
+      const currentCode = typeof current?.code === 'string' ? current.code.trim() : '';
+      const plannedCode = typeof planned?.code === 'string' ? planned.code.trim() : '';
+
+      if (!currentCode || !plannedCode) {
+        sections.push({
+          component: 'Unknown',
+          originalComponent: component || 'ArchitectureDiff',
+          reason: 'invalid-architecture-diff',
+        });
+        continue;
+      }
+    }
+
+    sections.push(section);
+  }
 
   if (sections.length === 0) return null;
 

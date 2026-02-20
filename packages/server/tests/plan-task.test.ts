@@ -2865,4 +2865,198 @@ describe('planTask', () => {
     expect(existsSync(task.filePath)).toBe(false);
     expect(discoverTasks(tasksDir).find((candidate) => candidate.id === task.id)).toBeUndefined();
   });
+
+  it('persists visualPlan data and emits plan_generated event on successful planning', async () => {
+    createAgentSessionMock.mockResolvedValue({
+      session: {
+        subscribe: () => () => {},
+        prompt: async () => {
+          const callback = (globalThis as any).__piFactoryPlanCallbacks?.get(task.id);
+          if (!callback) {
+            throw new Error('save_plan callback not registered');
+          }
+
+          callback({
+            acceptanceCriteria: ['Visual plan criterion one', 'Visual plan criterion two'],
+            plan: {
+              goal: 'Test visual plan persistence',
+              steps: ['Add visual plan support', 'Render visual plan sections'],
+              validation: ['Unit tests pass', 'Integration tests pass'],
+              cleanup: ['Deploy to staging', 'Monitor metrics'],
+              generatedAt: new Date().toISOString(),
+              visualPlan: {
+                version: '1',
+                sections: [
+                  {
+                    component: 'SummaryHero',
+                    problem: 'The core problem',
+                    insight: 'The key insight',
+                    outcome: 'The expected outcome',
+                  },
+                  {
+                    component: 'ArchitectureDiff',
+                    current: { label: 'Current', code: 'graph TD\nA-->B' },
+                    planned: { label: 'Planned', code: 'graph TD\nA-->C' },
+                  },
+                  {
+                    component: 'ChangeList',
+                    items: [
+                      { area: 'Server', change: 'Add visual plan support' },
+                      { area: 'Client', change: 'Render visual plan sections' },
+                    ],
+                  },
+                  {
+                    component: 'ValidationPlan',
+                    checks: ['Unit tests pass', 'Integration tests pass'],
+                  },
+                  {
+                    component: 'NextSteps',
+                    items: ['Deploy to staging', 'Monitor metrics'],
+                  },
+                ],
+              },
+            },
+          });
+        },
+        abort: async () => {},
+      },
+    });
+
+    const workspacePath = mkdtempSync(join(tmpdir(), 'pi-factory-plan-task-'));
+    tempDirs.push(workspacePath);
+
+    const tasksDir = join(workspacePath, '.pi', 'tasks');
+    mkdirSync(tasksDir, { recursive: true });
+
+    const { createTask, parseTaskFile } = await import('../src/task-service.js');
+    const { planTask } = await import('../src/agent-execution-service.js');
+
+    const task = createTask(workspacePath, tasksDir, {
+      content: 'Test visual plan persistence in planning flow',
+      acceptanceCriteria: [],
+    });
+
+    const broadcasts: any[] = [];
+    const result = await planTask({
+      task,
+      workspaceId: 'workspace-test',
+      workspacePath,
+      broadcastToWorkspace: (event: any) => broadcasts.push(event),
+    });
+
+    // Verify result contains visualPlan
+    expect(result).not.toBeNull();
+    expect(result?.visualPlan).toBeDefined();
+    expect(result?.visualPlan?.version).toBe('1');
+    expect(result?.visualPlan?.sections).toHaveLength(5);
+
+    // Verify task has planningStatus completed
+    expect(task.frontmatter.planningStatus).toBe('completed');
+
+    // Verify persisted task contains visualPlan
+    const persistedTask = parseTaskFile(task.filePath);
+    expect(persistedTask.frontmatter.plan).toBeDefined();
+    expect(persistedTask.frontmatter.plan?.visualPlan).toBeDefined();
+    expect(persistedTask.frontmatter.plan?.visualPlan?.sections).toHaveLength(5);
+    expect(persistedTask.frontmatter.planningStatus).toBe('completed');
+
+    // Verify task:plan_generated event was emitted with visualPlan
+    const planGeneratedEvents = broadcasts.filter((event) => event.type === 'task:plan_generated');
+    expect(planGeneratedEvents).toHaveLength(1);
+    expect(planGeneratedEvents[0].taskId).toBe(task.id);
+    expect(planGeneratedEvents[0].plan).toBeDefined();
+    expect(planGeneratedEvents[0].plan.visualPlan).toBeDefined();
+    expect(planGeneratedEvents[0].plan.visualPlan.sections).toHaveLength(5);
+
+    // Verify task:updated event was emitted
+    const updateEvents = broadcasts.filter((event) => event.type === 'task:updated');
+    expect(updateEvents.length).toBeGreaterThan(0);
+
+    // Verify status events show completed
+    const statusEvents = broadcasts.filter((event) => event.type === 'agent:execution_status');
+    expect(statusEvents.at(-1)).toMatchObject({
+      taskId: task.id,
+      status: 'completed',
+    });
+  });
+
+  it('preserves visualPlan sections through normalization and persistence cycle', async () => {
+    createAgentSessionMock.mockResolvedValue({
+      session: {
+        subscribe: () => () => {},
+        prompt: async () => {
+          const callback = (globalThis as any).__piFactoryPlanCallbacks?.get(task.id);
+          if (!callback) {
+            throw new Error('save_plan callback not registered');
+          }
+
+          callback({
+            acceptanceCriteria: ['Test normalization'],
+            plan: {
+              goal: 'Test normalization',
+              steps: ['Step'],
+              validation: ['Validate'],
+              cleanup: [],
+              generatedAt: new Date().toISOString(),
+              visualPlan: {
+                version: '1',
+                sections: [
+                  { component: 'SummaryHero', problem: 'P', insight: 'I', outcome: 'O' },
+                  { component: 'ImpactStats', stats: [{ label: 'Files', value: '10' }] },
+                  { component: 'Risks', items: [{ risk: 'Risk', severity: 'high', mitigation: 'Mitigate' }] },
+                  { component: 'OpenQuestions', items: [{ question: 'Q1' }] },
+                  { component: 'DecisionLog', entries: [{ decision: 'D1', rationale: 'R1' }] },
+                  { component: 'FutureWork', items: ['Future item'] },
+                  // Invalid section that should be normalized to Unknown
+                  {
+                    component: 'ArchitectureDiff',
+                    current: { label: 'Current', code: '' },
+                    planned: { label: 'Planned', code: 'valid' },
+                  },
+                ],
+              },
+            },
+          });
+        },
+        abort: async () => {},
+      },
+    });
+
+    const workspacePath = mkdtempSync(join(tmpdir(), 'pi-factory-plan-task-'));
+    tempDirs.push(workspacePath);
+
+    const tasksDir = join(workspacePath, '.pi', 'tasks');
+    mkdirSync(tasksDir, { recursive: true });
+
+    const { createTask, parseTaskFile } = await import('../src/task-service.js');
+    const { planTask } = await import('../src/agent-execution-service.js');
+
+    const task = createTask(workspacePath, tasksDir, {
+      content: 'Test visual plan normalization cycle',
+      acceptanceCriteria: [],
+    });
+
+    const result = await planTask({
+      task,
+      workspaceId: 'workspace-test',
+      workspacePath,
+      broadcastToWorkspace: () => {},
+    });
+
+    expect(result).not.toBeNull();
+
+    const persistedTask = parseTaskFile(task.filePath);
+    const sections = persistedTask.frontmatter.plan?.visualPlan?.sections;
+
+    expect(sections).toHaveLength(7);
+    expect(sections?.[0]?.component).toBe('SummaryHero');
+    expect(sections?.[1]?.component).toBe('ImpactStats');
+    expect(sections?.[2]?.component).toBe('Risks');
+    expect(sections?.[3]?.component).toBe('OpenQuestions');
+    expect(sections?.[4]?.component).toBe('DecisionLog');
+    expect(sections?.[5]?.component).toBe('FutureWork');
+    // Invalid ArchitectureDiff should be normalized to Unknown
+    expect(sections?.[6]?.component).toBe('Unknown');
+    expect(sections?.[6]?.originalComponent).toBe('ArchitectureDiff');
+  });
 });

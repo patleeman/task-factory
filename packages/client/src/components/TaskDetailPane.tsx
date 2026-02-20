@@ -1423,6 +1423,14 @@ function isLikelyMermaidDiagram(code: string): boolean {
   )
 }
 
+function safeString(value: unknown, fallback = ''): string {
+  return typeof value === 'string' ? value : fallback
+}
+
+function safeArray<T = unknown>(value: unknown): T[] {
+  return Array.isArray(value) ? (value as T[]) : []
+}
+
 function MermaidDiagramPanel({ title, code }: { title: string; code: string }) {
   if (!isLikelyMermaidDiagram(code)) {
     return (
@@ -1454,79 +1462,93 @@ function renderVisualPlanSection(section: any, index: number) {
           <p className="text-sm text-slate-700"><span className="font-semibold">Outcome:</span> {section.outcome}</p>
         </div>
       )
-    case 'ImpactStats':
+    case 'ImpactStats': {
+      const stats = safeArray<any>(section.stats)
       return (
         <div key={sectionKey}>
           <h4 className="text-xs font-semibold text-slate-600 mb-1">{section.title || 'Impact'}</h4>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {section.stats.map((stat: any, statIndex: number) => (
+            {stats.map((stat: any, statIndex: number) => (
               <div key={`${sectionKey}-stat-${statIndex}`} className="rounded border border-slate-200 bg-white p-2">
-                <div className="text-[11px] text-slate-500 uppercase tracking-wide">{stat.label}</div>
-                <div className="text-sm font-semibold text-slate-800">{stat.value}</div>
-                {stat.detail && <div className="text-xs text-slate-600">{stat.detail}</div>}
+                <div className="text-[11px] text-slate-500 uppercase tracking-wide">{safeString(stat?.label, 'Stat')}</div>
+                <div className="text-sm font-semibold text-slate-800">{safeString(stat?.value)}</div>
+                {safeString(stat?.detail) && <div className="text-xs text-slate-600">{safeString(stat?.detail)}</div>}
               </div>
             ))}
           </div>
         </div>
       )
-    case 'ArchitectureDiff':
+    }
+    case 'ArchitectureDiff': {
+      const current = (section.current && typeof section.current === 'object') ? section.current as Record<string, unknown> : {}
+      const planned = (section.planned && typeof section.planned === 'object') ? section.planned as Record<string, unknown> : {}
+      const notes = safeArray<string>(section.notes)
+
       return (
         <div key={sectionKey}>
           <h4 className="text-xs font-semibold text-slate-600 mb-1">{section.title || 'Architecture Diff'}</h4>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
-            <MermaidDiagramPanel title={section.current.label || 'Current'} code={section.current.code} />
-            <MermaidDiagramPanel title={section.planned.label || 'Planned'} code={section.planned.code} />
+            <MermaidDiagramPanel title={safeString(current.label, 'Current')} code={safeString(current.code)} />
+            <MermaidDiagramPanel title={safeString(planned.label, 'Planned')} code={safeString(planned.code)} />
           </div>
-          {section.notes && section.notes.length > 0 && (
+          {notes.length > 0 && (
             <ul className="mt-2 space-y-1 text-sm text-slate-700">
-              {section.notes.map((note: string, noteIndex: number) => <li key={`${sectionKey}-note-${noteIndex}`}>• {note}</li>)}
+              {notes.map((note: string, noteIndex: number) => <li key={`${sectionKey}-note-${noteIndex}`}>• {note}</li>)}
             </ul>
           )}
         </div>
       )
-    case 'ChangeList':
+    }
+    case 'ChangeList': {
+      const items = safeArray<any>(section.items)
       return (
         <div key={sectionKey}>
           <h4 className="text-xs font-semibold text-slate-600 mb-1">{section.title || 'Changes'}</h4>
           <ul className="space-y-1.5 text-sm text-slate-700">
-            {section.items.map((item: any, itemIndex: number) => (
+            {items.map((item: any, itemIndex: number) => (
               <li key={`${sectionKey}-item-${itemIndex}`}>
-                <span className="font-semibold">{item.area}:</span> {item.change}{item.rationale ? ` (${item.rationale})` : ''}
+                <span className="font-semibold">{safeString(item?.area, 'Area')}:</span> {safeString(item?.change)}{safeString(item?.rationale) ? ` (${safeString(item?.rationale)})` : ''}
               </li>
             ))}
           </ul>
         </div>
       )
-    case 'Risks':
+    }
+    case 'Risks': {
+      const items = safeArray<any>(section.items)
       return (
         <div key={sectionKey}>
           <h4 className="text-xs font-semibold text-slate-600 mb-1">{section.title || 'Risks'}</h4>
           <ul className="space-y-1.5 text-sm text-slate-700">
-            {section.items.map((item: any, itemIndex: number) => (
+            {items.map((item: any, itemIndex: number) => (
               <li key={`${sectionKey}-risk-${itemIndex}`}>
-                <span className="font-semibold">[{item.severity.toUpperCase()}]</span> {item.risk} — {item.mitigation}
+                <span className="font-semibold">[{safeString(item?.severity, 'unknown').toUpperCase()}]</span> {safeString(item?.risk)} — {safeString(item?.mitigation)}
               </li>
             ))}
           </ul>
         </div>
       )
-    case 'OpenQuestions':
+    }
+    case 'OpenQuestions': {
+      const items = safeArray<any>(section.items)
       return (
         <div key={sectionKey}>
           <h4 className="text-xs font-semibold text-slate-600 mb-1">{section.title || 'Open Questions'}</h4>
           <ul className="space-y-1.5 text-sm text-slate-700">
-            {section.items.map((item: any, itemIndex: number) => (
-              <li key={`${sectionKey}-question-${itemIndex}`}>{item.question}</li>
+            {items.map((item: any, itemIndex: number) => (
+              <li key={`${sectionKey}-question-${itemIndex}`}>{safeString(item?.question)}</li>
             ))}
           </ul>
         </div>
       )
-    case 'ValidationPlan':
+    }
+    case 'ValidationPlan': {
+      const checks = safeArray<string>(section.checks)
       return (
         <div key={sectionKey}>
           <h4 className="text-xs font-semibold text-slate-600 mb-1">{section.title || 'Validation'}</h4>
           <ul className="space-y-1.5">
-            {section.checks.map((check: string, checkIndex: number) => (
+            {checks.map((check: string, checkIndex: number) => (
               <li key={`${sectionKey}-check-${checkIndex}`} className="flex items-start gap-2 text-sm text-slate-700">
                 <span className="text-green-500 shrink-0 mt-0.5"><AppIcon icon={Check} size="xs" /></span>
                 {check}
@@ -1535,31 +1557,36 @@ function renderVisualPlanSection(section: any, index: number) {
           </ul>
         </div>
       )
-    case 'DecisionLog':
+    }
+    case 'DecisionLog': {
+      const entries = safeArray<any>(section.entries)
       return (
         <div key={sectionKey}>
           <h4 className="text-xs font-semibold text-slate-600 mb-1">{section.title || 'Decision Log'}</h4>
           <ul className="space-y-1.5 text-sm text-slate-700">
-            {section.entries.map((entry: any, entryIndex: number) => (
+            {entries.map((entry: any, entryIndex: number) => (
               <li key={`${sectionKey}-decision-${entryIndex}`}>
-                <span className="font-semibold">{entry.decision}</span> — {entry.rationale}
+                <span className="font-semibold">{safeString(entry?.decision)}</span> — {safeString(entry?.rationale)}
               </li>
             ))}
           </ul>
         </div>
       )
+    }
     case 'NextSteps':
-    case 'FutureWork':
+    case 'FutureWork': {
+      const items = safeArray<any>(section.items)
       return (
         <div key={sectionKey}>
           <h4 className="text-xs font-semibold text-slate-600 mb-1">{section.title || (section.component === 'NextSteps' ? 'Next Steps' : 'Future Work')}</h4>
           <ul className="space-y-1.5 text-sm text-slate-700">
-            {section.items.map((item: any, itemIndex: number) => (
-              <li key={`${sectionKey}-next-${itemIndex}`}>— {item}</li>
+            {items.map((item: any, itemIndex: number) => (
+              <li key={`${sectionKey}-next-${itemIndex}`}>— {String(item ?? '')}</li>
             ))}
           </ul>
         </div>
       )
+    }
     case 'Unknown':
       return (
         <div key={sectionKey} className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-700">
