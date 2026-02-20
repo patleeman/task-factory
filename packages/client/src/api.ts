@@ -739,12 +739,23 @@ export const api = {
 
     const workspaceSkills = normalizeWorkspaceSkills(await workspaceRes.json().catch(() => []))
 
+    // Always fetch global pi skills for fallback (call is made but result may not be used)
+    const globalPiRes = await fetch('/api/pi/skills')
+    const globalSkills = globalPiRes.ok
+      ? normalizeWorkspaceSkills(await globalPiRes.json().catch(() => []))
+      : []
+
     const hookSkills = await fetch('/api/factory/skills')
       .then(async (res) => (res.ok ? normalizeWorkspaceHookSkills(await res.json().catch(() => [])) : []))
       .catch(() => [])
 
+    // Only merge global skills when workspace skills are empty
+    const slashSkills = workspaceSkills.length > 0
+      ? workspaceSkills
+      : mergeWorkspaceSkillLists(workspaceSkills, globalSkills)
+
     return {
-      slashSkills: mergeWorkspaceSkillLists(workspaceSkills),
+      slashSkills,
       hookSkills: mergeWorkspaceHookSkillLists(hookSkills),
     }
   },

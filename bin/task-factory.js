@@ -66,8 +66,8 @@ function saveCliConfig(config) {
 
 function getServerUrl() {
   const config = loadCliConfig();
-  const port = config.port || process.env.PORT || DEFAULT_PORT;
-  const host = config.host || process.env.HOST || DEFAULT_HOST;
+  const port = process.env.PORT || config.port || DEFAULT_PORT;
+  const host = process.env.HOST || config.host || DEFAULT_HOST;
   return `http://${host}:${port}`;
 }
 
@@ -341,8 +341,8 @@ async function daemonStart(options) {
   ensureTaskFactoryDir();
 
   const config = loadCliConfig();
-  const port = options.port || config.port || process.env.PORT || DEFAULT_PORT;
-  const host = options.host || config.host || process.env.HOST || DEFAULT_HOST;
+  const port = options.port || process.env.PORT || config.port || DEFAULT_PORT;
+  const host = options.host || process.env.HOST || config.host || DEFAULT_HOST;
 
   // Start daemon process
   const out = openSync(DAEMON_LOG_FILE, 'a');
@@ -351,7 +351,7 @@ async function daemonStart(options) {
   const proc = spawn(process.execPath, [serverPath], {
     detached: true,
     stdio: ['ignore', out, err],
-    env: { ...process.env, PORT: port.toString(), HOST: host },
+    env: { ...process.env, PORT: port, HOST: host },
   });
 
   proc.unref();
@@ -1466,7 +1466,7 @@ program
 
     const proc = spawn(process.execPath, [serverPath], {
       stdio: 'inherit',
-      env: { ...process.env, PORT: port.toString(), HOST: host },
+      env: { ...process.env, PORT: port, HOST: host },
     });
 
     if (options.open && host !== '0.0.0.0') {

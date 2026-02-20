@@ -80,6 +80,10 @@ export interface ModelProfile {
   executionModelConfig: ModelConfig;
   /** Legacy alias retained for compatibility with older clients. */
   modelConfig?: ModelConfig;
+  /** Optional fallback models for planning when primary is unavailable. */
+  planningFallbackModels?: ModelConfig[];
+  /** Optional fallback models for execution when primary is unavailable. */
+  executionFallbackModels?: ModelConfig[];
 }
 
 export interface TaskDefaults {
@@ -140,14 +144,23 @@ You are a planning agent. Your job is to research the codebase, generate strong 
 3. Do NOT read other task files in .taskfactory/tasks/ (or legacy .pi/tasks/). They are irrelevant to your investigation and waste your tool budget.
 4. From your investigation, produce 3-7 specific, testable acceptance criteria for this task.
 5. Then produce a plan that directly satisfies those acceptance criteria.
-6. The plan is a high-level task summary for humans. Keep it concise and easy to parse.
-7. Keep wording short and scannable: goal should be 1-2 short sentences, and each step/validation/cleanup item should be a short outcome-focused line. Avoid walls of text.
-8. Steps should be short outcome-focused summaries (usually 3-6 steps). Avoid line-level implementation details, exact file paths, and low-level function-by-function instructions.
-9. Validation items must verify the acceptance criteria and overall outcome without turning into a detailed test script.
-10. Call the \`save_plan\` tool **exactly once** with taskId "{{taskId}}", acceptanceCriteria, and a complete \`visualPlan\` payload (include goal/steps/validation/cleanup for migration compatibility).
-11. Cleanup items are post-completion tasks (pass an empty array if none needed).
-12. After calling \`save_plan\`, stop immediately. Do not run any further tools or actions.
-13. Stay within planning guardrails: at most {{maxToolCalls}} tool calls.`;
+6. Build a **composable** \`visualPlan\`: components are optional and you should select only sections that improve clarity for this task.
+7. Use these templates as guidance (not rigid rules):
+   - Feature Delivery: SummaryHero, ArchitectureDiff, ChangeList, Risks, ValidationPlan, NextSteps
+   - Bug Fix: SummaryHero, ChangeList, Risks, ValidationPlan, DecisionLog
+   - Refactor: SummaryHero, ImpactStats, ArchitectureDiff, ChangeList, Risks, FutureWork
+   - Testing Plan: SummaryHero, ImpactStats, ChangeList, ValidationPlan, OpenQuestions
+   - Migration/Rollout: SummaryHero, ArchitectureDiff, ChangeList, Risks, ValidationPlan, DecisionLog, NextSteps
+   - Research/Spike: SummaryHero, DecisionLog, OpenQuestions, Risks, NextSteps
+8. The plan is a high-level task summary for humans. Keep it concise and easy to parse.
+9. Keep wording short and scannable: goal should be 1-2 short sentences, and each step/validation/cleanup item should be a short outcome-focused line. Avoid walls of text.
+10. Steps should be short outcome-focused summaries (usually 3-6 steps). Avoid line-level implementation details, exact file paths, and low-level function-by-function instructions.
+11. Validation items must verify the acceptance criteria and overall outcome without turning into a detailed test script.
+12. Optionally set \`visualPlan.planType\` to one of: \`feature-delivery\`, \`bug-fix\`, \`refactor\`, \`testing-plan\`, \`migration-rollout\`, \`research-spike\`, or \`custom\`.
+13. Call the \`save_plan\` tool **exactly once** with taskId "{{taskId}}", acceptanceCriteria, and a complete \`visualPlan\` payload (include goal/steps/validation/cleanup for migration compatibility).
+14. Cleanup items are post-completion tasks (pass an empty array if none needed).
+15. After calling \`save_plan\`, stop immediately. Do not run any further tools or actions.
+16. Stay within planning guardrails: at most {{maxToolCalls}} tool calls.`;
 
 /**
  * Default execution prompt template.
@@ -203,10 +216,19 @@ Continue the existing planning conversation for this task. Reuse prior investiga
 3. Do NOT read other task files in .taskfactory/tasks/ (or legacy .pi/tasks/). They are irrelevant and waste your tool budget.
 4. Produce 3-7 specific, testable acceptance criteria.
 5. Produce a concise high-level plan aligned to those criteria.
-6. Keep wording short and easy to scan: goal should be 1-2 short sentences, and each step/validation/cleanup item should be one short line when possible. Avoid walls of text.
-7. Call the \`save_plan\` tool exactly once with taskId "{{taskId}}", acceptanceCriteria, and a complete \`visualPlan\` payload (include goal/steps/validation/cleanup for migration compatibility).
-8. After calling \`save_plan\`, stop immediately.
-9. Stay within planning guardrails: at most {{maxToolCalls}} tool calls.`;
+6. Build a **composable** \`visualPlan\`: components are optional and you should select only sections that improve clarity for this task.
+7. Use these templates as guidance (not rigid rules):
+   - Feature Delivery: SummaryHero, ArchitectureDiff, ChangeList, Risks, ValidationPlan, NextSteps
+   - Bug Fix: SummaryHero, ChangeList, Risks, ValidationPlan, DecisionLog
+   - Refactor: SummaryHero, ImpactStats, ArchitectureDiff, ChangeList, Risks, FutureWork
+   - Testing Plan: SummaryHero, ImpactStats, ChangeList, ValidationPlan, OpenQuestions
+   - Migration/Rollout: SummaryHero, ArchitectureDiff, ChangeList, Risks, ValidationPlan, DecisionLog, NextSteps
+   - Research/Spike: SummaryHero, DecisionLog, OpenQuestions, Risks, NextSteps
+8. Keep wording short and easy to scan: goal should be 1-2 short sentences, and each step/validation/cleanup item should be one short line when possible. Avoid walls of text.
+9. Optionally set \`visualPlan.planType\` to one of: \`feature-delivery\`, \`bug-fix\`, \`refactor\`, \`testing-plan\`, \`migration-rollout\`, \`research-spike\`, or \`custom\`.
+10. Call the \`save_plan\` tool exactly once with taskId "{{taskId}}", acceptanceCriteria, and a complete \`visualPlan\` payload (include goal/steps/validation/cleanup for migration compatibility).
+11. After calling \`save_plan\`, stop immediately.
+12. Stay within planning guardrails: at most {{maxToolCalls}} tool calls.`;
 
 /**
  * Default rework prompt template.
@@ -507,6 +529,8 @@ export interface TaskFrontmatter {
 
   // Planning lifecycle (used to recover interrupted planning after restarts)
   planningStatus?: 'running' | 'completed' | 'error';
+  // Explicit no-plan mode (task intentionally skips planning phase)
+  planningSkipped?: boolean;
 
   // Attachments (images, files)
   attachments: Attachment[];
@@ -609,8 +633,26 @@ export type VisualPlanSection =
   | FutureWorkSection
   | UnknownVisualPlanSection;
 
+export type VisualPlanTemplateType =
+  | 'feature-delivery'
+  | 'bug-fix'
+  | 'refactor'
+  | 'testing-plan'
+  | 'migration-rollout'
+  | 'research-spike'
+  | 'custom';
+
 export interface VisualPlan {
   version: '1';
+  /**
+   * Optional template hint chosen by the planning agent.
+   * This is advisory metadata, not a strict schema contract.
+   */
+  planType?: VisualPlanTemplateType;
+  /**
+   * Ordered composable sections. Components are intentionally optional:
+   * plans can include only the sections that best fit the task.
+   */
   sections: VisualPlanSection[];
   generatedAt?: string;
 }
@@ -799,8 +841,22 @@ export function normalizeVisualPlan(input: unknown): VisualPlan | null {
 
   if (sections.length === 0) return null;
 
+  const planTypeRaw = asString(record.planType);
+  const planType = [
+    'feature-delivery',
+    'bug-fix',
+    'refactor',
+    'testing-plan',
+    'migration-rollout',
+    'research-spike',
+    'custom',
+  ].includes(planTypeRaw)
+    ? planTypeRaw as VisualPlanTemplateType
+    : undefined;
+
   return {
     version: '1',
+    planType,
     sections,
     generatedAt: asString(record.generatedAt) || undefined,
   };
@@ -809,6 +865,7 @@ export function normalizeVisualPlan(input: unknown): VisualPlan | null {
 export function buildVisualPlanFromLegacyPlan(plan: Pick<TaskPlan, 'goal' | 'steps' | 'validation' | 'cleanup' | 'generatedAt'>): VisualPlan {
   return {
     version: '1',
+    planType: 'custom',
     generatedAt: plan.generatedAt,
     sections: [
       {

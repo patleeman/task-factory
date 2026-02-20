@@ -21,7 +21,8 @@ describe('create-task backlog routing regression checks', () => {
   it('does not redirect after successful task creation and keeps task-detail navigation explicit', () => {
     const handleCreateTaskBlock = getHandleCreateTaskBlock();
 
-    expect(handleCreateTaskBlock).toContain('const task = await api.createTask(createWorkspaceId, taskData)');
+    expect(handleCreateTaskBlock).toContain('const task = await api.createTask(createWorkspaceId, {');
+    expect(handleCreateTaskBlock).toContain('...taskData,');
     expect(handleCreateTaskBlock).not.toContain('navigate(workspaceRootPath)');
     expect(handleCreateTaskBlock).not.toContain('navigate(`${workspaceRootPath}/tasks/${task.id}`)');
   });

@@ -1,6 +1,6 @@
 {
   "name": "@task-factory/server",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "type": "module",
   "main": "./dist/index.js",
   "scripts": {
@@ -13,8 +13,8 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "@mariozechner/pi-ai": "^0.53.0",
-    "@mariozechner/pi-coding-agent": "^0.53.0",
+    "@mariozechner/pi-ai": "^0.54.0",
+    "@mariozechner/pi-coding-agent": "^0.54.0",
     "@task-factory/shared": "file:../shared",
     "cors": "^2.8.5",
     "express": "^4.21.2",

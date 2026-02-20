@@ -131,6 +131,31 @@ function parseModelConfig(
   return { ok: true, value: modelConfig };
 }
 
+function parseFallbackModels(
+  value: unknown,
+  fieldName: string,
+): { ok: true; value: ModelConfig[] | undefined } | { ok: false; error: string } {
+  if (value === undefined) {
+    return { ok: true, value: undefined };
+  }
+
+  if (!Array.isArray(value)) {
+    return { ok: false, error: `${fieldName} must be an array when provided` };
+  }
+
+  const normalizedFallbacks: ModelConfig[] = [];
+
+  for (let index = 0; index < value.length; index += 1) {
+    const result = parseModelConfig(value[index], `${fieldName}[${index}]`);
+    if (!result.ok) {
+      return result;
+    }
+    normalizedFallbacks.push(result.value);
+  }
+
+  return { ok: true, value: normalizedFallbacks };
+}
+
 function parseModelProfiles(
   value: unknown,
 ): { ok: true; value: ModelProfile[] | undefined } | { ok: false; error: string } {
@@ -192,14 +217,41 @@ function parseModelProfiles(
       return executionResult;
     }
 
-    normalizedProfiles.push({
+    // Parse optional fallback model arrays
+    const planningFallbackModelsResult = parseFallbackModels(
+      (rawProfile as { planningFallbackModels?: unknown }).planningFallbackModels,
+      `${fieldPrefix}.planningFallbackModels`,
+    );
+    if (!planningFallbackModelsResult.ok) {
+      return planningFallbackModelsResult;
+    }
+
+    const executionFallbackModelsResult = parseFallbackModels(
+      (rawProfile as { executionFallbackModels?: unknown }).executionFallbackModels,
+      `${fieldPrefix}.executionFallbackModels`,
+    );
+    if (!executionFallbackModelsResult.ok) {
+      return executionFallbackModelsResult;
+    }
+
+    const normalizedProfile: ModelProfile = {
       id: normalizedId,
       name: name.trim(),
       planningModelConfig: planningResult.value,
       executionModelConfig: executionResult.value,
       // Keep legacy alias aligned for backward compatibility.
       modelConfig: executionResult.value,
-    });
+    };
+
+    // Add fallback models if present and non-empty
+    if (planningFallbackModelsResult.value && planningFallbackModelsResult.value.length > 0) {
+      normalizedProfile.planningFallbackModels = planningFallbackModelsResult.value;
+    }
+    if (executionFallbackModelsResult.value && executionFallbackModelsResult.value.length > 0) {
+      normalizedProfile.executionFallbackModels = executionFallbackModelsResult.value;
+    }
+
+    normalizedProfiles.push(normalizedProfile);
   }
 
   return { ok: true, value: normalizedProfiles };
