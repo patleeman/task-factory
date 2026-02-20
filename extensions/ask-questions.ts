@@ -54,7 +54,7 @@ export default function (pi: ExtensionAPI) {
           minItems: 1,
         },
       ),
-      workspaceId: Type.Optional(Type.String({ description: 'Workspace ID for routing the question to the correct UI session' })),
+      workspaceId: Type.String({ description: 'Workspace ID for routing the question to the correct UI session (required)' }),
     }),
     async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
       const { questions, workspaceId } = params;
@@ -71,25 +71,24 @@ export default function (pi: ExtensionAPI) {
         };
       }
 
-      // Extract workspaceId from context if not provided in params
-      const effectiveWorkspaceId = workspaceId || (_ctx as { workspaceId?: string })?.workspaceId;
-      if (!effectiveWorkspaceId) {
+      // Use the provided workspaceId for routing
+      if (!workspaceId) {
         return {
           content: [{
             type: 'text' as const,
-            text: 'Q&A request failed: workspace context not available. Cannot route questions to the correct session.',
+            text: 'Q&A request failed: workspaceId is required. The tool must be called with a workspaceId parameter.',
           }],
           details: {} as Record<string, unknown>,
         };
       }
 
       // Look up the callback for the specific workspace
-      const cb = callbacks.get(effectiveWorkspaceId);
+      const cb = callbacks.get(workspaceId);
       if (!cb) {
         return {
           content: [{
             type: 'text' as const,
-            text: `Q&A request failed: no callback registered for workspace ${effectiveWorkspaceId}. The session may have been reset.`,
+            text: `Q&A request failed: no callback registered for workspace ${workspaceId}. The session may have been reset.`,
           }],
           details: {} as Record<string, unknown>,
         };
@@ -98,7 +97,7 @@ export default function (pi: ExtensionAPI) {
       try {
         // Race the QA promise against the abort signal so we don't hang
         // if the agent session is cancelled while waiting for user answers.
-        const qaPromise = cb.askQuestions(requestId, questions, effectiveWorkspaceId);
+        const qaPromise = cb.askQuestions(requestId, questions, workspaceId);
 
         const abortPromise = signal
           ? new Promise<never>((_resolve, reject) => {

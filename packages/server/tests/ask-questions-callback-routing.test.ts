@@ -11,8 +11,7 @@ beforeEach(() => {
 
 // Simulated ask_questions tool logic (extracted from extension)
 async function simulatedAskQuestionsTool(
-  params: { questions: any[]; workspaceId?: string },
-  ctx?: { workspaceId?: string }
+  params: { questions: any[]; workspaceId: string }
 ) {
   const { questions, workspaceId } = params;
   const requestId = crypto.randomUUID();
@@ -25,26 +24,25 @@ async function simulatedAskQuestionsTool(
     };
   }
 
-  // Extract workspaceId from context if not provided in params
-  const effectiveWorkspaceId = workspaceId || ctx?.workspaceId;
-  if (!effectiveWorkspaceId) {
+  // workspaceId is required for routing
+  if (!workspaceId) {
     return {
-      content: [{ type: 'text' as const, text: 'Q&A request failed: workspace context not available' }],
+      content: [{ type: 'text' as const, text: 'Q&A request failed: workspaceId is required' }],
       details: {},
     };
   }
 
   // Look up the callback for the specific workspace
-  const cb = callbacks.get(effectiveWorkspaceId);
+  const cb = callbacks.get(workspaceId);
   if (!cb) {
     return {
-      content: [{ type: 'text' as const, text: `Q&A request failed: no callback registered for workspace ${effectiveWorkspaceId}` }],
+      content: [{ type: 'text' as const, text: `Q&A request failed: no callback registered for workspace ${workspaceId}` }],
       details: {},
     };
   }
 
   try {
-    const answers = await cb.askQuestions(requestId, questions, effectiveWorkspaceId);
+    const answers = await cb.askQuestions(requestId, questions, workspaceId);
     return {
       content: [{ type: 'text' as const, text: `User answered ${answers.length} question(s)` }],
       details: {},
@@ -75,29 +73,15 @@ describe('ask_questions callback routing', () => {
     expect(result.content[0].text).toContain('User answered 1 question(s)');
   });
 
-  it('falls back to context workspaceId when not in params', async () => {
-    const workspaceAHandler = vi.fn().mockResolvedValue([{ questionId: 'q1', selectedOption: 'A' }]);
-
-    mockCallbacks.set('workspace-a', { askQuestions: workspaceAHandler });
-
-    const result = await simulatedAskQuestionsTool(
-      { questions: [{ id: 'q1', text: 'Test?', options: ['A', 'B'] }] },
-      { workspaceId: 'workspace-a' }
-    );
-
-    expect(workspaceAHandler).toHaveBeenCalledTimes(1);
-    expect(result.content[0].text).toContain('User answered 1 question(s)');
-  });
-
-  it('returns error when workspaceId is not available in params or context', async () => {
+  it('returns error when workspaceId is empty string', async () => {
     mockCallbacks.set('workspace-a', { askQuestions: vi.fn() });
 
     const result = await simulatedAskQuestionsTool({
       questions: [{ id: 'q1', text: 'Test?', options: ['A', 'B'] }],
-      // No workspaceId provided
+      workspaceId: '',
     });
 
-    expect(result.content[0].text).toContain('workspace context not available');
+    expect(result.content[0].text).toContain('workspaceId is required');
   });
 
   it('returns error when no callback is registered for the workspace', async () => {
