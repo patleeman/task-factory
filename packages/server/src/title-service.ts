@@ -3,7 +3,6 @@
 // =============================================================================
 // Uses Pi SDK to auto-generate concise task titles from description + criteria
 
-import { getModel } from '@mariozechner/pi-ai';
 import {
   AuthStorage,
   createAgentSession,
@@ -13,12 +12,40 @@ import {
   DefaultResourceLoader,
 } from '@mariozechner/pi-coding-agent';
 import { getTaskFactoryAuthPath } from './taskfactory-home.js';
+import { loadPiSettings } from './pi-integration.js';
 
 function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
   return Promise.race([
     promise,
     new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms)),
   ]);
+}
+
+/**
+ * Resolve a model for title generation using the following precedence:
+ * 1. Configured default provider/model from Pi settings
+ * 2. First available model from the registry
+ * Returns null if no model is available.
+ */
+async function resolveTitleModel(
+  modelRegistry: ModelRegistry
+): Promise<any | null> {
+  // Try configured default provider/model first
+  const piSettings = loadPiSettings();
+  if (piSettings?.defaultProvider && piSettings?.defaultModel) {
+    const configuredModel = modelRegistry.find(piSettings.defaultProvider, piSettings.defaultModel);
+    if (configuredModel) {
+      return configuredModel;
+    }
+  }
+
+  // Fall back to first available model
+  const available = await modelRegistry.getAvailable();
+  if (available.length > 0) {
+    return available[0];
+  }
+
+  return null;
 }
 
 export async function generateTitle(
@@ -38,11 +65,8 @@ ${description}${criteriaText}`;
     const authStorage = AuthStorage.create(getTaskFactoryAuthPath());
     const modelRegistry = new ModelRegistry(authStorage);
 
-    // Use a fast cheap model for title generation
-    const model =
-      getModel('anthropic', 'claude-haiku-4-5') ||
-      getModel('anthropic', 'claude-sonnet-4-20250514') ||
-      (await modelRegistry.getAvailable())[0];
+    // Use configured default model or fall back to available models
+    const model = await resolveTitleModel(modelRegistry);
 
     if (!model) {
       return fallbackTitle(description);
