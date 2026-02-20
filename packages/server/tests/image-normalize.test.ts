@@ -19,6 +19,7 @@ import {
   normalizeAttachmentImage,
   SUPPORTED_IMAGE_MIME_TYPES,
   _setResizeFnForTesting,
+  _setResizeModulePathForTesting,
   _resetResizeFnCache,
   type AttachmentImageContent,
   type ResizeImageFn,
@@ -225,6 +226,45 @@ describe('normalizeAttachmentImage', () => {
     expect(result).not.toBeNull();
     expect(result!.data).toBe(SMALL_PNG_B64);
     expect(result!.mimeType).toBe('image/jpeg');
+  });
+
+  it('loads the real resize utility path without export-path warnings', async () => {
+    _setResizeFnForTesting(null);
+    _setResizeModulePathForTesting(null);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    const result = await normalizeAttachmentImage({
+      type: 'image',
+      data: SMALL_PNG_B64,
+      mimeType: 'image/png',
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.mimeType).toBe('image/png');
+    expect(warnSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining('[ImageNormalize] Could not load resizeImage utility'),
+      expect.anything(),
+    );
+  });
+
+  it('falls back to no-op resize when utility loading fails for other reasons', async () => {
+    _setResizeFnForTesting(null);
+    _setResizeModulePathForTesting('/definitely-missing/image-resize.js');
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    const result = await normalizeAttachmentImage({
+      type: 'image',
+      data: SMALL_PNG_B64,
+      mimeType: 'image/png',
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.data).toBe(SMALL_PNG_B64);
+    expect(result!.mimeType).toBe('image/png');
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('[ImageNormalize] Could not load resizeImage utility'),
+      expect.any(Error),
+    );
   });
 
   it('returns null and logs an error when the resize function throws', async () => {

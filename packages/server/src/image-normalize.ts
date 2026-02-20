@@ -12,13 +12,13 @@
  *   image/jpeg, image/png, image/gif, image/webp
  *
  * Uses the resizeImage utility bundled with @mariozechner/pi-coding-agent.
- * That module is not re-exported from the package's public entry point, so we
- * load it at runtime via a file URL to bypass the `exports` field restriction.
+ * The utility is not publicly exported, so we resolve the package entrypoint
+ * via ESM resolution and then import the utility by absolute file URL.
  */
 
-import { createRequire } from 'module';
+import { existsSync } from 'fs';
 import { dirname, join } from 'path';
-import { pathToFileURL } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 
 // =============================================================================
 // MIME type allowlist & canonicalization
@@ -84,6 +84,58 @@ export type ResizeImageFn = (img: AttachmentImageContent) => Promise<{
 // Module-level cache so we only resolve once per server process.
 let cachedResizeFn: ResizeImageFn | null = null;
 let loadPromise: Promise<ResizeImageFn> | null = null;
+let resizeModulePathForTesting: string | null = null;
+
+function findResizeModulePathByWalkingParents(startDir: string): string | null {
+  let currentDir = startDir;
+
+  while (true) {
+    const candidate = join(
+      currentDir,
+      'node_modules',
+      '@mariozechner',
+      'pi-coding-agent',
+      'dist',
+      'utils',
+      'image-resize.js',
+    );
+
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+
+    const parentDir = dirname(currentDir);
+    if (parentDir === currentDir) {
+      return null;
+    }
+    currentDir = parentDir;
+  }
+}
+
+function resolveResizeModulePath(): string {
+  if (resizeModulePathForTesting) return resizeModulePathForTesting;
+
+  // Prefer ESM-native resolution when available.
+  try {
+    const packageEntryUrl = import.meta.resolve('@mariozechner/pi-coding-agent');
+    const packageEntryPath = fileURLToPath(packageEntryUrl);
+    const resolvedPath = join(dirname(packageEntryPath), 'utils', 'image-resize.js');
+    if (existsSync(resolvedPath)) {
+      return resolvedPath;
+    }
+  } catch {
+    // Some runners (e.g. Vitest module runner) do not support import.meta.resolve.
+    // We fall back to locating the dependency on disk.
+  }
+
+  const currentModuleDir = dirname(fileURLToPath(import.meta.url));
+  const fallbackPath = findResizeModulePathByWalkingParents(currentModuleDir);
+  if (fallbackPath) {
+    return fallbackPath;
+  }
+
+  throw new Error('Could not locate @mariozechner/pi-coding-agent/dist/utils/image-resize.js');
+}
 
 async function getResizeFn(): Promise<ResizeImageFn> {
   if (cachedResizeFn) return cachedResizeFn;
@@ -91,13 +143,7 @@ async function getResizeFn(): Promise<ResizeImageFn> {
 
   loadPromise = (async (): Promise<ResizeImageFn> => {
     try {
-      // Use createRequire so we can resolve the package's main entry path
-      // without triggering the exports-field restrictions on sub-paths.
-      const _require = createRequire(import.meta.url);
-      const mainPath = _require.resolve('@mariozechner/pi-coding-agent');
-      // Navigate from dist/index.js → dist/utils/image-resize.js
-      const imageResizePath = join(dirname(mainPath), 'utils', 'image-resize.js');
-      // File-URL import bypasses the package exports field entirely
+      const imageResizePath = resolveResizeModulePath();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const mod = await import(pathToFileURL(imageResizePath).href) as any;
       const fn: ResizeImageFn = mod.resizeImage;
@@ -172,10 +218,18 @@ export async function normalizeAttachmentImage(
 export function _resetResizeFnCache(): void {
   cachedResizeFn = null;
   loadPromise = null;
+  resizeModulePathForTesting = null;
 }
 
 /** Exposed for tests: inject a specific resize function to use instead of the real one. */
 export function _setResizeFnForTesting(fn: ResizeImageFn | null): void {
   cachedResizeFn = fn;
+  loadPromise = null;
+}
+
+/** Exposed for tests: override the resolved resize module path. */
+export function _setResizeModulePathForTesting(modulePath: string | null): void {
+  resizeModulePathForTesting = modulePath;
+  cachedResizeFn = null;
   loadPromise = null;
 }
