@@ -1438,9 +1438,18 @@ async function isPackageInstalledGlobally() {
 // CLI Setup
 // =============================================================================
 
+// Override help output to include version
+const originalHelpInformation = Command.prototype.helpInformation;
+Command.prototype.helpInformation = function(context) {
+  const help = originalHelpInformation.call(this, context);
+  const version = chalk.gray(`v${getPackageVersion()}`);
+  // Add version on its own line after the description
+  return help.replace(/^(Task Factory.+)$/m, `$1 ${version}`);
+};
+
 const program = new Command()
   .name('task-factory')
-  .description('Task Factory - TPS-inspired Agent Work Queue')
+  .description('Task Factory - Lean manufacturing for AI agent workflows')
   .version(getPackageVersion())
   .configureOutput({
     outputError: (str, write) => write(chalk.red(str)),
