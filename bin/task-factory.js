@@ -1535,6 +1535,176 @@ async function piSettingsGet() {
 }
 
 // =============================================================================
+// Settings Schema Command
+// =============================================================================
+
+const SETTINGS_SCHEMA = {
+  'theme': {
+    type: 'string',
+    description: 'UI theme ("dark" or "light")',
+    example: 'task-factory settings set theme "dark"'
+  },
+  'defaultWorkspace': {
+    type: 'string',
+    description: 'Default workspace ID to open on startup',
+    example: 'task-factory settings set defaultWorkspace "ws-abc123"'
+  },
+  'voiceInputHotkey': {
+    type: 'string',
+    description: 'Keyboard shortcut for voice input',
+    example: 'task-factory settings set voiceInputHotkey "cmd+shift+v"'
+  },
+  'taskDefaults.modelConfig.provider': {
+    type: 'string',
+    description: 'Default model provider for task execution',
+    example: 'task-factory settings set taskDefaults.modelConfig.provider "openai-codex"'
+  },
+  'taskDefaults.modelConfig.modelId': {
+    type: 'string',
+    description: 'Default model ID for task execution',
+    example: 'task-factory settings set taskDefaults.modelConfig.modelId "gpt-5.3-codex"'
+  },
+  'taskDefaults.modelConfig.thinkingLevel': {
+    type: 'string',
+    description: 'Default thinking level: off, minimal, low, medium, high, xhigh',
+    example: 'task-factory settings set taskDefaults.modelConfig.thinkingLevel "medium"'
+  },
+  'taskDefaults.planningModelConfig.provider': {
+    type: 'string',
+    description: 'Model provider for planning (acceptance criteria + plan generation)',
+    example: 'task-factory settings set taskDefaults.planningModelConfig.provider "anthropic"'
+  },
+  'taskDefaults.planningModelConfig.modelId': {
+    type: 'string',
+    description: 'Model ID for planning',
+    example: 'task-factory settings set taskDefaults.planningModelConfig.modelId "claude-sonnet-4-20250514"'
+  },
+  'taskDefaults.planningModelConfig.thinkingLevel': {
+    type: 'string',
+    description: 'Thinking level for planning: off, minimal, low, medium, high, xhigh',
+    example: 'task-factory settings set taskDefaults.planningModelConfig.thinkingLevel "xhigh"'
+  },
+  'taskDefaults.executionModelConfig.provider': {
+    type: 'string',
+    description: 'Model provider for execution/rework/chat',
+    example: 'task-factory settings set taskDefaults.executionModelConfig.provider "kimi-coding"'
+  },
+  'taskDefaults.executionModelConfig.modelId': {
+    type: 'string',
+    description: 'Model ID for execution',
+    example: 'task-factory settings set taskDefaults.executionModelConfig.modelId "k2p5"'
+  },
+  'taskDefaults.executionModelConfig.thinkingLevel': {
+    type: 'string',
+    description: 'Thinking level for execution: off, minimal, low, medium, high, xhigh',
+    example: 'task-factory settings set taskDefaults.executionModelConfig.thinkingLevel "medium"'
+  },
+  'taskDefaults.preExecutionSkills': {
+    type: 'string[]',
+    description: 'Skills to run before task execution (JSON array)',
+    example: 'task-factory settings set taskDefaults.preExecutionSkills \'["skill-name"]\''
+  },
+  'taskDefaults.postExecutionSkills': {
+    type: 'string[]',
+    description: 'Skills to run after task completion (JSON array)',
+    example: 'task-factory settings set taskDefaults.postExecutionSkills \'["checkpoint", "code-review"]\''
+  },
+  'workflowDefaults.readyLimit': {
+    type: 'number',
+    description: 'Maximum tasks in ready queue (1-100)',
+    example: 'task-factory settings set workflowDefaults.readyLimit 25'
+  },
+  'workflowDefaults.executingLimit': {
+    type: 'number',
+    description: 'Maximum concurrent executing tasks (1-20)',
+    example: 'task-factory settings set workflowDefaults.executingLimit 1'
+  },
+  'workflowDefaults.backlogToReady': {
+    type: 'boolean',
+    description: 'Auto-promote tasks from backlog to ready',
+    example: 'task-factory settings set workflowDefaults.backlogToReady false'
+  },
+  'workflowDefaults.readyToExecuting': {
+    type: 'boolean',
+    description: 'Auto-promote tasks from ready to executing',
+    example: 'task-factory settings set workflowDefaults.readyToExecuting true'
+  },
+  'planningGuardrails.timeoutMs': {
+    type: 'number',
+    description: 'Planning session timeout in milliseconds',
+    example: 'task-factory settings set planningGuardrails.timeoutMs 1800000'
+  },
+  'planningGuardrails.maxToolCalls': {
+    type: 'number',
+    description: 'Maximum tool calls per planning session',
+    example: 'task-factory settings set planningGuardrails.maxToolCalls 100'
+  }
+};
+
+async function settingsSchema() {
+  console.log(chalk.bold('\nAvailable Settings\n'));
+  console.log(chalk.gray('Use dot notation to set nested values. Run "task-factory settings get" to see current values.\n'));
+  
+  // Group by category
+  const categories = {
+    'General': ['theme', 'defaultWorkspace', 'voiceInputHotkey'],
+    'Task Defaults - Model': [
+      'taskDefaults.modelConfig.provider',
+      'taskDefaults.modelConfig.modelId',
+      'taskDefaults.modelConfig.thinkingLevel'
+    ],
+    'Task Defaults - Planning Model': [
+      'taskDefaults.planningModelConfig.provider',
+      'taskDefaults.planningModelConfig.modelId',
+      'taskDefaults.planningModelConfig.thinkingLevel'
+    ],
+    'Task Defaults - Execution Model': [
+      'taskDefaults.executionModelConfig.provider',
+      'taskDefaults.executionModelConfig.modelId',
+      'taskDefaults.executionModelConfig.thinkingLevel'
+    ],
+    'Task Defaults - Skills': [
+      'taskDefaults.preExecutionSkills',
+      'taskDefaults.postExecutionSkills'
+    ],
+    'Workflow': [
+      'workflowDefaults.readyLimit',
+      'workflowDefaults.executingLimit',
+      'workflowDefaults.backlogToReady',
+      'workflowDefaults.readyToExecuting'
+    ],
+    'Planning': [
+      'planningGuardrails.timeoutMs',
+      'planningGuardrails.maxToolCalls'
+    ]
+  };
+  
+  for (const [category, keys] of Object.entries(categories)) {
+    console.log(chalk.yellow(`${category}:`));
+    for (const key of keys) {
+      const field = SETTINGS_SCHEMA[key];
+      if (field) {
+        console.log(`  ${chalk.cyan(key)} ${chalk.gray(`(${field.type})`)}`);
+        console.log(`    ${field.description}`);
+      }
+    }
+    console.log('');
+  }
+  
+  console.log(chalk.bold('Examples:'));
+  console.log(chalk.gray('  # Set theme'));
+  console.log('  task-factory settings set theme "dark"');
+  console.log('');
+  console.log(chalk.gray('  # Set default model for execution'));
+  console.log('  task-factory settings set taskDefaults.modelConfig.provider "openai-codex"');
+  console.log('  task-factory settings set taskDefaults.modelConfig.modelId "gpt-5.3-codex"');
+  console.log('');
+  console.log(chalk.gray('  # Configure workflow automation'));
+  console.log('  task-factory settings set workflowDefaults.readyLimit 10');
+  console.log('  task-factory settings set workflowDefaults.backlogToReady true');
+}
+
+// =============================================================================
 // Auth Commands
 // =============================================================================
 
@@ -1860,6 +2030,11 @@ settingsCmd
   .command('pi')
   .description('Get Pi settings')
   .action(piSettingsGet);
+
+settingsCmd
+  .command('schema')
+  .description('Show available settings fields and types')
+  .action(settingsSchema);
 
 // Auth commands
 const authCmd = program
