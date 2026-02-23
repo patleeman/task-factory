@@ -1,6 +1,6 @@
 {
   "name": "task-factory",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "A lean manufacturing-inspired task queue system for AI agents",
   "type": "module",
   "bin": {
