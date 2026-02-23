@@ -1126,6 +1126,9 @@ async function taskUpdate(taskId, options) {
   if (options.acceptanceCriteria) {
     updateRequest.acceptanceCriteria = options.acceptanceCriteria.split(',').map(s => s.trim());
   }
+  if (options.prePlanningSkills) {
+    updateRequest.prePlanningSkills = options.prePlanningSkills.split(',').map(s => s.trim());
+  }
   if (options.preExecutionSkills) {
     updateRequest.preExecutionSkills = options.preExecutionSkills.split(',').map(s => s.trim());
   }
@@ -2282,6 +2285,7 @@ taskCmd
   .option('-c, --content <content>', 'Update content/description')
   .option('-f, --file <path>', 'Read content from file')
   .option('-a, --acceptance-criteria <criteria>', 'Comma-separated acceptance criteria')
+  .option('--pre-planning-skills <skills>', 'Comma-separated pre-planning skill IDs')
   .option('--pre-execution-skills <skills>', 'Comma-separated pre-execution skill IDs')
   .option('--post-execution-skills <skills>', 'Comma-separated post-execution skill IDs')
   .option('--model-provider <provider>', 'Set execution model provider')
