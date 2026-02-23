@@ -534,6 +534,27 @@ Get Pi settings.
 task-factory settings pi
 ```
 
+### `task-factory settings schema`
+
+Show all available settings fields with their types and descriptions.
+
+```bash
+task-factory settings schema
+```
+
+**Output includes:**
+- Setting key (with dot notation for nested values)
+- Type (string, number, boolean, string[])
+- Description of what the setting controls
+- Example commands
+
+**Categories:**
+- General (theme, defaultWorkspace, voiceInputHotkey)
+- Task Defaults - Model (modelConfig, planningModelConfig, executionModelConfig)
+- Task Defaults - Skills (preExecutionSkills, postExecutionSkills)
+- Workflow (readyLimit, executingLimit, backlogToReady, readyToExecuting)
+- Planning (timeoutMs, maxToolCalls)
+
 ---
 
 ## Model Commands
