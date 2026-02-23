@@ -1450,6 +1450,108 @@ async function isPackageInstalledGlobally() {
 }
 
 // =============================================================================
+// Stats Command
+// =============================================================================
+
+async function statsCommand() {
+  const client = new ApiClient();
+  const spinner = clack.spinner();
+  spinner.start('Gathering statistics...');
+  
+  try {
+    // Get all workspaces
+    const workspaces = await client.listWorkspaces();
+    
+    // Collect stats from all workspaces
+    const stats = {
+      total: 0,
+      byPhase: {
+        backlog: 0,
+        ready: 0,
+        executing: 0,
+        complete: 0,
+        archived: 0
+      },
+      byWorkspace: []
+    };
+    
+    for (const ws of workspaces) {
+      try {
+        const tasks = await client.listTasks(ws.id, 'all');
+        const wsStats = {
+          name: ws.name,
+          id: ws.id,
+          total: tasks.length,
+          byPhase: {
+            backlog: 0,
+            ready: 0,
+            executing: 0,
+            complete: 0,
+            archived: 0
+          }
+        };
+        
+        for (const task of tasks) {
+          const phase = task.frontmatter?.phase || 'backlog';
+          stats.total++;
+          
+          if (stats.byPhase[phase] !== undefined) {
+            stats.byPhase[phase]++;
+            wsStats.byPhase[phase]++;
+          }
+        }
+        
+        stats.byWorkspace.push(wsStats);
+      } catch {
+        // Skip workspaces with errors
+      }
+    }
+    
+    spinner.stop('Statistics gathered');
+    
+    // Output
+    console.log(chalk.bold('\n📊 Task Factory Stats\n'));
+    
+    console.log(`${chalk.bold('Total Tasks:')} ${chalk.cyan(stats.total)}`);
+    console.log();
+    
+    console.log(chalk.bold('By Phase:'));
+    const phaseColors = {
+      backlog: chalk.gray,
+      ready: chalk.blue,
+      executing: chalk.yellow,
+      complete: chalk.green,
+      archived: chalk.gray
+    };
+    
+    for (const [phase, count] of Object.entries(stats.byPhase)) {
+      const color = phaseColors[phase] || chalk.white;
+      const paddedPhase = phase.padStart(10);
+      const paddedCount = count.toString().padStart(4);
+      console.log(`  ${color(paddedPhase)}: ${chalk.cyan(paddedCount)}`);
+    }
+    
+    console.log();
+    console.log(`${chalk.bold('Active Workspaces:')} ${chalk.cyan(workspaces.length)}`);
+    console.log();
+    
+    console.log(chalk.bold('Tasks per Workspace:'));
+    for (const ws of stats.byWorkspace) {
+      const wsName = ws.name.padEnd(20);
+      const wsCount = ws.total.toString().padStart(4);
+      console.log(`  ${chalk.cyan(wsName)} ${wsCount}`);
+    }
+    console.log();
+    
+  } catch (err) {
+    spinner.stop('Failed to gather statistics');
+    if (handleConnectionError(err)) return;
+    console.error(chalk.red(`Error: ${err.message}`));
+    process.exit(1);
+  }
+}
+
+// =============================================================================
 // Settings Commands
 // =============================================================================
 
@@ -2065,6 +2167,12 @@ modelCmd
   .command('list')
   .description('List available models')
   .action(modelsList);
+
+// Stats command
+program
+  .command('stats')
+  .description('Show task statistics across all workspaces')
+  .action(statsCommand);
 
 // Update command
 program
