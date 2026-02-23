@@ -1,10 +1,9 @@
 {
-  "name": "pi-factory",
-  "version": "0.3.0",
+  "name": "task-factory",
+  "version": "0.5.0",
   "description": "A lean manufacturing-inspired task queue system for AI agents",
   "type": "module",
   "bin": {
-    "pi-factory": "./bin/pi-factory.js",
     "task-factory": "./bin/task-factory.js"
   },
   "files": [
