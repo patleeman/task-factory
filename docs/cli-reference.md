@@ -557,6 +557,45 @@ task-factory settings schema
 
 ---
 
+## Stats Command
+
+Show task statistics across all workspaces.
+
+### `task-factory stats`
+
+Display aggregated task statistics.
+
+```bash
+task-factory stats
+```
+
+**Output includes:**
+- Total task count across all workspaces
+- Phase breakdown (backlog, ready, executing, complete, archived)
+- Active workspace count
+- Tasks per workspace breakdown
+
+**Example output:**
+```
+📊 Task Factory Stats
+
+Total Tasks: 47
+
+By Phase:
+     backlog:   12
+       ready:    5
+   executing:    2
+    complete:   28
+
+Active Workspaces: 3
+
+Tasks per Workspace:
+  task-factory           15
+  familiar               32
+```
+
+---
+
 ## Model Commands
 
 Manage AI models.
