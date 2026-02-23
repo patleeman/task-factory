@@ -1133,6 +1133,41 @@ async function taskUpdate(taskId, options) {
     updateRequest.postExecutionSkills = options.postExecutionSkills.split(',').map(s => s.trim());
   }
 
+  // Handle execution model config
+  if (options.modelProvider || options.modelId || options.modelThinking) {
+    updateRequest.executionModelConfig = {
+      ...(options.modelProvider && { provider: options.modelProvider }),
+      ...(options.modelId && { modelId: options.modelId }),
+      ...(options.modelThinking && { thinkingLevel: options.modelThinking }),
+    };
+    // Also update legacy modelConfig for backward compatibility
+    updateRequest.modelConfig = { ...updateRequest.executionModelConfig };
+  }
+
+  // Handle planning model config
+  if (options.planningProvider || options.planningModelId || options.planningThinking) {
+    updateRequest.planningModelConfig = {
+      ...(options.planningProvider && { provider: options.planningProvider }),
+      ...(options.planningModelId && { modelId: options.planningModelId }),
+      ...(options.planningThinking && { thinkingLevel: options.planningThinking }),
+    };
+  }
+
+  // Handle task order (for backlog prioritization)
+  if (options.order !== undefined) {
+    updateRequest.order = parseInt(options.order, 10);
+  }
+
+  // Handle plan updates
+  if (options.planGoal || options.planSteps) {
+    const plan = {};
+    if (options.planGoal) plan.goal = options.planGoal;
+    if (options.planSteps) {
+      plan.steps = options.planSteps.split(',').map(s => s.trim()).filter(s => s);
+    }
+    updateRequest.plan = plan;
+  }
+
   if (Object.keys(updateRequest).length === 0) {
     console.error(chalk.red('Error: No fields to update. Use --title, --content, --acceptance-criteria, etc.'));
     process.exit(1);
@@ -2249,6 +2284,15 @@ taskCmd
   .option('-a, --acceptance-criteria <criteria>', 'Comma-separated acceptance criteria')
   .option('--pre-execution-skills <skills>', 'Comma-separated pre-execution skill IDs')
   .option('--post-execution-skills <skills>', 'Comma-separated post-execution skill IDs')
+  .option('--model-provider <provider>', 'Set execution model provider')
+  .option('--model-id <id>', 'Set execution model ID')
+  .option('--model-thinking <level>', 'Set execution thinking level (off/minimal/low/medium/high/xhigh)')
+  .option('--planning-provider <provider>', 'Set planning model provider')
+  .option('--planning-model-id <id>', 'Set planning model ID')
+  .option('--planning-thinking <level>', 'Set planning thinking level (off/minimal/low/medium/high/xhigh)')
+  .option('--order <n>', 'Set task order for backlog prioritization')
+  .option('--plan-goal <goal>', 'Set plan goal')
+  .option('--plan-steps <steps>', 'Set plan steps (comma-separated)')
   .action(taskUpdate);
 
 taskCmd
