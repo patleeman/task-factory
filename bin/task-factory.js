@@ -174,6 +174,23 @@ class ApiClient {
 }
 
 // =============================================================================
+// Error Handling Helper
+// =============================================================================
+
+function handleConnectionError(err) {
+  if (err.message && err.message.includes('Cannot connect to Task Factory server')) {
+    console.error(chalk.red.bold('\n✗ Server Not Running\n'));
+    console.error(chalk.yellow('The Task Factory daemon is not running.\n'));
+    console.error(chalk.gray('To start the daemon, run:\n'));
+    console.error(chalk.cyan('  task-factory daemon start\n'));
+    console.error(chalk.gray('Or start in foreground mode:\n'));
+    console.error(chalk.cyan('  task-factory start\n'));
+    process.exit(1);
+  }
+  return false; // Not a connection error
+}
+
+// =============================================================================
 // Output Formatting
 // =============================================================================
 
@@ -471,8 +488,13 @@ async function daemonStatus() {
 
 async function workspaceList() {
   const client = new ApiClient();
-  const workspaces = await client.listWorkspaces();
-  printWorkspaces(workspaces);
+  try {
+    const workspaces = await client.listWorkspaces();
+    printWorkspaces(workspaces);
+  } catch (err) {
+    if (handleConnectionError(err)) return;
+    throw err;
+  }
 }
 
 async function workspaceCreate(path, options) {
@@ -1484,6 +1506,45 @@ program
     process.on('SIGINT', () => proc.kill('SIGINT'));
     process.on('SIGTERM', () => proc.kill('SIGTERM'));
   });
+
+// Global error handling for uncaught errors
+process.on('uncaughtException', (err) => {
+  // Handle connection errors gracefully
+  if (handleConnectionError(err)) {
+    process.exit(1);
+  }
+  
+  // Handle other errors
+  console.error(chalk.red.bold('\n✗ Error:\n'));
+  console.error(chalk.red(err.message || 'An unexpected error occurred'));
+  
+  // Show stack trace only in debug mode
+  if (process.env.DEBUG) {
+    console.error(chalk.gray('\nStack trace:'));
+    console.error(err.stack);
+  }
+  
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  const err = reason instanceof Error ? reason : new Error(String(reason));
+  
+  // Handle connection errors gracefully
+  if (handleConnectionError(err)) {
+    process.exit(1);
+  }
+  
+  console.error(chalk.red.bold('\n✗ Unhandled Error:\n'));
+  console.error(chalk.red(err.message || 'An unexpected error occurred'));
+  
+  if (process.env.DEBUG) {
+    console.error(chalk.gray('\nStack trace:'));
+    console.error(err.stack);
+  }
+  
+  process.exit(1);
+});
 
 // Parse and run
 program.parse();
