@@ -36,30 +36,56 @@ export async function automationSet(
 ) {
   try {
     const settings: Record<string, unknown> = {};
-    
+
+    // Validate and set ready limit
     if (options['ready-limit'] !== undefined) {
-      settings.readyLimit = parseInt(options['ready-limit'], 10);
+      const value = parseInt(options['ready-limit'], 10);
+      if (isNaN(value) || value < 1 || value > 100) {
+        console.error(chalk.red('Error: ready-limit must be a number between 1 and 100'));
+        process.exit(1);
+      }
+      settings.readyLimit = value;
     }
+
+    // Validate and set executing limit
     if (options['executing-limit'] !== undefined) {
-      settings.executingLimit = parseInt(options['executing-limit'], 10);
+      const value = parseInt(options['executing-limit'], 10);
+      if (isNaN(value) || value < 1 || value > 20) {
+        console.error(chalk.red('Error: executing-limit must be a number between 1 and 20'));
+        process.exit(1);
+      }
+      settings.executingLimit = value;
     }
+
+    // Validate boolean options
     if (options['backlog-to-ready'] !== undefined) {
-      settings.backlogToReady = options['backlog-to-ready'] === 'true';
+      const value = options['backlog-to-ready'].toLowerCase();
+      if (value !== 'true' && value !== 'false') {
+        console.error(chalk.red('Error: backlog-to-ready must be "true" or "false"'));
+        process.exit(1);
+      }
+      settings.backlogToReady = value === 'true';
     }
+
     if (options['ready-to-executing'] !== undefined) {
-      settings.readyToExecuting = options['ready-to-executing'] === 'true';
+      const value = options['ready-to-executing'].toLowerCase();
+      if (value !== 'true' && value !== 'false') {
+        console.error(chalk.red('Error: ready-to-executing must be "true" or "false"'));
+        process.exit(1);
+      }
+      settings.readyToExecuting = value === 'true';
     }
-    
+
     if (Object.keys(settings).length === 0) {
       console.error(chalk.red('Error: No settings specified'));
       process.exit(1);
     }
-    
+
     const spinner = clack.spinner();
     spinner.start('Updating automation settings...');
-    
+
     await client.setAutomationSettings(workspaceId, settings);
-    
+
     spinner.stop('Settings updated');
     console.log(chalk.green('✓ Automation settings updated'));
   } catch (err: any) {

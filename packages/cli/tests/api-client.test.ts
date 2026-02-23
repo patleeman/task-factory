@@ -11,7 +11,8 @@ describe('ApiClient', () => {
   let client: ApiClient;
 
   beforeEach(() => {
-    client = new ApiClient(baseUrl);
+    // Use 0 retries for tests to avoid timeout issues
+    client = new ApiClient(baseUrl, 30000, 0);
     vi.resetAllMocks();
   });
 

@@ -18,9 +18,13 @@ import type {
 
 export class ApiClient {
   private baseUrl: string;
+  private timeoutMs: number;
+  private maxRetries: number;
 
-  constructor(baseUrl?: string) {
+  constructor(baseUrl?: string, timeoutMs = 30000, maxRetries = 3) {
     this.baseUrl = baseUrl || this.getServerUrl();
+    this.timeoutMs = timeoutMs;
+    this.maxRetries = maxRetries;
   }
 
   private getServerUrl(): string {
@@ -28,6 +32,62 @@ export class ApiClient {
     const port = process.env.PORT || '3000';
     const host = process.env.HOST || '127.0.0.1';
     return `http://${host}:${port}`;
+  }
+
+  private async fetchWithTimeout(
+    url: string,
+    options: RequestInit,
+    timeoutMs: number
+  ): Promise<Response> {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    
+    try {
+      const response = await fetch(url, {
+        ...options,
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      return response;
+    } catch (err) {
+      clearTimeout(timeoutId);
+      if (err instanceof Error && err.name === 'AbortError') {
+        throw new Error(`Request timeout after ${timeoutMs}ms`);
+      }
+      throw err;
+    }
+  }
+
+  private async retryWithBackoff<T>(
+    operation: () => Promise<T>,
+    retries: number
+  ): Promise<T> {
+    let lastError: Error | undefined;
+    
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        return await operation();
+      } catch (err) {
+        lastError = err instanceof Error ? err : new Error(String(err));
+        
+        // Don't retry on client errors (4xx) except 429 (rate limit)
+        const status = (err as Error & { status?: number }).status;
+        if (status && status >= 400 && status < 500 && status !== 429) {
+          throw err;
+        }
+        
+        // Don't retry on the last attempt
+        if (attempt === retries) {
+          throw err;
+        }
+        
+        // Exponential backoff: 2^attempt * 1000ms (1s, 2s, 4s)
+        const delay = Math.pow(2, attempt) * 1000;
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+    
+    throw lastError;
   }
 
   private async request<T>(
@@ -50,37 +110,47 @@ export class ApiClient {
       fetchOptions.body = body as globalThis.BodyInit;
     }
 
-    try {
-      const response = await fetch(url, fetchOptions);
-      
-      // Handle non-OK responses
-      if (!response.ok) {
-        const data = await response.json().catch(() => null) as { error?: string } | null;
-        const errorMessage = data?.error || `HTTP ${response.status}`;
-        const error = new Error(errorMessage);
-        (error as Error & { status: number }).status = response.status;
-        (error as Error & { data: unknown }).data = data;
-        throw error;
-      }
+    return this.retryWithBackoff(async () => {
+      try {
+        const response = await this.fetchWithTimeout(url, fetchOptions, this.timeoutMs);
+        
+        // Handle rate limiting (429)
+        if (response.status === 429) {
+          const retryAfter = response.headers.get('Retry-After');
+          const delay = retryAfter ? parseInt(retryAfter, 10) * 1000 : 5000;
+          await new Promise(resolve => setTimeout(resolve, delay));
+          throw new Error('Rate limited'); // Will trigger retry
+        }
+        
+        // Handle non-OK responses
+        if (!response.ok) {
+          const data = await response.json().catch(() => null) as { error?: string } | null;
+          const errorMessage = data?.error || `HTTP ${response.status}`;
+          const error = new Error(errorMessage);
+          (error as Error & { status: number }).status = response.status;
+          (error as Error & { data: unknown }).data = data;
+          throw error;
+        }
 
-      // For DELETE or empty responses
-      if (response.status === 204) {
-        return undefined as T;
-      }
+        // For DELETE or empty responses
+        if (response.status === 204) {
+          return undefined as T;
+        }
 
-      // Try to parse JSON
-      const data = await response.json().catch(() => null) as T;
-      return data;
-    } catch (err) {
-      // Re-throw API errors
-      if (err instanceof Error && 'status' in err) {
-        throw err;
+        // Try to parse JSON
+        const data = await response.json().catch(() => null) as T;
+        return data;
+      } catch (err) {
+        // Re-throw API errors
+        if (err instanceof Error && 'status' in err) {
+          throw err;
+        }
+        // Wrap network errors
+        throw new Error(
+          `Cannot connect to Task Factory server at ${this.baseUrl}. Is the daemon running?`
+        );
       }
-      // Wrap network errors
-      throw new Error(
-        `Cannot connect to Task Factory server at ${this.baseUrl}. Is the daemon running?`
-      );
-    }
+    }, this.maxRetries);
   }
 
   // ==========================================================================
@@ -285,13 +355,46 @@ export class ApiClient {
 
   async downloadAttachment(workspaceId: string, taskId: string, attachmentId: string): Promise<Blob> {
     const url = `${this.baseUrl}/api/workspaces/${encodeURIComponent(workspaceId)}/tasks/${encodeURIComponent(taskId)}/attachments/${encodeURIComponent(attachmentId)}`;
-    const response = await fetch(url, {});
-    if (!response.ok) {
-      const error = new Error(`HTTP ${response.status}`);
-      (error as Error & { status: number }).status = response.status;
-      throw error;
-    }
-    return response.blob();
+    
+    return this.retryWithBackoff(async () => {
+      const response = await this.fetchWithTimeout(url, {}, this.timeoutMs);
+      
+      if (response.status === 429) {
+        const retryAfter = response.headers.get('Retry-After');
+        const delay = retryAfter ? parseInt(retryAfter, 10) * 1000 : 5000;
+        await new Promise(resolve => setTimeout(resolve, delay));
+        throw new Error('Rate limited');
+      }
+      
+      if (!response.ok) {
+        const error = new Error(`HTTP ${response.status}`);
+        (error as Error & { status: number }).status = response.status;
+        throw error;
+      }
+      
+      // Validate content type if provided
+      const contentType = response.headers.get('Content-Type');
+      if (contentType && !this.isValidContentType(contentType)) {
+        throw new Error(`Invalid content type: ${contentType}`);
+      }
+      
+      return response.blob();
+    }, this.maxRetries);
+  }
+  
+  private isValidContentType(contentType: string): boolean {
+    // Allow common safe content types
+    const allowedTypes = [
+      'text/',
+      'application/json',
+      'application/pdf',
+      'image/',
+      'audio/',
+      'video/',
+      'application/octet-stream',
+      'multipart/form-data',
+    ];
+    return allowedTypes.some(type => contentType.includes(type));
   }
 
   async deleteAttachment(workspaceId: string, taskId: string, attachmentId: string): Promise<{ success: boolean }> {

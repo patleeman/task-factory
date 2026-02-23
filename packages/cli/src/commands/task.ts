@@ -17,12 +17,16 @@ async function findTaskWorkspace(taskId: string): Promise<{ workspaceId: string;
   for (const ws of workspaces) {
     try {
       const tasks = await client.listTasks(ws.id, 'all');
-      const task = tasks.find(t => t.id === taskId || t.id.startsWith(taskId));
+      // Require exact match or minimum 8 characters for partial match to avoid collisions
+      const task = tasks.find(t =>
+        t.id === taskId ||
+        (taskId.length >= 8 && t.id.startsWith(taskId))
+      );
       if (task) {
         return { workspaceId: ws.id, task };
       }
-    } catch {
-      // Continue to next workspace
+    } catch (err: any) {
+      console.warn(chalk.yellow(`Warning: Could not list tasks for workspace ${ws.id}: ${err.message}`));
     }
   }
   
@@ -115,29 +119,62 @@ export async function taskUpdate(
 ) {
   try {
     const found = await findTaskWorkspace(taskId);
-    
+
     if (!found) {
       console.error(chalk.red(`Task not found: ${taskId}`));
       process.exit(1);
     }
-    
+
     const update: Record<string, unknown> = {};
-    
-    if (options.title) update.title = options.title;
-    if (options.content) update.content = options.content;
+
+    // Validate title length
+    if (options.title) {
+      if (options.title.length > 200) {
+        console.error(chalk.red('Error: Title must be 200 characters or less'));
+        process.exit(1);
+      }
+      update.title = options.title;
+    }
+
+    // Validate content length
+    if (options.content) {
+      if (options.content.length > 50000) {
+        console.error(chalk.red('Error: Content must be 50000 characters or less'));
+        process.exit(1);
+      }
+      update.content = options.content;
+    }
+
     if (options.acceptanceCriteria) {
-      update.acceptanceCriteria = options.acceptanceCriteria.split(',').map(s => s.trim());
+      const criteria = options.acceptanceCriteria.split(',').map(s => s.trim()).filter(Boolean);
+      if (criteria.length > 50) {
+        console.error(chalk.red('Error: Maximum 50 acceptance criteria allowed'));
+        process.exit(1);
+      }
+      update.acceptanceCriteria = criteria;
     }
     if (options.preExecutionSkills) {
-      update.preExecutionSkills = options.preExecutionSkills.split(',').map(s => s.trim());
+      update.preExecutionSkills = options.preExecutionSkills.split(',').map(s => s.trim()).filter(Boolean);
     }
     if (options.postExecutionSkills) {
-      update.postExecutionSkills = options.postExecutionSkills.split(',').map(s => s.trim());
+      update.postExecutionSkills = options.postExecutionSkills.split(',').map(s => s.trim()).filter(Boolean);
     }
-    
+
     if (options.file) {
-      const { readFileSync } = await import('fs');
-      const content = readFileSync(options.file, 'utf-8');
+      const { readFileSync, existsSync } = await import('fs');
+      const { resolve } = await import('path');
+      const resolvedPath = resolve(options.file);
+
+      if (!existsSync(resolvedPath)) {
+        console.error(chalk.red(`Error: File not found: ${options.file}`));
+        process.exit(1);
+      }
+
+      const content = readFileSync(resolvedPath, 'utf-8');
+      if (content.length > 50000) {
+        console.error(chalk.red('Error: File content must be 50000 characters or less'));
+        process.exit(1);
+      }
       update.content = content;
     }
     
@@ -341,28 +378,60 @@ export async function taskMessageSend(
 ) {
   try {
     const found = await findTaskWorkspace(taskId);
-    
+
     if (!found) {
       console.error(chalk.red(`Task not found: ${taskId}`));
       process.exit(1);
     }
-    
+
     let content = message;
-    
-    if (options.file) {
-      const { readFileSync } = await import('fs');
-      content = readFileSync(options.file, 'utf-8');
+
+    // Validate message length
+    if (content.length > 10000) {
+      console.error(chalk.red('Error: Message must be 10000 characters or less'));
+      process.exit(1);
     }
-    
+
+    if (options.file) {
+      const { readFileSync, existsSync } = await import('fs');
+      const { resolve } = await import('path');
+      const resolvedPath = resolve(options.file);
+
+      if (!existsSync(resolvedPath)) {
+        console.error(chalk.red(`Error: File not found: ${options.file}`));
+        process.exit(1);
+      }
+
+      content = readFileSync(resolvedPath, 'utf-8');
+      if (content.length > 10000) {
+        console.error(chalk.red('Error: File content must be 10000 characters or less'));
+        process.exit(1);
+      }
+    }
+
     // Handle attachments if provided
     let attachmentIds: string[] | undefined;
-    if (options.attachment) {
+    if (options.attachment && options.attachment.length > 0) {
+      // Validate attachment count
+      if (options.attachment.length > 10) {
+        console.error(chalk.red('Error: Maximum 10 attachments allowed'));
+        process.exit(1);
+      }
+
       // Upload attachments first
-      const { readFileSync } = await import('fs');
+      const { readFileSync, existsSync } = await import('fs');
+      const { resolve } = await import('path');
       attachmentIds = [];
-      
+
       for (const path of options.attachment) {
-        const fileContent = readFileSync(path);
+        const resolvedPath = resolve(path);
+
+        if (!existsSync(resolvedPath)) {
+          console.error(chalk.red(`Error: Attachment file not found: ${path}`));
+          process.exit(1);
+        }
+
+        const fileContent = readFileSync(resolvedPath);
         const fileName = path.split('/').pop() || 'attachment';
         const blob = new Blob([fileContent]);
         const file = new File([blob], fileName);
@@ -370,9 +439,9 @@ export async function taskMessageSend(
         attachmentIds.push(attachment.id);
       }
     }
-    
+
     await client.sendMessage(found.workspaceId, found.task.id, content, 'user', attachmentIds);
-    
+
     console.log(chalk.green(`✓ Message sent to task ${found.task.id}`));
   } catch (err: any) {
     console.error(chalk.red(`Error: ${err.message}`));

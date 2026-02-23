@@ -5,8 +5,8 @@
 import chalk from 'chalk';
 import * as clack from '@clack/prompts';
 import { ApiClient } from '../api/api-client.js';
-import { printAttachments } from '../utils/format.js';
-import { readFileSync, writeFileSync } from 'fs';
+import { printAttachments, formatBytes } from '../utils/format.js';
+import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
 
 const client = new ApiClient();
@@ -18,14 +18,37 @@ async function findTaskWorkspace(taskId: string): Promise<string | null> {
   for (const ws of workspaces) {
     try {
       const tasks = await client.listTasks(ws.id, 'all');
-      const task = tasks.find(t => t.id === taskId || t.id.startsWith(taskId));
+      // Require exact match or minimum 8 characters for partial match to avoid collisions
+      const task = tasks.find(t => 
+        t.id === taskId || 
+        (taskId.length >= 8 && t.id.startsWith(taskId))
+      );
       if (task) return ws.id;
-    } catch {
-      // Continue
+    } catch (err: any) {
+      console.warn(chalk.yellow(`Warning: Could not list tasks for workspace ${ws.id}: ${err.message}`));
     }
   }
   
   return null;
+}
+
+// Validate file path to prevent directory traversal
+function validateFilePath(filePath: string): string {
+  const resolvedPath = resolve(filePath);
+  const cwd = process.cwd();
+  
+  // Ensure resolved path is within current working directory or is an absolute path that exists
+  if (!resolvedPath.startsWith(cwd) && !existsSync(resolvedPath)) {
+    throw new Error(`Invalid file path: ${filePath}. Path must be within the current directory or an existing absolute path.`);
+  }
+  
+  // Check for path traversal attempts
+  const normalizedPath = resolve(resolvedPath);
+  if (!normalizedPath.startsWith(cwd) && !filePath.startsWith('/')) {
+    throw new Error(`Path traversal detected: ${filePath}`);
+  }
+  
+  return resolvedPath;
 }
 
 // ============================================================================
@@ -64,10 +87,19 @@ export async function attachmentUpload(taskId: string, filePath: string, options
     const spinner = clack.spinner();
     
     for (const path of files) {
-      const resolvedPath = resolve(path);
       spinner.start(`Uploading ${path}...`);
       
       try {
+        // Validate file path to prevent directory traversal
+        const resolvedPath = validateFilePath(path);
+        
+        // Check file size (10MB limit)
+        const stats = await import('fs').then(fs => fs.promises.stat(resolvedPath));
+        const maxSize = 10 * 1024 * 1024; // 10MB
+        if (stats.size > maxSize) {
+          throw new Error(`File too large: ${stats.size} bytes (max ${maxSize} bytes)`);
+        }
+        
         const fileContent = readFileSync(resolvedPath);
         const fileName = path.split('/').pop() || 'attachment';
         const blob = new Blob([fileContent]);
@@ -75,7 +107,7 @@ export async function attachmentUpload(taskId: string, filePath: string, options
         
         const attachment = await client.uploadAttachment(workspaceId, taskId, file);
         spinner.stop(`Uploaded ${path}`);
-        console.log(chalk.green(`✓ ${attachment.id}: ${attachment.name} (${attachment.size} bytes)`));
+        console.log(chalk.green(`✓ ${attachment.id}: ${attachment.name} (${formatBytes(attachment.size)})`));
       } catch (err: any) {
         spinner.stop(`Failed to upload ${path}`);
         console.error(chalk.red(`  Error: ${err.message}`));
@@ -106,6 +138,18 @@ export async function attachmentDownload(taskId: string, attachmentId: string, o
     const buffer = Buffer.from(await blob.arrayBuffer());
     
     const outputPath = options.output || attachmentId;
+    // Validate output path to prevent writing to system directories
+    if (outputPath.startsWith('/') && !outputPath.startsWith(process.cwd())) {
+      const confirmed = await clack.confirm({
+        message: `Write to absolute path ${outputPath}?`,
+        initialValue: false,
+      });
+      if (!confirmed) {
+        spinner.stop('Cancelled');
+        console.log(chalk.yellow('Download cancelled.'));
+        return;
+      }
+    }
     writeFileSync(outputPath, buffer);
     
     spinner.stop('Download complete');
