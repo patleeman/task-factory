@@ -122,6 +122,22 @@ task-factory task list -p executing
 task-factory task show TASK-XX
 ```
 
+### List Available Skills
+
+```bash
+# List factory skills (execution hooks)
+task-factory skills list
+
+# Get skill details
+task-factory skills get checkpoint
+
+# Reload skills after adding new ones
+task-factory skills reload
+
+# List Pi skills
+task-factory pi-skills list
+```
+
 ### Manage Settings
 
 ```bash
