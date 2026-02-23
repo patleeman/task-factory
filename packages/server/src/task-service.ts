@@ -219,8 +219,22 @@ function normalizeVisualPlanPayload(value: unknown): Record<string, unknown> | n
 
   if (sections.length === 0) return null;
 
+  const planTypeRaw = typeof record.planType === 'string' ? record.planType : '';
+  const planType = [
+    'feature-delivery',
+    'bug-fix',
+    'refactor',
+    'testing-plan',
+    'migration-rollout',
+    'research-spike',
+    'custom',
+  ].includes(planTypeRaw)
+    ? planTypeRaw
+    : undefined;
+
   return {
     version: '1',
+    planType,
     generatedAt: typeof record.generatedAt === 'string' && record.generatedAt ? record.generatedAt : undefined,
     sections,
   };
@@ -235,6 +249,7 @@ function buildVisualPlanFromLegacyFields(plan: {
 }): Record<string, unknown> {
   return {
     version: '1',
+    planType: 'custom',
     generatedAt: plan.generatedAt,
     sections: [
       {
@@ -524,6 +539,7 @@ export function createTask(
     order: nextOrder,
     acceptanceCriteria: normalizeAcceptanceCriteria(request.acceptanceCriteria),
     plan: normalizeTaskPlan(request.plan),
+    planningSkipped: request.skipPlanning === true ? true : undefined,
     testingInstructions: [],
     commits: [],
     attachments: [],
@@ -1013,8 +1029,14 @@ export function canMoveToPhase(task: Task, targetPhase: Phase): {
     };
   }
 
+  const hasAcceptanceCriteria = normalizeAcceptanceCriteria(task.frontmatter.acceptanceCriteria).length > 0;
+  const inferredNoPlanMode = task.frontmatter.planningStatus === 'completed'
+    && !task.frontmatter.plan
+    && !hasAcceptanceCriteria;
+  const requiresAcceptanceCriteria = task.frontmatter.planningSkipped !== true && !inferredNoPlanMode;
+
   if (targetPhase === 'ready') {
-    if (normalizeAcceptanceCriteria(task.frontmatter.acceptanceCriteria).length === 0) {
+    if (requiresAcceptanceCriteria && !hasAcceptanceCriteria) {
       return {
         allowed: false,
         reason: 'Task must have acceptance criteria before moving to Ready',
@@ -1022,10 +1044,9 @@ export function canMoveToPhase(task: Task, targetPhase: Phase): {
     }
   }
 
-  // Backlog tasks moving directly to executing must be execution-ready:
-  // they need at least one acceptance criterion so the agent has something to work toward.
+  // Backlog tasks moving directly to executing must be execution-ready unless planning was explicitly skipped.
   if (targetPhase === 'executing' && currentPhase === 'backlog') {
-    if (normalizeAcceptanceCriteria(task.frontmatter.acceptanceCriteria).length === 0) {
+    if (requiresAcceptanceCriteria && !hasAcceptanceCriteria) {
       return {
         allowed: false,
         reason: 'Task must have acceptance criteria before moving directly to Executing',

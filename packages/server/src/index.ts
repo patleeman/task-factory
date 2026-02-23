@@ -498,6 +498,7 @@ app.post('/api/workspaces/:id/tasks', async (req, res) => {
     // If skipPlanning is enabled, mark planning as completed so it won't be resumed by recovery
     if (request.skipPlanning) {
       task.frontmatter.planningStatus = 'completed';
+      task.frontmatter.planningSkipped = true;
       saveTaskFile(task);
     }
 

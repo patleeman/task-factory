@@ -8,6 +8,7 @@ describe('visual plan normalization', () => {
   it('normalizes architecture diff sections with current/planned mermaid diagrams', () => {
     const normalized = normalizeVisualPlan({
       version: '1',
+      planType: 'feature-delivery',
       sections: [
         {
           component: 'ArchitectureDiff',
@@ -18,6 +19,7 @@ describe('visual plan normalization', () => {
     });
 
     expect(normalized).not.toBeNull();
+    expect(normalized?.planType).toBe('feature-delivery');
     expect(normalized?.sections[0]).toMatchObject({
       component: 'ArchitectureDiff',
       current: { code: 'graph TD\nA-->B' },
@@ -55,6 +57,7 @@ describe('visual plan normalization', () => {
     });
 
     expect(plan).toBeDefined();
+    expect(plan?.visualPlan?.planType).toBe('custom');
     expect(plan?.visualPlan?.sections.length).toBeGreaterThan(0);
     expect(plan?.visualPlan?.sections[0]).toMatchObject({ component: 'SummaryHero' });
   });

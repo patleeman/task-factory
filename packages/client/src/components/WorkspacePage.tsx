@@ -841,7 +841,10 @@ export function WorkspacePage() {
 
     try {
       const { pendingFiles, sourceDraftId, skipPlanning, ...taskData } = data
-      const task = await api.createTask(createWorkspaceId, taskData)
+      const task = await api.createTask(createWorkspaceId, {
+        ...taskData,
+        skipPlanning,
+      })
       if (pendingFiles && pendingFiles.length > 0) {
         try {
           await api.uploadAttachments(createWorkspaceId, task.id, pendingFiles)

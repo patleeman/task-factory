@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { ArrowLeft, ArrowRight, Check, ChevronDown, ChevronRight, ExternalLink, Plus, RotateCcw, Trash2, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, ChevronDown, ChevronRight, ExternalLink, Plus, RotateCcw, Trash2, X } from 'lucide-react'
 import type {
   Task,
   Phase,
@@ -87,7 +87,9 @@ export function TaskDetailPane({
   const { frontmatter } = task
 
   // Determine which fields to highlight based on move error
+  const noPlanMode = frontmatter.planningSkipped === true
   const missingAcceptanceCriteria =
+    !noPlanMode &&
     moveError?.toLowerCase().includes('acceptance criteria') &&
     frontmatter.acceptanceCriteria.length === 0
 
@@ -289,6 +291,7 @@ export function TaskDetailPane({
           setEditedSkillConfigs={setEditedSkillConfigs}
           availableSkills={availableSkills}
           missingAcceptanceCriteria={missingAcceptanceCriteria}
+          noPlanMode={noPlanMode}
           isPlanGenerating={isPlanGenerating}
           onSaveEdit={handleSaveEdit}
           onDelete={handleDelete}
@@ -302,7 +305,7 @@ export function TaskDetailPane({
 // Details Content — shared between tabbed and side-by-side layouts
 // =============================================================================
 
-function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditing, editedTitle, setEditedTitle, editedContent, setEditedContent, editedCriteria, setEditedCriteria, editedPlanningModelConfig, setEditedPlanningModelConfig, editedExecutionModelConfig, setEditedExecutionModelConfig, selectedPrePlanningSkillIds, setSelectedPrePlanningSkillIds, selectedPreSkillIds, setSelectedPreSkillIds, selectedSkillIds, setSelectedSkillIds, editedSkillConfigs, setEditedSkillConfigs, availableSkills, missingAcceptanceCriteria, isPlanGenerating, onSaveEdit, onDelete }: any) {
+function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditing, editedTitle, setEditedTitle, editedContent, setEditedContent, editedCriteria, setEditedCriteria, editedPlanningModelConfig, setEditedPlanningModelConfig, editedExecutionModelConfig, setEditedExecutionModelConfig, selectedPrePlanningSkillIds, setSelectedPrePlanningSkillIds, selectedPreSkillIds, setSelectedPreSkillIds, selectedSkillIds, setSelectedSkillIds, editedSkillConfigs, setEditedSkillConfigs, availableSkills, missingAcceptanceCriteria, noPlanMode, isPlanGenerating, onSaveEdit, onDelete }: any) {
   const isCompleted = frontmatter.phase === 'complete' || frontmatter.phase === 'archived'
   const hasSummary = Boolean(task.frontmatter.postExecutionSummary)
   const normalizedFrontmatterCriteria = normalizeAcceptanceCriteria(frontmatter.acceptanceCriteria)
@@ -609,14 +612,14 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
       </section>
 
       {/* Section 2: Generated plan + acceptance criteria */}
-      <section className="rounded-xl border border-blue-200 bg-blue-50/40 overflow-hidden">
-        <div className="px-4 py-2.5 border-b border-blue-200 bg-blue-50/70">
+      <section className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+        <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50/50">
           <div className="flex items-center gap-2">
-            <h2 className="text-xs font-semibold text-blue-700 uppercase tracking-wide">2. Generated Plan & Acceptance Criteria</h2>
+            <h2 className="text-xs font-semibold text-slate-700 uppercase tracking-wide">2. Generated Plan & Acceptance Criteria</h2>
             <button
               type="button"
               onClick={() => setIsGeneratedSectionExpanded((prev) => !prev)}
-              className="ml-auto inline-flex items-center gap-1 rounded-md border border-blue-200 bg-white px-2 py-1 text-[11px] font-medium text-blue-700 hover:bg-blue-100"
+              className="ml-auto inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
               aria-expanded={isGeneratedSectionExpanded}
             >
               <AppIcon icon={isGeneratedSectionExpanded ? ChevronDown : ChevronRight} size="xs" />
@@ -673,14 +676,14 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
             </div>
           )}
           {frontmatter.plan && (
-            <div className="bg-blue-50 border border-blue-200 rounded-lg overflow-hidden">
-              <div className="px-4 py-3 flex items-center gap-2">
-                <h3 className="text-xs font-semibold text-blue-700 uppercase tracking-wide">Plan</h3>
-                <span className="text-[10px] text-blue-400 ml-auto">Generated {new Date(frontmatter.plan.generatedAt).toLocaleString()}</span>
+            <>
+              <div className="py-1 flex items-center gap-2">
+                <h3 className="text-xs font-semibold text-slate-700 uppercase tracking-wide">Plan Document</h3>
+                <span className="text-[10px] text-slate-500 ml-auto">Generated {new Date(frontmatter.plan.generatedAt).toLocaleString()}</span>
                 <button
                   type="button"
                   onClick={() => setIsPlanExpanded((prev) => !prev)}
-                  className="inline-flex items-center gap-1 rounded-md border border-blue-200 bg-white px-2 py-1 text-[11px] font-medium text-blue-700 hover:bg-blue-100"
+                  className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
                   aria-expanded={isPlanExpanded}
                 >
                   <AppIcon icon={isPlanExpanded ? ChevronDown : ChevronRight} size="xs" />
@@ -689,7 +692,7 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
               </div>
 
               {!isPlanExpanded && (
-                <div className="px-4 pb-3 text-sm text-slate-700">
+                <div className="pb-1 text-sm text-slate-700">
                   <span className="font-semibold text-slate-600 mr-1">Goal:</span>
                   <span>{collapsedGoalPreview || 'Plan details hidden to reduce visual noise.'}</span>
                 </div>
@@ -698,14 +701,17 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
               {isPlanExpanded && (
                 <VisualPlanPanel plan={frontmatter.plan} />
               )}
-            </div>
+            </>
           )}
 
-          <div className={missingAcceptanceCriteria ? 'rounded-lg border-2 border-red-300 bg-red-50 p-3 -mx-1' : ''}>
+          <div className={missingAcceptanceCriteria ? 'rounded-lg border-2 border-red-300 bg-red-50 p-3 -mx-1 mt-4' : 'pt-4 mt-4 border-t border-slate-200/80'}>
             <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
-              <h3 className={`text-xs font-semibold uppercase tracking-wide ${missingAcceptanceCriteria ? 'text-red-600' : 'text-slate-500'}`}>
-                {missingAcceptanceCriteria && <span className="mr-1 text-red-500">!</span>}Acceptance Criteria
-              </h3>
+              <div>
+                <h3 className={`text-xs font-semibold uppercase tracking-wide ${missingAcceptanceCriteria ? 'text-red-600' : 'text-slate-500'}`}>
+                  {missingAcceptanceCriteria && <span className="mr-1 text-red-500">!</span>}Acceptance Criteria
+                </h3>
+                <p className="mt-1 text-xs text-slate-500">If implementation is correct, these checks should all pass.</p>
+              </div>
               {!isEditing && (
                 <div className="flex flex-wrap items-center gap-2">
                   {isCriteriaEditing ? (
@@ -813,7 +819,9 @@ function DetailsContent({ task, workspaceId, frontmatter, isEditing, setIsEditin
                 ))}
               </ul>
             ) : (
-              <p className={`text-sm italic ${missingAcceptanceCriteria ? 'text-red-500 font-medium' : 'text-slate-400'}`}>No acceptance criteria defined</p>
+              <p className={`text-sm italic ${missingAcceptanceCriteria ? 'text-red-500 font-medium' : 'text-slate-400'}`}>
+                {noPlanMode ? 'Acceptance criteria skipped (no-plan mode)' : 'No acceptance criteria defined'}
+              </p>
             )}
           </div>
           </div>
@@ -1395,6 +1403,7 @@ type TaskPlanWithVisual = {
   generatedAt: string
   visualPlan?: {
     version?: string
+    planType?: string
     sections?: VisualPlanSection[]
     generatedAt?: string
   }
@@ -1432,193 +1441,293 @@ function safeArray<T = unknown>(value: unknown): T[] {
 }
 
 function MermaidDiagramPanel({ title, code }: { title: string; code: string }) {
-  if (!isLikelyMermaidDiagram(code)) {
+  const startsInvalid = !isLikelyMermaidDiagram(code)
+  const [svg, setSvg] = useState<string | null>(null)
+  const [renderError, setRenderError] = useState<string | null>(startsInvalid ? 'invalid' : null)
+
+  useEffect(() => {
+    setSvg(null)
+    setRenderError(null)
+
+    if (!isLikelyMermaidDiagram(code)) {
+      setRenderError('invalid')
+      return
+    }
+
+    let cancelled = false
+
+    void (async () => {
+      try {
+        const mermaidModule = await import('mermaid')
+        const mermaid = mermaidModule.default
+        mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'neutral' })
+
+        const diagramId = `mermaid-${Math.random().toString(36).slice(2, 10)}`
+        const result = await mermaid.render(diagramId, code)
+
+        if (!cancelled) {
+          setSvg(result.svg)
+        }
+      } catch {
+        if (!cancelled) {
+          setRenderError('render-failed')
+        }
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [code])
+
+  if (renderError === 'invalid') {
     return (
-      <div className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-700">
+      <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700">
         Invalid Mermaid diagram payload. Showing raw text fallback.
-        <pre className="mt-1 overflow-x-auto whitespace-pre-wrap rounded bg-white p-2 text-[11px] text-slate-700">{code || '(empty)'}</pre>
+        <pre className="mt-2 overflow-x-auto whitespace-pre-wrap rounded bg-white p-2 text-[11px] text-slate-700">{code || '(empty)'}</pre>
       </div>
     )
   }
 
   return (
-    <div className="rounded-md border border-slate-200 bg-white p-2">
-      <div className="mb-1 text-[11px] font-semibold text-slate-600 uppercase tracking-wide">{title}</div>
-      <pre className="overflow-x-auto whitespace-pre rounded bg-slate-50 p-2 text-[11px] text-slate-700">{code}</pre>
-    </div>
+    <figure className="space-y-2">
+      <figcaption className="text-xs font-medium uppercase tracking-wide text-slate-500">{title}</figcaption>
+      {svg ? (
+        <div
+          className="overflow-x-auto [&>svg]:h-auto [&>svg]:max-w-full"
+          dangerouslySetInnerHTML={{ __html: svg }}
+        />
+      ) : (
+        <div className="rounded bg-slate-50 p-2 text-xs text-slate-500 border border-slate-200">
+          {renderError === 'render-failed' ? 'Mermaid render failed. Showing source:' : 'Rendering Mermaid diagram...'}
+          <pre className="mt-2 overflow-x-auto whitespace-pre-wrap rounded bg-white p-2 text-[11px] text-slate-700">{code}</pre>
+        </div>
+      )}
+    </figure>
   )
 }
 
-function renderVisualPlanSection(section: any, index: number) {
-  const sectionKey = `${section.component}-${index}`
-
+function hasVisualPlanContent(section: VisualPlanSection): boolean {
   switch (section.component) {
     case 'SummaryHero':
-      return (
-        <div key={sectionKey} className="space-y-1">
-          <h4 className="text-xs font-semibold text-slate-600">{section.title || 'Summary'}</h4>
-          <p className="text-sm text-slate-700"><span className="font-semibold">Problem:</span> {section.problem}</p>
-          <p className="text-sm text-slate-700"><span className="font-semibold">Insight:</span> {section.insight}</p>
-          <p className="text-sm text-slate-700"><span className="font-semibold">Outcome:</span> {section.outcome}</p>
-        </div>
-      )
-    case 'ImpactStats': {
-      const stats = safeArray<any>(section.stats)
-      return (
-        <div key={sectionKey}>
-          <h4 className="text-xs font-semibold text-slate-600 mb-1">{section.title || 'Impact'}</h4>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {stats.map((stat: any, statIndex: number) => (
-              <div key={`${sectionKey}-stat-${statIndex}`} className="rounded border border-slate-200 bg-white p-2">
-                <div className="text-[11px] text-slate-500 uppercase tracking-wide">{safeString(stat?.label, 'Stat')}</div>
-                <div className="text-sm font-semibold text-slate-800">{safeString(stat?.value)}</div>
-                {safeString(stat?.detail) && <div className="text-xs text-slate-600">{safeString(stat?.detail)}</div>}
-              </div>
-            ))}
-          </div>
-        </div>
-      )
-    }
-    case 'ArchitectureDiff': {
-      const current = (section.current && typeof section.current === 'object') ? section.current as Record<string, unknown> : {}
-      const planned = (section.planned && typeof section.planned === 'object') ? section.planned as Record<string, unknown> : {}
-      const notes = safeArray<string>(section.notes)
-
-      return (
-        <div key={sectionKey}>
-          <h4 className="text-xs font-semibold text-slate-600 mb-1">{section.title || 'Architecture Diff'}</h4>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
-            <MermaidDiagramPanel title={safeString(current.label, 'Current')} code={safeString(current.code)} />
-            <MermaidDiagramPanel title={safeString(planned.label, 'Planned')} code={safeString(planned.code)} />
-          </div>
-          {notes.length > 0 && (
-            <ul className="mt-2 space-y-1 text-sm text-slate-700">
-              {notes.map((note: string, noteIndex: number) => <li key={`${sectionKey}-note-${noteIndex}`}>• {note}</li>)}
-            </ul>
-          )}
-        </div>
-      )
-    }
-    case 'ChangeList': {
-      const items = safeArray<any>(section.items)
-      return (
-        <div key={sectionKey}>
-          <h4 className="text-xs font-semibold text-slate-600 mb-1">{section.title || 'Changes'}</h4>
-          <ul className="space-y-1.5 text-sm text-slate-700">
-            {items.map((item: any, itemIndex: number) => (
-              <li key={`${sectionKey}-item-${itemIndex}`}>
-                <span className="font-semibold">{safeString(item?.area, 'Area')}:</span> {safeString(item?.change)}{safeString(item?.rationale) ? ` (${safeString(item?.rationale)})` : ''}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )
-    }
-    case 'Risks': {
-      const items = safeArray<any>(section.items)
-      return (
-        <div key={sectionKey}>
-          <h4 className="text-xs font-semibold text-slate-600 mb-1">{section.title || 'Risks'}</h4>
-          <ul className="space-y-1.5 text-sm text-slate-700">
-            {items.map((item: any, itemIndex: number) => (
-              <li key={`${sectionKey}-risk-${itemIndex}`}>
-                <span className="font-semibold">[{safeString(item?.severity, 'unknown').toUpperCase()}]</span> {safeString(item?.risk)} — {safeString(item?.mitigation)}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )
-    }
-    case 'OpenQuestions': {
-      const items = safeArray<any>(section.items)
-      return (
-        <div key={sectionKey}>
-          <h4 className="text-xs font-semibold text-slate-600 mb-1">{section.title || 'Open Questions'}</h4>
-          <ul className="space-y-1.5 text-sm text-slate-700">
-            {items.map((item: any, itemIndex: number) => (
-              <li key={`${sectionKey}-question-${itemIndex}`}>{safeString(item?.question)}</li>
-            ))}
-          </ul>
-        </div>
-      )
-    }
-    case 'ValidationPlan': {
-      const checks = safeArray<string>(section.checks)
-      return (
-        <div key={sectionKey}>
-          <h4 className="text-xs font-semibold text-slate-600 mb-1">{section.title || 'Validation'}</h4>
-          <ul className="space-y-1.5">
-            {checks.map((check: string, checkIndex: number) => (
-              <li key={`${sectionKey}-check-${checkIndex}`} className="flex items-start gap-2 text-sm text-slate-700">
-                <span className="text-green-500 shrink-0 mt-0.5"><AppIcon icon={Check} size="xs" /></span>
-                {check}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )
-    }
-    case 'DecisionLog': {
-      const entries = safeArray<any>(section.entries)
-      return (
-        <div key={sectionKey}>
-          <h4 className="text-xs font-semibold text-slate-600 mb-1">{section.title || 'Decision Log'}</h4>
-          <ul className="space-y-1.5 text-sm text-slate-700">
-            {entries.map((entry: any, entryIndex: number) => (
-              <li key={`${sectionKey}-decision-${entryIndex}`}>
-                <span className="font-semibold">{safeString(entry?.decision)}</span> — {safeString(entry?.rationale)}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )
-    }
+      return Boolean(safeString((section as any).problem) || safeString((section as any).insight) || safeString((section as any).outcome))
+    case 'ImpactStats':
+      return safeArray((section as any).stats).length > 0
+    case 'ArchitectureDiff':
+      return Boolean(safeString((section as any)?.current?.code) || safeString((section as any)?.planned?.code))
+    case 'ChangeList':
+    case 'Risks':
+    case 'OpenQuestions':
     case 'NextSteps':
-    case 'FutureWork': {
-      const items = safeArray<any>(section.items)
-      return (
-        <div key={sectionKey}>
-          <h4 className="text-xs font-semibold text-slate-600 mb-1">{section.title || (section.component === 'NextSteps' ? 'Next Steps' : 'Future Work')}</h4>
-          <ul className="space-y-1.5 text-sm text-slate-700">
-            {items.map((item: any, itemIndex: number) => (
-              <li key={`${sectionKey}-next-${itemIndex}`}>— {String(item ?? '')}</li>
-            ))}
-          </ul>
-        </div>
-      )
-    }
-    case 'Unknown':
-      return (
-        <div key={sectionKey} className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-700">
-          Unknown plan section "{section.originalComponent}" ({section.reason}).
-        </div>
-      )
+    case 'FutureWork':
+      return safeArray((section as any).items).length > 0
+    case 'ValidationPlan':
+      return safeArray((section as any).checks).length > 0
+    case 'DecisionLog':
+      return safeArray((section as any).entries).length > 0
     default:
-      return (
-        <div key={sectionKey} className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-700">
-          Unsupported plan section.
-        </div>
-      )
+      return true
   }
 }
 
 export function VisualPlanPanel({ plan }: { plan: TaskPlanWithVisual }) {
-  const sections = plan.visualPlan?.sections || []
+  const sections = (plan.visualPlan?.sections || []).filter((section) => hasVisualPlanContent(section))
 
-  if (sections.length === 0) {
+  const summary = sections.find((section) => section.component === 'SummaryHero') as any
+  const architectureSections = sections.filter((section) => section.component === 'ArchitectureDiff') as any[]
+  const impactSections = sections.filter((section) => section.component === 'ImpactStats') as any[]
+  const changeSections = sections.filter((section) => section.component === 'ChangeList') as any[]
+  const riskSections = sections.filter((section) => section.component === 'Risks') as any[]
+  const decisionSections = sections.filter((section) => section.component === 'DecisionLog') as any[]
+  const openQuestionSections = sections.filter((section) => section.component === 'OpenQuestions') as any[]
+  const validationSections = sections.filter((section) => section.component === 'ValidationPlan') as any[]
+  const unknownSections = sections.filter((section) => section.component === 'Unknown') as any[]
+  const nextSections = sections.filter((section) => section.component === 'NextSteps' || section.component === 'FutureWork') as any[]
+
+  const mediumLevelBullets: string[] = []
+  for (const section of impactSections) {
+    const stats = safeArray<any>(section.stats)
+    for (const stat of stats) {
+      const label = safeString(stat?.label, 'Metric')
+      const value = safeString(stat?.value)
+      const detail = safeString(stat?.detail)
+      if (value || detail) {
+        mediumLevelBullets.push(`${label}: ${value}${detail ? ` — ${detail}` : ''}`)
+      }
+    }
+  }
+  for (const section of changeSections) {
+    const items = safeArray<any>(section.items)
+    for (const item of items) {
+      const area = safeString(item?.area)
+      const change = safeString(item?.change)
+      const rationale = safeString(item?.rationale)
+      if (change) {
+        mediumLevelBullets.push(`${area ? `${area}: ` : ''}${change}${rationale ? ` (${rationale})` : ''}`)
+      }
+    }
+  }
+  for (const section of decisionSections) {
+    const entries = safeArray<any>(section.entries)
+    for (const entry of entries) {
+      const decision = safeString(entry?.decision)
+      const rationale = safeString(entry?.rationale)
+      if (decision) {
+        mediumLevelBullets.push(`Decision: ${decision}${rationale ? ` — Trade-off: ${rationale}` : ''}`)
+      }
+    }
+  }
+  for (const section of riskSections) {
+    const items = safeArray<any>(section.items)
+    for (const item of items) {
+      const risk = safeString(item?.risk)
+      const mitigation = safeString(item?.mitigation)
+      if (risk) {
+        mediumLevelBullets.push(`Risk: ${risk}${mitigation ? ` → Mitigation: ${mitigation}` : ''}`)
+      }
+    }
+  }
+  for (const section of openQuestionSections) {
+    const items = safeArray<any>(section.items)
+    for (const item of items) {
+      const question = safeString(item?.question)
+      if (question) mediumLevelBullets.push(`Open question: ${question}`)
+    }
+  }
+  for (const section of validationSections) {
+    const checks = safeArray<string>(section.checks)
+    for (const check of checks) {
+      const text = safeString(check)
+      if (text) mediumLevelBullets.push(`Validation check: ${text}`)
+    }
+  }
+
+  const implementationBullets: string[] = []
+  for (const section of nextSections) {
+    const items = safeArray<any>(section.items)
+    for (const item of items) {
+      const text = safeString(item)
+      if (text) implementationBullets.push(text)
+    }
+  }
+
+  const keyFiles = new Set<string>()
+  const pathRegex = /(?:[A-Za-z0-9._-]+\/)+[A-Za-z0-9._-]+/g
+  for (const bullet of [...mediumLevelBullets, ...implementationBullets]) {
+    const matches = bullet.match(pathRegex)
+    if (!matches) continue
+    for (const match of matches) keyFiles.add(match)
+  }
+
+  const highLevelDescription = (() => {
+    const firstArchitecture = architectureSections[0]
+    if (firstArchitecture) {
+      const notes = safeArray<string>(firstArchitecture.notes)
+      if (notes.length > 0) return notes[0]
+      const title = safeString(firstArchitecture.title)
+      if (title) return `Planned architecture change: ${title}.`
+    }
+
+    if (safeString(summary?.outcome)) return safeString(summary.outcome)
+
+    const goalPreview = summarizePlanGoal(plan.goal, 180)
+    if (goalPreview) return goalPreview
+
+    return 'We will evolve the current architecture to match the planned target while keeping behavior stable.'
+  })()
+
+  const renderLabeledText = (text: string) => {
+    const match = text.match(/^([A-Za-z][A-Za-z\s-]+):\s*(.*)$/)
+    if (!match) return text
+
+    const label = match[1]
+    const rest = match[2]
     return (
-      <div className="px-4 pb-4 pt-1 border-t border-blue-200/80 space-y-3">
-        <div>
-          <h4 className="text-xs font-semibold text-slate-600 mb-1">Goal</h4>
-          <div className="prose prose-slate prose-sm max-w-none text-slate-800"><ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{plan.goal}</ReactMarkdown></div>
-        </div>
-      </div>
+      <>
+        <span className="font-extrabold text-slate-100">{label}:</span>{rest ? ` ${rest}` : ''}
+      </>
     )
   }
 
   return (
-    <div className="px-4 pb-4 pt-1 border-t border-blue-200/80 space-y-4">
-      {sections.map((section: VisualPlanSection, index: number) => renderVisualPlanSection(section, index))}
+    <div className="px-0 pb-4 pt-3 border-t border-slate-200">
+      <div className="space-y-6 text-slate-800">
+        <section className="space-y-2 pb-4 border-b border-slate-200/70">
+          <h4 className="text-base font-semibold text-slate-900">Goal</h4>
+          {summary ? (
+            <ul className="list-disc pl-5 space-y-1.5 text-sm leading-6">
+              {safeString(summary.problem) && <li>{renderLabeledText(`Problem: ${safeString(summary.problem)}`)}</li>}
+              {safeString(summary.insight) && <li>{renderLabeledText(`Insight: ${safeString(summary.insight)}`)}</li>}
+              {safeString(summary.outcome) && <li>{renderLabeledText(`Outcome: ${safeString(summary.outcome)}`)}</li>}
+            </ul>
+          ) : (
+            <div className="prose prose-slate prose-sm max-w-none leading-relaxed"><ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{plan.goal}</ReactMarkdown></div>
+          )}
+        </section>
+
+        <section className="space-y-3 pb-4 border-b border-slate-200/70">
+          <h4 className="text-base font-semibold text-slate-900">High level</h4>
+          <p className="text-sm leading-6 text-slate-700">{highLevelDescription}</p>
+          {architectureSections.length > 0 && architectureSections.map((section, index) => {
+            const current = (section.current && typeof section.current === 'object') ? section.current as Record<string, unknown> : {}
+            const planned = (section.planned && typeof section.planned === 'object') ? section.planned as Record<string, unknown> : {}
+            const notes = safeArray<string>(section.notes)
+            return (
+              <div key={`arch-${index}`} className="space-y-2">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                  <MermaidDiagramPanel title={safeString(current.label, 'Current')} code={safeString(current.code)} />
+                  <MermaidDiagramPanel title={safeString(planned.label, 'Planned')} code={safeString(planned.code)} />
+                </div>
+                {notes.length > 0 && (
+                  <ul className="list-disc pl-5 space-y-1 text-sm leading-6 text-slate-700">
+                    {notes.map((note: string, noteIndex: number) => <li key={`arch-note-${noteIndex}`}>{note}</li>)}
+                  </ul>
+                )}
+              </div>
+            )
+          })}
+        </section>
+
+        <section className="space-y-2 pb-4 border-b border-slate-200/70">
+          <h4 className="text-base font-semibold text-slate-900">Medium level</h4>
+          {mediumLevelBullets.length > 0 ? (
+            <ul className="list-disc pl-5 space-y-1.5 text-sm leading-6">
+              {mediumLevelBullets.map((bullet, index) => <li key={`medium-${index}`}>{renderLabeledText(bullet)}</li>)}
+            </ul>
+          ) : (
+            <p className="text-sm text-slate-600">Implementation approach details were not provided for this plan.</p>
+          )}
+        </section>
+
+        <section className="space-y-2">
+          <h4 className="text-base font-semibold text-slate-900">Implementation details</h4>
+          {keyFiles.size > 0 && (
+            <div>
+              <p className="text-xs uppercase tracking-wide text-slate-500 mb-1">Key files from exploration</p>
+              <ul className="list-disc pl-5 space-y-1 text-sm leading-6">
+                {Array.from(keyFiles).map((file) => <li key={file}><code>{file}</code></li>)}
+              </ul>
+            </div>
+          )}
+          {implementationBullets.length > 0 && (
+            <ul className="list-disc pl-5 space-y-1.5 text-sm leading-6">
+              {implementationBullets.map((bullet, index) => <li key={`impl-${index}`}>{bullet}</li>)}
+            </ul>
+          )}
+          {unknownSections.length > 0 && (
+            <div className="space-y-1">
+              {unknownSections.map((section, index) => (
+                <p key={`unknown-${index}`} className="text-xs text-amber-700">
+                  Unknown plan section "{safeString(section.originalComponent)}" ({safeString(section.reason)}).
+                </p>
+              ))}
+            </div>
+          )}
+          {keyFiles.size === 0 && implementationBullets.length === 0 && unknownSections.length === 0 && (
+            <p className="text-sm text-slate-600">No implementation detail bullets provided.</p>
+          )}
+        </section>
+      </div>
     </div>
   )
 }

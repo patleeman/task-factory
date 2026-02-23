@@ -13,8 +13,18 @@
  */
 import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
+type VisualPlanTemplateType =
+  | 'feature-delivery'
+  | 'bug-fix'
+  | 'refactor'
+  | 'testing-plan'
+  | 'migration-rollout'
+  | 'research-spike'
+  | 'custom';
+
 interface VisualPlan {
   version: '1';
+  planType?: VisualPlanTemplateType;
   sections: Array<Record<string, unknown>>;
   generatedAt?: string;
 }
@@ -66,8 +76,22 @@ function normalizeVisualPlan(input: unknown): VisualPlan | null {
 
   if (sections.length === 0) return null;
 
+  const planTypeRaw = typeof record.planType === 'string' ? record.planType : '';
+  const planType = [
+    'feature-delivery',
+    'bug-fix',
+    'refactor',
+    'testing-plan',
+    'migration-rollout',
+    'research-spike',
+    'custom',
+  ].includes(planTypeRaw)
+    ? planTypeRaw as VisualPlanTemplateType
+    : undefined;
+
   return {
     version: '1',
+    planType,
     sections,
     generatedAt: typeof record.generatedAt === 'string' && record.generatedAt
       ? record.generatedAt
@@ -78,6 +102,7 @@ function normalizeVisualPlan(input: unknown): VisualPlan | null {
 function buildVisualPlanFromLegacyPlan(plan: { goal: string; steps: string[]; validation: string[]; cleanup: string[]; generatedAt: string }): VisualPlan {
   return {
     version: '1',
+    planType: 'custom',
     generatedAt: plan.generatedAt,
     sections: [
       {
@@ -165,6 +190,15 @@ export default function (pi: ExtensionAPI) {
       }),
       visualPlan: Type.Optional(Type.Object({
         version: Type.Optional(Type.String()),
+        planType: Type.Optional(Type.Union([
+          Type.Literal('feature-delivery'),
+          Type.Literal('bug-fix'),
+          Type.Literal('refactor'),
+          Type.Literal('testing-plan'),
+          Type.Literal('migration-rollout'),
+          Type.Literal('research-spike'),
+          Type.Literal('custom'),
+        ])),
         sections: Type.Array(Type.Any(), { minItems: 1 }),
         generatedAt: Type.Optional(Type.String()),
       }, {

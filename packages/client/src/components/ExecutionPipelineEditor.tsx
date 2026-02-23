@@ -25,6 +25,8 @@ interface ExecutionPipelineEditorProps {
   skillConfigs?: Record<string, Record<string, string>>
   onSkillConfigChange?: (skillConfigs: Record<string, Record<string, string>>) => void
   showSkillConfigControls?: boolean
+  enablePlanning?: boolean
+  onEnablePlanningChange?: (enablePlanning: boolean) => void
 }
 
 interface DragPayload extends SkillDragPosition {
@@ -69,6 +71,8 @@ export function ExecutionPipelineEditor({
   skillConfigs = {},
   onSkillConfigChange,
   showSkillConfigControls = true,
+  enablePlanning = true,
+  onEnablePlanningChange,
 }: ExecutionPipelineEditorProps) {
   const [selection, setSelection] = useState('')
   const [selectionLane, setSelectionLane] = useState<Lane>('pre')
@@ -551,8 +555,19 @@ export function ExecutionPipelineEditor({
       <div className="space-y-3">
         {renderLane('pre-planning')}
 
-        <div className="execution-core-divider rounded-xl border-2 border-dashed border-violet-200 px-3 text-center text-sm font-medium text-violet-600">
-          Task Planning
+        {/* Task Planning Section with integrated checkbox */}
+        <div className={`execution-core-divider rounded-xl border-2 border-dashed px-3 py-2 transition-all ${enablePlanning ? 'border-violet-200 text-violet-600' : 'border-slate-300 text-slate-600'}`}>
+          {onEnablePlanningChange && (
+            <label className="flex items-center gap-2 cursor-pointer justify-center">
+              <input
+                type="checkbox"
+                checked={enablePlanning}
+                onChange={(e) => onEnablePlanningChange(e.target.checked)}
+                className="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500"
+              />
+              <span className="text-sm font-medium">{enablePlanning ? 'Task Planning' : 'Planning Phase Skipped'}</span>
+            </label>
+          )}
         </div>
 
         {renderLane('pre')}

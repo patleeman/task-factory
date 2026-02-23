@@ -1,14 +1,11 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, existsSync, readFileSync } from 'fs';
+import { afterEach, describe, expect, it } from 'vitest';
+import { mkdtempSync, mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import type { Task } from '@task-factory/shared';
 import {
   createTask,
   discoverTasks,
   shouldResumeInterruptedPlanning,
-  saveTaskFile,
-  getTaskFilePath,
   canMoveToPhase,
 } from '../src/task-service.js';
 
@@ -33,119 +30,86 @@ function createTempWorkspace(): { workspacePath: string; tasksDir: string } {
 }
 
 describe('skipPlanning feature', () => {
-  it('creates a task without planningStatus when skipPlanning is not set', () => {
+  it('persists explicit no-plan mode flags when skipPlanning is enabled', () => {
     const { workspacePath, tasksDir } = createTempWorkspace();
 
-    const task = createTask(workspacePath, tasksDir, {
-      title: 'Task without skip',
-      content: 'This task should have no planningStatus',
-      acceptanceCriteria: ['criterion'],
-    });
-
-    // By default, planningStatus should be undefined (not set)
-    expect(task.frontmatter.planningStatus).toBeUndefined();
-    
-    // The task should be eligible for planning/resume
-    expect(shouldResumeInterruptedPlanning(task)).toBe(true);
-  });
-
-  it('creates a task with planningStatus=completed when skipPlanning is true', () => {
-    const { workspacePath, tasksDir } = createTempWorkspace();
-
-    // Create the task
     const task = createTask(workspacePath, tasksDir, {
       title: 'Task with skip planning',
-      content: 'This task should skip planning',
-      acceptanceCriteria: ['criterion'],
+      content: 'Skip planning requested',
+      skipPlanning: true,
     });
 
-    // Simulate what the server does when skipPlanning is true
-    task.frontmatter.planningStatus = 'completed';
-    saveTaskFile(task);
+    expect(task.frontmatter.planningSkipped).toBe(true);
+    expect(task.frontmatter.plan).toBeUndefined();
 
-    // Verify the persisted task has planningStatus=completed
     const persisted = discoverTasks(tasksDir).find((t) => t.id === task.id)!;
-    expect(persisted.frontmatter.planningStatus).toBe('completed');
-    
-    // The task should NOT be eligible for planning resume
-    expect(shouldResumeInterruptedPlanning(persisted)).toBe(false);
-    
-    // Verify the YAML file contains planningStatus: completed
-    const taskYaml = readFileSync(task.filePath, 'utf-8');
-    expect(taskYaml).toContain('planningStatus: completed');
+    expect(persisted.frontmatter.planningSkipped).toBe(true);
   });
 
-  it('persists skip-planning state correctly even without a plan', () => {
+  it('does not resume interrupted planning for explicit no-plan tasks', () => {
     const { workspacePath, tasksDir } = createTempWorkspace();
 
-    const task = createTask(workspacePath, tasksDir, {
-      title: 'Skip planning no plan',
-      content: 'No plan but planning skipped',
-      acceptanceCriteria: ['do something'],
+    const noPlanTask = createTask(workspacePath, tasksDir, {
+      title: 'No-plan task',
+      content: 'Skip planning',
+      skipPlanning: true,
     });
+    noPlanTask.frontmatter.planningStatus = 'completed';
 
-    // Simulate server setting planningStatus to completed when skipPlanning is true
-    task.frontmatter.planningStatus = 'completed';
-    saveTaskFile(task);
-
-    const persisted = discoverTasks(tasksDir).find((t) => t.id === task.id)!;
-    
-    // Should not have a plan
-    expect(persisted.frontmatter.plan).toBeUndefined();
-    
-    // But planningStatus should be completed to prevent recovery
-    expect(persisted.frontmatter.planningStatus).toBe('completed');
-    
-    // Should not be resumed
-    expect(shouldResumeInterruptedPlanning(persisted)).toBe(false);
-  });
-
-  it('distinguishes between skip-planning and legacy unplanned tasks', () => {
-    const { workspacePath, tasksDir } = createTempWorkspace();
-
-    // Legacy unplanned task (no planningStatus)
     const legacyTask = createTask(workspacePath, tasksDir, {
-      title: 'Legacy task',
-      content: 'Legacy unplanned task',
-      acceptanceCriteria: ['criterion'],
+      title: 'Legacy unplanned task',
+      content: 'Needs planning',
     });
 
-    // Skip-planning task (planningStatus=completed)
-    const skipTask = createTask(workspacePath, tasksDir, {
-      title: 'Skip planning task',
-      content: 'Skip planning task',
-      acceptanceCriteria: ['criterion'],
-    });
-    skipTask.frontmatter.planningStatus = 'completed';
-    saveTaskFile(skipTask);
-
-    // Legacy task should be eligible for planning resume
+    expect(shouldResumeInterruptedPlanning(noPlanTask)).toBe(false);
     expect(shouldResumeInterruptedPlanning(legacyTask)).toBe(true);
-    
-    // Skip-planning task should NOT be eligible
-    expect(shouldResumeInterruptedPlanning(skipTask)).toBe(false);
   });
 
-  it('allows moving skip-planning task to executing without planning block', () => {
+  it('allows no-plan tasks to move backlog -> ready without acceptance criteria', () => {
     const { workspacePath, tasksDir } = createTempWorkspace();
 
-    const task = createTask(workspacePath, tasksDir, {
-      title: 'Skip planning for execution',
-      content: 'Skip and execute',
-      acceptanceCriteria: ['execute this'],
+    const noPlanTask = createTask(workspacePath, tasksDir, {
+      title: 'No-plan ready transition',
+      content: 'No AC provided',
+      skipPlanning: true,
+      acceptanceCriteria: [],
     });
 
-    // Mark as skip-planning
-    task.frontmatter.planningStatus = 'completed';
-    saveTaskFile(task);
+    const result = canMoveToPhase(noPlanTask, 'ready');
+    expect(result).toEqual({ allowed: true });
+  });
 
-    const persisted = discoverTasks(tasksDir).find((t) => t.id === task.id)!;
-    
-    // Task has acceptance criteria and planning is completed (not running)
-    // so it should be able to move to executing
-    const result = canMoveToPhase(persisted, 'executing');
-    
-    // Should be allowed since planning is completed (not running)
-    expect(result.allowed).toBe(true);
+  it('allows no-plan tasks to move backlog -> executing without acceptance criteria', () => {
+    const { workspacePath, tasksDir } = createTempWorkspace();
+
+    const noPlanTask = createTask(workspacePath, tasksDir, {
+      title: 'No-plan executing transition',
+      content: 'No AC provided',
+      skipPlanning: true,
+      acceptanceCriteria: [],
+    });
+
+    const result = canMoveToPhase(noPlanTask, 'executing');
+    expect(result).toEqual({ allowed: true });
+  });
+
+  it('preserves acceptance criteria guard for normal planned tasks', () => {
+    const { workspacePath, tasksDir } = createTempWorkspace();
+
+    const normalTask = createTask(workspacePath, tasksDir, {
+      title: 'Planned task',
+      content: 'No skip planning',
+      acceptanceCriteria: [],
+    });
+
+    expect(canMoveToPhase(normalTask, 'ready')).toEqual({
+      allowed: false,
+      reason: 'Task must have acceptance criteria before moving to Ready',
+    });
+
+    expect(canMoveToPhase(normalTask, 'executing')).toEqual({
+      allowed: false,
+      reason: 'Task must have acceptance criteria before moving directly to Executing',
+    });
   });
 });
