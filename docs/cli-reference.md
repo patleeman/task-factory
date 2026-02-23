@@ -515,20 +515,26 @@ Set global setting.
 task-factory settings set <key> <value>
 ```
 
-### `task-factory settings pi-get`
+### `task-factory settings pi`
 
 Get Pi settings.
 
 ```bash
-task-factory settings pi-get
+task-factory settings pi
 ```
 
-### `task-factory settings pi-models`
+---
 
-Get available Pi models.
+## Model Commands
+
+Manage AI models.
+
+### `task-factory models list`
+
+List available models grouped by provider.
 
 ```bash
-task-factory settings pi-models
+task-factory models list
 ```
 
 ---
