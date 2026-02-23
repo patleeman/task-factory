@@ -1472,6 +1472,22 @@ async function settingsGet() {
   }
 }
 
+function setNestedValue(obj, path, value) {
+  const keys = path.split('.');
+  let current = obj;
+  
+  for (let i = 0; i < keys.length - 1; i++) {
+    const key = keys[i];
+    if (!(key in current) || typeof current[key] !== 'object') {
+      current[key] = {};
+    }
+    current = current[key];
+  }
+  
+  current[keys[keys.length - 1]] = value;
+  return obj;
+}
+
 async function settingsSet(key, value) {
   const client = new ApiClient();
   try {
@@ -1483,7 +1499,14 @@ async function settingsSet(key, value) {
       parsedValue = value;
     }
     
-    await client.updateSettings({ [key]: parsedValue });
+    // First get current settings to merge with
+    const currentSettings = await client.getSettings();
+    
+    // Build nested object from dot-notation path and merge
+    const settings = { ...currentSettings };
+    setNestedValue(settings, key, parsedValue);
+    
+    await client.updateSettings(settings);
     console.log(chalk.green(`✓ Set ${key} = ${JSON.stringify(parsedValue)}`));
   } catch (err) {
     if (handleConnectionError(err)) return;
