@@ -247,6 +247,8 @@ class ApiClient {
 
   // Activity
   getActivity(workspaceId, limit = 100) { return this.request('GET', `/api/workspaces/${workspaceId}/activity?limit=${limit}`); }
+  getTaskActivity(workspaceId, taskId, limit = 100) { return this.request('GET', `/api/workspaces/${workspaceId}/tasks/${taskId}/activity?limit=${limit}`); }
+  getTaskExecution(workspaceId, taskId) { return this.request('GET', `/api/workspaces/${workspaceId}/tasks/${taskId}/execution`); }
 
   // Settings
   getSettings() { return this.request('GET', '/api/settings'); }
@@ -1062,6 +1064,174 @@ async function taskStop(taskId) {
 
         spinner.stop('Execution stopped');
         console.log(chalk.green('✓ Task execution stopped'));
+        return;
+      }
+    } catch {
+      // continue
+    }
+  }
+
+  console.error(chalk.red(`Task not found: ${taskId}`));
+  process.exit(1);
+}
+
+// =============================================================================
+// Task Update Command
+// =============================================================================
+
+async function taskUpdate(taskId, options) {
+  if (!taskId) {
+    console.error(chalk.red('Error: Task ID is required'));
+    process.exit(1);
+  }
+
+  const client = new ApiClient();
+
+  // Find task workspace
+  const workspaces = await client.listWorkspaces();
+  let workspaceId = null;
+  let foundTask = null;
+
+  for (const ws of workspaces) {
+    try {
+      const tasks = await client.listTasks(ws.id, 'all');
+      const task = tasks.find(t => t.id === taskId || t.id.startsWith(taskId));
+      if (task) {
+        workspaceId = ws.id;
+        foundTask = task;
+        break;
+      }
+    } catch {
+      // continue
+    }
+  }
+
+  if (!foundTask) {
+    console.error(chalk.red(`Task not found: ${taskId}`));
+    process.exit(1);
+  }
+
+  const updateRequest = {};
+
+  if (options.title) updateRequest.title = options.title;
+  if (options.content) updateRequest.content = options.content;
+  if (options.acceptanceCriteria) {
+    updateRequest.acceptanceCriteria = options.acceptanceCriteria.split(',').map(s => s.trim());
+  }
+  if (options.preExecutionSkills) {
+    updateRequest.preExecutionSkills = options.preExecutionSkills.split(',').map(s => s.trim());
+  }
+  if (options.postExecutionSkills) {
+    updateRequest.postExecutionSkills = options.postExecutionSkills.split(',').map(s => s.trim());
+  }
+
+  if (Object.keys(updateRequest).length === 0) {
+    console.error(chalk.red('Error: No fields to update. Use --title, --content, --acceptance-criteria, etc.'));
+    process.exit(1);
+  }
+
+  const spinner = clack.spinner();
+  spinner.start('Updating task...');
+
+  try {
+    await client.updateTask(workspaceId, foundTask.id, updateRequest);
+    spinner.stop('Task updated');
+    console.log(chalk.green('✓ Task updated'));
+  } catch (err) {
+    spinner.stop('Failed to update task');
+    console.error(chalk.red(`Error: ${err.message}`));
+    process.exit(1);
+  }
+}
+
+// =============================================================================
+// Task Activity Command
+// =============================================================================
+
+async function taskActivity(taskId, options) {
+  if (!taskId) {
+    console.error(chalk.red('Error: Task ID is required'));
+    process.exit(1);
+  }
+
+  const client = new ApiClient();
+
+  // Find task workspace
+  const workspaces = await client.listWorkspaces();
+
+  for (const ws of workspaces) {
+    try {
+      const tasks = await client.listTasks(ws.id, 'all');
+      const task = tasks.find(t => t.id === taskId || t.id.startsWith(taskId));
+      if (task) {
+        const limit = options.limit || 50;
+        const activity = await client.getTaskActivity(ws.id, task.id, limit);
+
+        console.log(chalk.bold(`\n📋 Activity for ${task.frontmatter.title}\n`));
+
+        if (!activity || activity.length === 0) {
+          console.log(chalk.gray('No activity found.'));
+          return;
+        }
+
+        for (const entry of activity) {
+          const timestamp = new Date(entry.timestamp).toLocaleString();
+          const event = entry.event || 'unknown';
+          const message = entry.message || '';
+          console.log(`${chalk.gray(timestamp)} ${chalk.yellow(event)}: ${message}`);
+        }
+        return;
+      }
+    } catch {
+      // continue
+    }
+  }
+
+  console.error(chalk.red(`Task not found: ${taskId}`));
+  process.exit(1);
+}
+
+// =============================================================================
+// Task Conversation Command
+// =============================================================================
+
+async function taskConversation(taskId, options) {
+  if (!taskId) {
+    console.error(chalk.red('Error: Task ID is required'));
+    process.exit(1);
+  }
+
+  const client = new ApiClient();
+
+  // Find task workspace
+  const workspaces = await client.listWorkspaces();
+
+  for (const ws of workspaces) {
+    try {
+      const tasks = await client.listTasks(ws.id, 'all');
+      const task = tasks.find(t => t.id === taskId || t.id.startsWith(taskId));
+      if (task) {
+        try {
+          const execution = await client.getTaskExecution(ws.id, task.id);
+
+          console.log(chalk.bold(`\n💬 Conversation for ${task.frontmatter.title}\n`));
+
+          if (execution.output && execution.output.length > 0) {
+            console.log(chalk.gray(execution.output));
+          } else {
+            console.log(chalk.gray('No conversation output available.'));
+          }
+
+          if (options.follow) {
+            console.log(chalk.gray('\n--follow not yet implemented in CLI'));
+          }
+        } catch (err) {
+          if (err.status === 404) {
+            console.log(chalk.yellow('No active execution found for this task.'));
+          } else {
+            throw err;
+          }
+        }
         return;
       }
     } catch {
@@ -2061,6 +2231,29 @@ taskCmd
   .description('Import task from JSON file')
   .requiredOption('-w, --workspace <id>', 'Target workspace ID')
   .action(taskImport);
+
+taskCmd
+  .command('update <task-id>')
+  .description('Update task fields')
+  .option('-t, --title <title>', 'Update title')
+  .option('-c, --content <content>', 'Update content/description')
+  .option('-a, --acceptance-criteria <criteria>', 'Comma-separated acceptance criteria')
+  .option('--pre-execution-skills <skills>', 'Comma-separated pre-execution skill IDs')
+  .option('--post-execution-skills <skills>', 'Comma-separated post-execution skill IDs')
+  .action(taskUpdate);
+
+taskCmd
+  .command('activity <task-id>')
+  .description('View task activity log')
+  .option('-l, --limit <n>', 'Number of entries', parseInt, 50)
+  .action(taskActivity);
+
+taskCmd
+  .command('conversation <task-id>')
+  .alias('chat')
+  .description('View task conversation')
+  .option('-f, --follow', 'Follow in real-time (not yet implemented)')
+  .action(taskConversation);
 
 // Queue commands
 const queueCmd = program
