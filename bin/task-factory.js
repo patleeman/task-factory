@@ -247,6 +247,21 @@ class ApiClient {
 
   // Activity
   getActivity(workspaceId, limit = 100) { return this.request('GET', `/api/workspaces/${workspaceId}/activity?limit=${limit}`); }
+
+  // Settings
+  getSettings() { return this.request('GET', '/api/settings'); }
+  updateSettings(settings) { return this.request('POST', '/api/settings', settings); }
+
+  // Pi Settings
+  getPiSettings() { return this.request('GET', '/api/pi/settings'); }
+
+  // Auth
+  getAuthStatus() { return this.request('GET', '/api/pi/auth'); }
+  setApiKey(providerId, apiKey) { return this.request('PUT', `/api/pi/auth/providers/${providerId}/api-key`, { apiKey }); }
+  clearAuth(providerId) { return this.request('DELETE', `/api/pi/auth/providers/${providerId}`); }
+
+  // Models
+  getAvailableModels() { return this.request('GET', '/api/pi/available-models'); }
 }
 
 // =============================================================================
@@ -1435,6 +1450,174 @@ async function isPackageInstalledGlobally() {
 }
 
 // =============================================================================
+// Settings Commands
+// =============================================================================
+
+async function settingsGet() {
+  const client = new ApiClient();
+  try {
+    const settings = await client.getSettings();
+    console.log(chalk.bold('\nGlobal Settings:'));
+    if (Object.keys(settings).length === 0) {
+      console.log(chalk.gray('  (no settings configured)'));
+    } else {
+      for (const [key, value] of Object.entries(settings)) {
+        console.log(`  ${key}: ${chalk.cyan(JSON.stringify(value))}`);
+      }
+    }
+  } catch (err) {
+    if (handleConnectionError(err)) return;
+    console.error(chalk.red(`Error: ${err.message}`));
+    process.exit(1);
+  }
+}
+
+async function settingsSet(key, value) {
+  const client = new ApiClient();
+  try {
+    // Try to parse as JSON, otherwise use as string
+    let parsedValue;
+    try {
+      parsedValue = JSON.parse(value);
+    } catch {
+      parsedValue = value;
+    }
+    
+    await client.updateSettings({ [key]: parsedValue });
+    console.log(chalk.green(`✓ Set ${key} = ${JSON.stringify(parsedValue)}`));
+  } catch (err) {
+    if (handleConnectionError(err)) return;
+    console.error(chalk.red(`Error: ${err.message}`));
+    process.exit(1);
+  }
+}
+
+async function piSettingsGet() {
+  const client = new ApiClient();
+  try {
+    const settings = await client.getPiSettings();
+    console.log(chalk.bold('\nPi Settings:'));
+    if (!settings || Object.keys(settings).length === 0) {
+      console.log(chalk.gray('  (no Pi settings configured)'));
+    } else {
+      for (const [key, value] of Object.entries(settings)) {
+        console.log(`  ${key}: ${chalk.cyan(JSON.stringify(value))}`);
+      }
+    }
+  } catch (err) {
+    if (handleConnectionError(err)) return;
+    console.error(chalk.red(`Error: ${err.message}`));
+    process.exit(1);
+  }
+}
+
+// =============================================================================
+// Auth Commands
+// =============================================================================
+
+async function authStatus() {
+  const client = new ApiClient();
+  try {
+    const auth = await client.getAuthStatus();
+    console.log(chalk.bold('\nAuth Status:'));
+    
+    if (auth.providers && auth.providers.length > 0) {
+      for (const provider of auth.providers) {
+        const isConfigured = provider.hasStoredCredential || provider.authState === 'oauth' || provider.authState === 'external';
+        const statusIcon = isConfigured ? chalk.green('✓') : chalk.gray('○');
+        const authState = provider.authState !== 'none' ? chalk.gray(`(${provider.authState})`) : '';
+        console.log(`  ${statusIcon} ${provider.id} ${authState}`);
+      }
+    } else {
+      console.log(chalk.gray('  (no providers configured)'));
+    }
+    
+    if (auth.oauthProviders && auth.oauthProviders.length > 0) {
+      console.log(chalk.bold('\nOAuth Providers:'));
+      for (const provider of auth.oauthProviders) {
+        const statusIcon = provider.loggedIn ? chalk.green('✓') : chalk.gray('○');
+        console.log(`  ${statusIcon} ${provider.name}`);
+      }
+    }
+  } catch (err) {
+    if (handleConnectionError(err)) return;
+    console.error(chalk.red(`Error: ${err.message}`));
+    process.exit(1);
+  }
+}
+
+async function authSetKey(providerId, apiKey) {
+  const client = new ApiClient();
+  try {
+    await client.setApiKey(providerId, apiKey);
+    console.log(chalk.green(`✓ API key set for ${providerId}`));
+  } catch (err) {
+    if (handleConnectionError(err)) return;
+    console.error(chalk.red(`Error: ${err.message}`));
+    process.exit(1);
+  }
+}
+
+async function authClear(providerId) {
+  const confirmed = await clack.confirm({
+    message: `Clear credentials for ${providerId}?`,
+    initialValue: false,
+  });
+
+  if (!confirmed) {
+    console.log(chalk.yellow('Cancelled.'));
+    return;
+  }
+
+  const client = new ApiClient();
+  try {
+    await client.clearAuth(providerId);
+    console.log(chalk.green(`✓ Credentials cleared for ${providerId}`));
+  } catch (err) {
+    if (handleConnectionError(err)) return;
+    console.error(chalk.red(`Error: ${err.message}`));
+    process.exit(1);
+  }
+}
+
+// =============================================================================
+// Model Commands
+// =============================================================================
+
+async function modelsList() {
+  const client = new ApiClient();
+  try {
+    const models = await client.getAvailableModels();
+    console.log(chalk.bold('\nAvailable Models:'));
+    
+    if (models.length === 0) {
+      console.log(chalk.gray('  (no models available)'));
+      return;
+    }
+    
+    // Group by provider
+    const byProvider = {};
+    for (const model of models) {
+      if (!byProvider[model.provider]) {
+        byProvider[model.provider] = [];
+      }
+      byProvider[model.provider].push(model);
+    }
+    
+    for (const [provider, providerModels] of Object.entries(byProvider)) {
+      console.log(chalk.yellow(`\n  ${provider}:`));
+      for (const model of providerModels) {
+        console.log(`    • ${model.id}`);
+      }
+    }
+  } catch (err) {
+    if (handleConnectionError(err)) return;
+    console.error(chalk.red(`Error: ${err.message}`));
+    process.exit(1);
+  }
+}
+
+// =============================================================================
 // CLI Setup
 // =============================================================================
 
@@ -1634,6 +1817,56 @@ configCmd
   .command('list')
   .description('List all configuration values')
   .action(configList);
+
+// Settings commands
+const settingsCmd = program
+  .command('settings')
+  .description('Manage global settings');
+
+settingsCmd
+  .command('get')
+  .description('Get global settings')
+  .action(settingsGet);
+
+settingsCmd
+  .command('set <key> <value>')
+  .description('Set a global setting value')
+  .action(settingsSet);
+
+settingsCmd
+  .command('pi')
+  .description('Get Pi settings')
+  .action(piSettingsGet);
+
+// Auth commands
+const authCmd = program
+  .command('auth')
+  .description('Manage authentication');
+
+authCmd
+  .command('status')
+  .description('Check authentication status')
+  .action(authStatus);
+
+authCmd
+  .command('set-key <provider> <api-key>')
+  .description('Set API key for a provider')
+  .action(authSetKey);
+
+authCmd
+  .command('clear <provider>')
+  .description('Clear credentials for a provider')
+  .action(authClear);
+
+// Model commands
+const modelCmd = program
+  .command('models')
+  .description('Manage AI models');
+
+modelCmd
+  .command('list')
+  .description('List available models')
+  .action(modelsList);
 
 // Update command
 program
