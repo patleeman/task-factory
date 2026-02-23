@@ -1115,6 +1115,14 @@ async function taskUpdate(taskId, options) {
 
   if (options.title) updateRequest.title = options.title;
   if (options.content) updateRequest.content = options.content;
+  if (options.file) {
+    try {
+      updateRequest.content = readFileSync(options.file, 'utf-8');
+    } catch (err) {
+      console.error(chalk.red(`Error: Failed to read file ${options.file}: ${err.message}`));
+      process.exit(1);
+    }
+  }
   if (options.acceptanceCriteria) {
     updateRequest.acceptanceCriteria = options.acceptanceCriteria.split(',').map(s => s.trim());
   }
@@ -2237,6 +2245,7 @@ taskCmd
   .description('Update task fields')
   .option('-t, --title <title>', 'Update title')
   .option('-c, --content <content>', 'Update content/description')
+  .option('-f, --file <path>', 'Read content from file')
   .option('-a, --acceptance-criteria <criteria>', 'Comma-separated acceptance criteria')
   .option('--pre-execution-skills <skills>', 'Comma-separated pre-execution skill IDs')
   .option('--post-execution-skills <skills>', 'Comma-separated post-execution skill IDs')
