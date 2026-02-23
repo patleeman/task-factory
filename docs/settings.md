@@ -69,6 +69,49 @@ Model profiles support ordered fallback arrays for both planning and execution (
 - Choosing **Migrate** or **Skip** persists a decision in `~/.taskfactory/pi-migration-state.json`.
 - After a decision is stored, the prompt is suppressed on subsequent startups.
 
+### Available Settings Fields
+
+Use the CLI to view all available settings:
+
+```bash
+task-factory settings schema
+```
+
+**Key settings categories:**
+
+| Setting Path | Type | Description |
+|--------------|------|-------------|
+| `theme` | string | UI theme (`"dark"` or `"light"`) |
+| `defaultWorkspace` | string | Default workspace ID to open on startup |
+| `taskDefaults.modelConfig.provider` | string | Default model provider for execution |
+| `taskDefaults.modelConfig.modelId` | string | Default model ID for execution |
+| `taskDefaults.modelConfig.thinkingLevel` | string | Thinking level: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` |
+| `taskDefaults.planningModelConfig.*` | object | Same as modelConfig but for planning phase |
+| `taskDefaults.executionModelConfig.*` | object | Same as modelConfig but for execution phase |
+| `taskDefaults.preExecutionSkills` | string[] | Skills to run before task execution |
+| `taskDefaults.postExecutionSkills` | string[] | Skills to run after task completion |
+| `workflowDefaults.readyLimit` | number | Max tasks in ready queue (1-100) |
+| `workflowDefaults.executingLimit` | number | Max concurrent executing tasks (1-20) |
+| `workflowDefaults.backlogToReady` | boolean | Auto-promote backlog → ready |
+| `workflowDefaults.readyToExecuting` | boolean | Auto-promote ready → executing |
+| `planningGuardrails.timeoutMs` | number | Planning session timeout |
+| `planningGuardrails.maxToolCalls` | number | Max tool calls per planning session |
+
+**View current settings:**
+```bash
+task-factory settings get
+```
+
+**Set a setting:**
+```bash
+# Simple value
+task-factory settings set theme "dark"
+
+# Nested value (dot notation)
+task-factory settings set taskDefaults.modelConfig.provider "openai-codex"
+task-factory settings set workflowDefaults.readyLimit 10
+```
+
 ### Pi settings compatibility
 
 Task Factory uses its own storage under `~/.taskfactory` for runtime auth/skills/extensions. If you also manage Pi-specific settings directly, refer to the Pi documentation for `settings.json`, models, and themes expectations.
