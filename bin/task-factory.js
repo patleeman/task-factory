@@ -264,6 +264,15 @@ class ApiClient {
 
   // Models
   getAvailableModels() { return this.request('GET', '/api/pi/available-models'); }
+
+  // Factory Skills
+  listFactorySkills() { return this.request('GET', '/api/factory/skills'); }
+  getFactorySkill(id) { return this.request('GET', `/api/factory/skills/${id}`); }
+  reloadFactorySkills() { return this.request('POST', '/api/factory/skills/reload'); }
+
+  // Pi Skills
+  listPiSkills() { return this.request('GET', '/api/pi/skills'); }
+  getPiSkill(id) { return this.request('GET', `/api/pi/skills/${id}`); }
 }
 
 // =============================================================================
@@ -2129,6 +2138,111 @@ async function modelsList() {
 }
 
 // =============================================================================
+// Factory Skill Commands
+// =============================================================================
+
+async function factorySkillsList() {
+  const client = new ApiClient();
+  try {
+    const skills = await client.listFactorySkills();
+    console.log(chalk.bold('\nFactory Skills (Execution Hooks):'));
+    
+    if (skills.length === 0) {
+      console.log(chalk.gray('  (no skills found)'));
+      return;
+    }
+    
+    for (const skill of skills) {
+      const hooks = skill.hooks?.join(', ') || 'none';
+      console.log(`\n  ${chalk.cyan(skill.id)} ${chalk.gray(`(${skill.source})`)}`);
+      console.log(`    ${skill.description?.slice(0, 80) || 'No description'}...`);
+      console.log(`    Hooks: ${chalk.yellow(hooks)}`);
+    }
+  } catch (err) {
+    if (handleConnectionError(err)) return;
+    console.error(chalk.red(`Error: ${err.message}`));
+    process.exit(1);
+  }
+}
+
+async function factorySkillsGet(skillId) {
+  const client = new ApiClient();
+  try {
+    const skill = await client.getFactorySkill(skillId);
+    console.log(chalk.bold(`\n${skill.name || skill.id}\n`));
+    console.log(`${chalk.gray('ID:')} ${skill.id}`);
+    console.log(`${chalk.gray('Source:')} ${skill.source}`);
+    console.log(`${chalk.gray('Type:')} ${skill.type}`);
+    console.log(`${chalk.gray('Hooks:')} ${skill.hooks?.join(', ') || 'none'}`);
+    console.log(`\n${chalk.gray('Description:')}\n${skill.description || 'No description'}`);
+    console.log(`\n${chalk.gray('Path:')} ${skill.path}`);
+  } catch (err) {
+    if (handleConnectionError(err)) return;
+    console.error(chalk.red(`Error: ${err.message}`));
+    process.exit(1);
+  }
+}
+
+async function factorySkillsReload() {
+  const client = new ApiClient();
+  const spinner = clack.spinner();
+  spinner.start('Reloading factory skills...');
+  try {
+    await client.reloadFactorySkills();
+    spinner.stop('Skills reloaded');
+    console.log(chalk.green('✓ Factory skills reloaded'));
+  } catch (err) {
+    spinner.stop('Failed to reload skills');
+    if (handleConnectionError(err)) return;
+    console.error(chalk.red(`Error: ${err.message}`));
+    process.exit(1);
+  }
+}
+
+// =============================================================================
+// Pi Skill Commands
+// =============================================================================
+
+async function piSkillsList() {
+  const client = new ApiClient();
+  try {
+    const skills = await client.listPiSkills();
+    console.log(chalk.bold('\nPi Skills:'));
+    
+    if (skills.length === 0) {
+      console.log(chalk.gray('  (no skills found)'));
+      return;
+    }
+    
+    for (const skill of skills) {
+      console.log(`\n  ${chalk.cyan(skill.id)}`);
+      console.log(`    ${skill.description?.slice(0, 80) || 'No description'}...`);
+    }
+  } catch (err) {
+    if (handleConnectionError(err)) return;
+    console.error(chalk.red(`Error: ${err.message}`));
+    process.exit(1);
+  }
+}
+
+async function piSkillsGet(skillId) {
+  const client = new ApiClient();
+  try {
+    const skill = await client.getPiSkill(skillId);
+    console.log(chalk.bold(`\n${skill.name || skill.id}\n`));
+    console.log(`${chalk.gray('ID:')} ${skill.id}`);
+    console.log(`\n${chalk.gray('Description:')}\n${skill.description || 'No description'}`);
+    if (skill.content) {
+      console.log(`\n${chalk.gray('Content preview:')}\n${skill.content.slice(0, 500)}...`);
+    }
+  } catch (err) {
+    if (handleConnectionError(err)) return;
+    console.error(chalk.red(`Error: ${err.message}`));
+    process.exit(1);
+  }
+}
+
+// =============================================================================
 // CLI Setup
 // =============================================================================
 
@@ -2417,6 +2531,42 @@ modelCmd
   .command('list')
   .description('List available models')
   .action(modelsList);
+
+// Factory Skill commands
+const factorySkillCmd = program
+  .command('factory-skills')
+  .alias('skills')
+  .description('Manage factory execution hook skills');
+
+factorySkillCmd
+  .command('list')
+  .description('List all factory skills')
+  .action(factorySkillsList);
+
+factorySkillCmd
+  .command('get <skill-id>')
+  .description('Get skill details')
+  .action(factorySkillsGet);
+
+factorySkillCmd
+  .command('reload')
+  .description('Reload factory skills from disk')
+  .action(factorySkillsReload);
+
+// Pi Skill commands
+const piSkillCmd = program
+  .command('pi-skills')
+  .description('Manage Pi skills');
+
+piSkillCmd
+  .command('list')
+  .description('List all Pi skills')
+  .action(piSkillsList);
+
+piSkillCmd
+  .command('get <skill-id>')
+  .description('Get Pi skill details')
+  .action(piSkillsGet);
 
 // Stats command
 program
