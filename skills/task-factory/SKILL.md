@@ -89,10 +89,11 @@ task-factory task update TASK-XX --file description.md
 task-factory task update TASK-XX \
   --acceptance-criteria "Criterion 1,Criterion 2,Criterion 3"
 
-# Update skills
+# Update execution hooks (skills)
 task-factory task update TASK-XX \
-  --pre-execution-skills "skill-1,skill-2" \
-  --post-execution-skills "checkpoint,code-review"
+  --pre-planning-skills "research,analyze" \
+  --pre-execution-skills "setup-env" \
+  --post-execution-skills "checkpoint,code-review,update-docs"
 
 # Set task priority (order)
 task-factory task update TASK-XX --order 5
