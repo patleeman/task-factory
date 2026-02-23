@@ -14,6 +14,9 @@ import chalk from 'chalk';
 import Table from 'cli-table3';
 import * as clack from '@clack/prompts';
 
+// Cache for version check
+let versionCheckCache = null;
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
@@ -37,6 +40,79 @@ function getPackageVersion() {
     return pkg.version;
   } catch {
     return '0.1.0';
+  }
+}
+
+// =============================================================================
+// Version Check
+// =============================================================================
+
+async function getLatestVersion() {
+  // Return cached result if available
+  if (versionCheckCache) {
+    return versionCheckCache;
+  }
+
+  try {
+    const response = await fetch('https://registry.npmjs.org/task-factory/latest', {
+      headers: { 'Accept': 'application/json' },
+    });
+    
+    if (!response.ok) {
+      return null;
+    }
+    
+    const data = await response.json();
+    versionCheckCache = data.version || null;
+    return versionCheckCache;
+  } catch {
+    // Network error or other issue - silently fail
+    return null;
+  }
+}
+
+function compareVersions(current, latest) {
+  const currentParts = current.split('.').map(Number);
+  const latestParts = latest.split('.').map(Number);
+  
+  for (let i = 0; i < Math.max(currentParts.length, latestParts.length); i++) {
+    const currentPart = currentParts[i] || 0;
+    const latestPart = latestParts[i] || 0;
+    
+    if (latestPart > currentPart) return -1; // Update available
+    if (latestPart < currentPart) return 1;  // Current is newer (dev/alpha)
+  }
+  
+  return 0; // Same version
+}
+
+async function checkForUpdates() {
+  const currentVersion = getPackageVersion();
+  const latestVersion = await getLatestVersion();
+  
+  if (latestVersion && compareVersions(currentVersion, latestVersion) < 0) {
+    return {
+      hasUpdate: true,
+      currentVersion,
+      latestVersion,
+    };
+  }
+  
+  return { hasUpdate: false, currentVersion, latestVersion };
+}
+
+async function showUpdateNotice() {
+  const updateInfo = await checkForUpdates();
+  
+  if (updateInfo.hasUpdate) {
+    console.log(chalk.yellow('\n┌─────────────────────────────────────────────────────────────┐'));
+    console.log(chalk.yellow('│ ') + chalk.bold('Update Available') + chalk.yellow('                                             │'));
+    console.log(chalk.yellow('├─────────────────────────────────────────────────────────────┤'));
+    console.log(chalk.yellow(`│  Current version: ${updateInfo.currentVersion.padEnd(46)} │`));
+    console.log(chalk.yellow(`│  Latest version:  ${updateInfo.latestVersion.padEnd(46)} │`));
+    console.log(chalk.yellow('├─────────────────────────────────────────────────────────────┤'));
+    console.log(chalk.yellow('│  Run ') + chalk.cyan('task-factory update') + chalk.yellow(' to update to the latest version.      │'));
+    console.log(chalk.yellow('└─────────────────────────────────────────────────────────────┘\n'));
   }
 }
 
@@ -1266,6 +1342,99 @@ async function configList() {
 }
 
 // =============================================================================
+// Update Command
+// =============================================================================
+
+async function updateCommand() {
+  const spinner = clack.spinner();
+  
+  // First check if there's an update available
+  spinner.start('Checking for updates...');
+  const updateInfo = await checkForUpdates();
+  
+  if (!updateInfo.hasUpdate) {
+    spinner.stop('Already up to date');
+    console.log(chalk.green(`✓ You're already running the latest version (${updateInfo.currentVersion})`));
+    return;
+  }
+  
+  spinner.stop('Update available');
+  console.log(chalk.yellow(`Current version: ${updateInfo.currentVersion}`));
+  console.log(chalk.green(`Latest version:  ${updateInfo.latestVersion}`));
+  
+  const confirmed = await clack.confirm({
+    message: `Update to version ${updateInfo.latestVersion}?`,
+    initialValue: true,
+  });
+
+  if (!confirmed) {
+    console.log(chalk.yellow('Update cancelled.'));
+    return;
+  }
+
+  spinner.start('Installing update...');
+  
+  // Detect package manager
+  const isGlobal = await isPackageInstalledGlobally();
+  const installCmd = isGlobal ? ['npm', ['install', '-g', 'task-factory']] : ['npm', ['install', 'task-factory@latest']];
+  
+  return new Promise((resolve, reject) => {
+    const child = spawn(installCmd[0], installCmd[1], {
+      stdio: 'pipe',
+      shell: true,
+    });
+    
+    let output = '';
+    child.stdout?.on('data', (data) => {
+      output += data.toString();
+    });
+    child.stderr?.on('data', (data) => {
+      output += data.toString();
+    });
+    
+    child.on('close', (code) => {
+      if (code === 0) {
+        spinner.stop('Update complete');
+        console.log(chalk.green(`✓ Successfully updated to version ${updateInfo.latestVersion}`));
+        console.log(chalk.gray('\nPlease restart the daemon if it\'s running:'));
+        console.log(chalk.cyan('  task-factory daemon restart'));
+        resolve();
+      } else {
+        spinner.stop('Update failed');
+        console.error(chalk.red(`✗ Update failed with exit code ${code}`));
+        console.error(chalk.gray(output));
+        reject(new Error(`npm install failed with code ${code}`));
+      }
+    });
+    
+    child.on('error', (err) => {
+      spinner.stop('Update failed');
+      console.error(chalk.red(`✗ Failed to run npm: ${err.message}`));
+      reject(err);
+    });
+  });
+}
+
+async function isPackageInstalledGlobally() {
+  try {
+    // Check if the current script path contains npm's global location
+    const scriptPath = fileURLToPath(import.meta.url);
+    const globalPaths = [
+      '/usr/local/lib/node_modules',
+      '/usr/lib/node_modules',
+      join(homedir(), '.npm-global'),
+      join(homedir(), '.nvm'),
+      '/opt/homebrew/lib/node_modules',
+      '/usr/local/share/nvm',
+    ];
+    
+    return globalPaths.some(globalPath => scriptPath.includes(globalPath));
+  } catch {
+    return false;
+  }
+}
+
+// =============================================================================
 // CLI Setup
 // =============================================================================
 
@@ -1457,6 +1626,12 @@ configCmd
   .description('List all configuration values')
   .action(configList);
 
+// Update command
+program
+  .command('update')
+  .description('Update task-factory to the latest version')
+  .action(updateCommand);
+
 // Legacy start command (start server in foreground)
 program
   .command('start')
@@ -1552,4 +1727,15 @@ program.parse();
 // Show help if no arguments provided
 if (process.argv.length <= 2) {
   program.help();
+}
+
+// Check for updates on certain commands (but not on update command itself)
+const skipUpdateCheck = ['update', '--version', '-v', '--help', '-h'];
+const shouldCheckUpdate = !skipUpdateCheck.some(cmd => process.argv.includes(cmd));
+
+if (shouldCheckUpdate) {
+  // Fire-and-forget update check (don't block CLI)
+  showUpdateNotice().catch(() => {
+    // Silently ignore errors
+  });
 }
