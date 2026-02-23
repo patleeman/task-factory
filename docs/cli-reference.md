@@ -509,10 +509,21 @@ task-factory settings get
 
 ### `task-factory settings set <key> <value>`
 
-Set global setting.
+Set global setting. Supports dot notation for nested keys.
 
 ```bash
 task-factory settings set <key> <value>
+```
+
+**Examples:**
+```bash
+# Set simple value
+task-factory settings set theme "dark"
+
+# Set nested value using dot notation
+task-factory settings set taskDefaults.modelConfig.provider "openai-codex"
+task-factory settings set taskDefaults.modelConfig.modelId "gpt-5.3-codex"
+task-factory settings set workflowDefaults.readyLimit 10
 ```
 
 ### `task-factory settings pi`
