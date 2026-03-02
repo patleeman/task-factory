@@ -25,6 +25,9 @@ npm install -g task-factory
 
 For non-interactive and automation usage:
 
+- Query CLI capabilities and version as stable JSON:
+  - `task-factory capabilities`
+  - `task-factory capabilities --compact`
 - Destructive commands support `-y, --yes` (or `--force`) to skip confirmation prompts:
   - `task-factory workspace delete <id> --yes`
   - `task-factory task delete <task-id> --yes`
@@ -36,6 +39,62 @@ For non-interactive and automation usage:
   - `task-factory stats --json`
 
 Without these flags, human-readable output and interactive confirmations are preserved.
+
+JSON responses use stable top-level envelopes for automation:
+- `capabilities`: `{ schemaVersion, cli, supportLevel, requiredForAgents, commands, features }`
+- `workspace list`: `{ workspaces: [...], count }`
+- `workspace show`: `{ workspace: {...} }`
+- `task list`: `{ tasks: [...], count, phase, workspaceId }`
+- `task show`: `{ task: {...} }`
+- `stats`: `{ summary: {...}, workspaces: [...] }`
+
+For upgrade/rollback steps between old and current CLI installs, see [CLI Migration Guide](./cli-migration.md).
+
+---
+
+## Capability Contract Command
+
+### `task-factory capabilities`
+
+Print a machine-readable CLI capability contract for agent/automation compatibility checks.
+
+```bash
+task-factory capabilities [--compact]
+```
+
+**Options:**
+- `--compact` - Output single-line JSON
+
+**Example response:**
+
+```json
+{
+  "schemaVersion": "1.0",
+  "cli": {
+    "name": "task-factory",
+    "version": "0.5.2"
+  },
+  "supportLevel": "full",
+  "requiredForAgents": {
+    "task update": true,
+    "task activity": true,
+    "task conversation": true,
+    "stats": true,
+    "models list": true,
+    "settings": true
+  },
+  "commands": {
+    "total": 43,
+    "available": ["..."],
+    "missingRequired": []
+  },
+  "features": {
+    "capabilityContract": true,
+    "jsonOutput": true,
+    "nonInteractiveDeletes": true
+  }
+}
+```
 
 ---
 
@@ -53,7 +112,7 @@ task-factory task list [--workspace <id>] [--phase <phase>] [--json | --output j
 
 **Options:**
 - `-w, --workspace <id>` - Workspace ID filter
-- `-p, --phase <phase>` - Scope: `active`, `archived`, `all` (default: `active`)
+- `-p, --phase <phase>` - Phase filter: `active`, `archived`, `all` (default: `active`)
 - `--json` - Output machine-readable JSON
 - `--output json` - Explicit output format selector
 
@@ -83,6 +142,29 @@ task-factory task show task-abc123
 task-factory task show abc123  # Partial ID matching (min 8 chars)
 ```
 
+### `task-factory task create`
+
+Create a new task.
+
+```bash
+task-factory task create --workspace <id> [options]
+```
+
+**Options:**
+- `-w, --workspace <id>` - Target workspace ID (required)
+- `-t, --title <title>` - Task title
+- `-c, --content <content>` - Inline task content
+- `-f, --file <path>` - Read task content from a UTF-8 text/markdown file (overrides inline `--content` when both are set)
+
+**Examples:**
+```bash
+# Create with inline content
+task-factory task create --workspace ws-abc123 --title "Implement feature" --content "Add endpoint and tests"
+
+# Create from markdown file
+task-factory task create --workspace ws-abc123 --title "Implement feature" --file ./specs/feature.md
+```
+
 ### `task-factory task update <task-id>`
 
 Update task fields.
@@ -93,11 +175,21 @@ task-factory task update <task-id> [options]
 
 **Options:**
 - `-t, --title <title>` - Update title (max 200 chars)
-- `-c, --content <content>` - Update content (max 50000 chars)
+- `-c, --content <content>` - Update inline content (max 50000 chars)
+- `-f, --file <path>` - Read content from UTF-8 file (overrides inline `--content` when both are set)
 - `-a, --acceptance-criteria <criteria>` - Comma-separated criteria (max 50)
-- `--pre-execution-skills <skills>` - Comma-separated skill IDs
-- `--post-execution-skills <skills>` - Comma-separated skill IDs
-- `-f, --file <path>` - Read content from file (max 50000 chars)
+- `--pre-planning-skills <skills>` - Comma-separated pre-planning skill IDs
+- `--pre-execution-skills <skills>` - Comma-separated pre-execution skill IDs
+- `--post-execution-skills <skills>` - Comma-separated post-execution skill IDs
+- `--model-provider <provider>` - Execution model provider
+- `--model-id <id>` - Execution model ID
+- `--model-thinking <level>` - Execution thinking level (`off|minimal|low|medium|high|xhigh`)
+- `--planning-provider <provider>` - Planning model provider
+- `--planning-model-id <id>` - Planning model ID
+- `--planning-thinking <level>` - Planning thinking level (`off|minimal|low|medium|high|xhigh`)
+- `--plan-goal <goal>` - Plan goal text
+- `--plan-steps <steps>` - Comma-separated plan steps
+- `--order <n>` - Task order for backlog prioritization
 
 **Examples:**
 ```bash
@@ -109,6 +201,16 @@ task-factory task update task-abc123 --file description.md
 
 # Update acceptance criteria
 task-factory task update task-abc123 --acceptance-criteria "Test passing,Code reviewed,Documentation updated"
+
+# Update multiple agent-facing fields at once
+task-factory task update task-abc123 \
+  --plan-goal "Ship CLI lifecycle improvements" \
+  --plan-steps "Add file input,Add tests,Update docs" \
+  --model-provider openai \
+  --model-id gpt-5-codex \
+  --pre-planning-skills "task-factory" \
+  --pre-execution-skills "checkpoint" \
+  --post-execution-skills "create-pr"
 ```
 
 ### `task-factory task conversation <task-id>`

@@ -250,6 +250,11 @@ class ApiClient {
   getTaskActivity(workspaceId, taskId, limit = 100) { return this.request('GET', `/api/workspaces/${workspaceId}/tasks/${taskId}/activity?limit=${limit}`); }
   getTaskExecution(workspaceId, taskId) { return this.request('GET', `/api/workspaces/${workspaceId}/tasks/${taskId}/execution`); }
 
+  // Planning
+  getPlanningStatus(workspaceId) { return this.request('GET', `/api/workspaces/${workspaceId}/planning/status`); }
+  stopPlanning(workspaceId) { return this.request('POST', `/api/workspaces/${workspaceId}/planning/stop`); }
+  resetPlanning(workspaceId) { return this.request('POST', `/api/workspaces/${workspaceId}/planning/reset`); }
+
   // Settings
   getSettings() { return this.request('GET', '/api/settings'); }
   updateSettings(settings) { return this.request('POST', '/api/settings', settings); }
@@ -313,12 +318,140 @@ function formatDuration(seconds) {
 }
 
 function isJsonOutput(options = {}) {
-  const output = typeof options.output === 'string' ? options.output.toLowerCase() : undefined;
+  const output = typeof options.output === 'string' ? options.output.trim().toLowerCase() : undefined;
   return options.json === true || output === 'json';
 }
 
 function shouldSkipConfirmation(options = {}) {
   return options.yes === true || options.force === true;
+}
+
+const EXIT_CODES = {
+  GENERAL_ERROR: 1,
+  PLANNING_BLOCKED: 40,
+};
+
+function outputJson(payload) {
+  console.log(JSON.stringify(payload, null, 2));
+}
+
+function printCliError(message, options = {}, details = {}, exitCode = EXIT_CODES.GENERAL_ERROR) {
+  if (isJsonOutput(options)) {
+    outputJson({
+      ok: false,
+      error: {
+        message,
+        code: details.code || 'CLI_ERROR',
+        ...details,
+      },
+    });
+  } else {
+    console.error(chalk.red(`Error: ${message}`));
+  }
+  process.exit(exitCode);
+}
+
+async function resolveTaskReference(client, taskIdInput) {
+  const workspaces = await client.listWorkspaces();
+
+  const matches = [];
+  for (const workspace of workspaces) {
+    try {
+      const tasks = await client.listTasks(workspace.id, 'all');
+      for (const task of tasks) {
+        if (task.id === taskIdInput || task.id.startsWith(taskIdInput)) {
+          matches.push({ workspace, task });
+        }
+      }
+    } catch {
+      // ignore workspace list errors
+    }
+  }
+
+  if (matches.length === 0) {
+    throw new Error(`Task not found: ${taskIdInput}`);
+  }
+
+  if (matches.length > 1) {
+    const details = matches
+      .map(({ workspace, task }) => `  - ${task.id} (${workspace.name || workspace.id})`)
+      .join('\n');
+    throw new Error(`Ambiguous task ID "${taskIdInput}". Matches:\n${details}`);
+  }
+
+  return matches[0];
+}
+
+function parseCommaSeparatedList(value) {
+  if (!value) return undefined;
+  const items = value.split(',').map((item) => item.trim()).filter(Boolean);
+  return items.length > 0 ? items : undefined;
+}
+
+function readUtf8FileContent(filePath) {
+  try {
+    return readFileSync(filePath, 'utf-8');
+  } catch (err) {
+    throw new Error(`Failed to read file ${filePath}: ${err.message}`);
+  }
+}
+
+function resolveTaskContentFromOptions(options = {}) {
+  if (options.file) {
+    return readUtf8FileContent(options.file);
+  }
+  return options.content;
+}
+
+function buildTaskUpdateRequest(options = {}) {
+  const updateRequest = {};
+
+  if (options.title) updateRequest.title = options.title;
+
+  const content = resolveTaskContentFromOptions(options);
+  if (content !== undefined) updateRequest.content = content;
+
+  const acceptanceCriteria = parseCommaSeparatedList(options.acceptanceCriteria);
+  if (acceptanceCriteria) updateRequest.acceptanceCriteria = acceptanceCriteria;
+
+  const prePlanningSkills = parseCommaSeparatedList(options.prePlanningSkills);
+  if (prePlanningSkills) updateRequest.prePlanningSkills = prePlanningSkills;
+
+  const preExecutionSkills = parseCommaSeparatedList(options.preExecutionSkills);
+  if (preExecutionSkills) updateRequest.preExecutionSkills = preExecutionSkills;
+
+  const postExecutionSkills = parseCommaSeparatedList(options.postExecutionSkills);
+  if (postExecutionSkills) updateRequest.postExecutionSkills = postExecutionSkills;
+
+  if (options.modelProvider || options.modelId || options.modelThinking) {
+    updateRequest.executionModelConfig = {
+      ...(options.modelProvider && { provider: options.modelProvider }),
+      ...(options.modelId && { modelId: options.modelId }),
+      ...(options.modelThinking && { thinkingLevel: options.modelThinking }),
+    };
+    updateRequest.modelConfig = { ...updateRequest.executionModelConfig };
+  }
+
+  if (options.planningProvider || options.planningModelId || options.planningThinking) {
+    updateRequest.planningModelConfig = {
+      ...(options.planningProvider && { provider: options.planningProvider }),
+      ...(options.planningModelId && { modelId: options.planningModelId }),
+      ...(options.planningThinking && { thinkingLevel: options.planningThinking }),
+    };
+  }
+
+  if (options.order !== undefined) {
+    updateRequest.order = parseInt(options.order, 10);
+  }
+
+  if (options.planGoal || options.planSteps) {
+    updateRequest.plan = {
+      ...(options.planGoal && { goal: options.planGoal }),
+      ...(options.planSteps && { steps: parseCommaSeparatedList(options.planSteps) || [] }),
+    };
+  }
+
+  return updateRequest;
 }
 
 function toWorkspaceJson(workspace) {
@@ -343,6 +476,63 @@ function toTaskJson(task) {
     updatedAt: fm.updated,
     acceptanceCriteria: fm.acceptanceCriteria || [],
     content: task.content || '',
+  };
+}
+
+const CAPABILITY_SCHEMA_VERSION = '1.0';
+
+const REQUIRED_AGENT_COMMANDS = [
+  'task update',
+  'task activity',
+  'task conversation',
+  'stats',
+  'models list',
+  'settings',
+];
+
+function collectCommandPaths(command, prefix = []) {
+  const paths = [];
+
+  for (const subcommand of command.commands) {
+    if (!subcommand.name()) continue;
+    const path = [...prefix, subcommand.name()];
+    paths.push(path.join(' '));
+    paths.push(...collectCommandPaths(subcommand, path));
+  }
+
+  return Array.from(new Set(paths)).sort();
+}
+
+function buildCapabilityContract(options = {}) {
+  const availableCommands = options.availableCommands || collectCommandPaths(program);
+  const requiredForAgents = Object.fromEntries(
+    REQUIRED_AGENT_COMMANDS.map((command) => [command, availableCommands.includes(command)]),
+  );
+  const missingRequiredCommands = Object
+    .entries(requiredForAgents)
+    .filter(([, supported]) => !supported)
+    .map(([command]) => command);
+
+  const supportLevel = missingRequiredCommands.length === 0 ? 'full' : 'partial';
+
+  return {
+    schemaVersion: CAPABILITY_SCHEMA_VERSION,
+    cli: {
+      name: 'task-factory',
+      version: options.version || getPackageVersion(),
+    },
+    supportLevel,
+    requiredForAgents,
+    commands: {
+      total: availableCommands.length,
+      available: availableCommands,
+      missingRequired: missingRequiredCommands,
+    },
+    features: {
+      capabilityContract: true,
+      jsonOutput: true,
+      nonInteractiveDeletes: true,
+    },
   };
 }
 
@@ -935,7 +1125,7 @@ async function taskList(options) {
     console.log(JSON.stringify({
       tasks: tasks.map(toTaskJson),
       count: tasks.length,
-      scope: options.phase || 'active',
+      phase: options.phase || 'active',
       workspaceId: resolvedWorkspaceId,
     }, null, 2));
     return;
@@ -974,8 +1164,15 @@ async function taskCreate(options) {
     options.title = title;
   }
 
-  let content = options.content;
-  if (!content) {
+  let content;
+  try {
+    content = resolveTaskContentFromOptions(options);
+  } catch (err) {
+    console.error(chalk.red(`Error: ${err.message}`));
+    process.exit(1);
+  }
+
+  if (!content && !options.file) {
     const desc = await clack.text({
       message: 'Task description (optional):',
     });
@@ -1142,43 +1339,63 @@ async function taskDelete(taskId, options = {}) {
   process.exit(1);
 }
 
-async function taskExecute(taskId) {
+async function taskExecute(taskId, options = {}) {
   if (!taskId) {
-    console.error(chalk.red('Error: Task ID is required'));
-    process.exit(1);
+    printCliError('Task ID is required', options, { code: 'MISSING_TASK_ID' });
   }
 
   const client = new ApiClient();
+  let resolved;
 
-  // Find task workspace
-  const workspaces = await client.listWorkspaces();
-
-  for (const ws of workspaces) {
-    try {
-      const tasks = await client.listTasks(ws.id, 'all');
-      const task = tasks.find(t => t.id === taskId || t.id.startsWith(taskId));
-      if (task) {
-        const spinner = clack.spinner();
-        spinner.start('Starting task execution...');
-
-        const result = await client.executeTask(ws.id, task.id);
-
-        spinner.stop('Execution started');
-        console.log(chalk.green('✓ Task execution started'));
-        console.log(`  Session ID: ${result.sessionId}`);
-        console.log(`  Status: ${result.status}`);
-        return;
-      }
-    } catch (err) {
-      if (err.status !== 404) {
-        console.error(chalk.red(`Error: ${err.message}`));
-        process.exit(1);
-      }
-    }
+  try {
+    resolved = await resolveTaskReference(client, taskId);
+  } catch (err) {
+    printCliError(err.message, options, { code: 'TASK_NOT_FOUND' });
   }
 
-  console.error(chalk.red(`Task not found: ${taskId}`));
-  process.exit(1);
+  const spinner = isJsonOutput(options) ? null : clack.spinner();
+
+  try {
+    spinner?.start('Starting task execution...');
+    const result = await client.executeTask(resolved.workspace.id, resolved.task.id);
+    spinner?.stop('Execution started');
+
+    if (isJsonOutput(options)) {
+      outputJson({
+        ok: true,
+        taskId: resolved.task.id,
+        workspaceId: resolved.workspace.id,
+        sessionId: result.sessionId,
+        status: result.status,
+      });
+      return;
+    }
+
+    console.log(chalk.green('✓ Task execution started'));
+    console.log(`  Session ID: ${result.sessionId}`);
+    console.log(`  Status: ${result.status}`);
+  } catch (err) {
+    spinner?.stop('Failed to start execution');
+
+    if (err.status === 409) {
+      printCliError(
+        err.message,
+        options,
+        {
+          code: 'PLANNING_BLOCKED',
+          taskId: resolved.task.id,
+          workspaceId: resolved.workspace.id,
+          guidance: 'Planning is still running. Use "task-factory planning status --workspace <id>" then "planning stop" or wait for planning completion.',
+          status: err.status,
+          details: err.data,
+        },
+        EXIT_CODES.PLANNING_BLOCKED,
+      );
+    }
+
+    if (handleConnectionError(err)) return;
+    printCliError(err.message, options, { code: 'EXECUTION_START_FAILED', status: err.status, details: err.data });
+  }
 }
 
 async function taskStop(taskId) {
@@ -1251,64 +1468,12 @@ async function taskUpdate(taskId, options) {
     process.exit(1);
   }
 
-  const updateRequest = {};
-
-  if (options.title) updateRequest.title = options.title;
-  if (options.content) updateRequest.content = options.content;
-  if (options.file) {
-    try {
-      updateRequest.content = readFileSync(options.file, 'utf-8');
-    } catch (err) {
-      console.error(chalk.red(`Error: Failed to read file ${options.file}: ${err.message}`));
-      process.exit(1);
-    }
-  }
-  if (options.acceptanceCriteria) {
-    updateRequest.acceptanceCriteria = options.acceptanceCriteria.split(',').map(s => s.trim());
-  }
-  if (options.prePlanningSkills) {
-    updateRequest.prePlanningSkills = options.prePlanningSkills.split(',').map(s => s.trim());
-  }
-  if (options.preExecutionSkills) {
-    updateRequest.preExecutionSkills = options.preExecutionSkills.split(',').map(s => s.trim());
-  }
-  if (options.postExecutionSkills) {
-    updateRequest.postExecutionSkills = options.postExecutionSkills.split(',').map(s => s.trim());
-  }
-
-  // Handle execution model config
-  if (options.modelProvider || options.modelId || options.modelThinking) {
-    updateRequest.executionModelConfig = {
-      ...(options.modelProvider && { provider: options.modelProvider }),
-      ...(options.modelId && { modelId: options.modelId }),
-      ...(options.modelThinking && { thinkingLevel: options.modelThinking }),
-    };
-    // Also update legacy modelConfig for backward compatibility
-    updateRequest.modelConfig = { ...updateRequest.executionModelConfig };
-  }
-
-  // Handle planning model config
-  if (options.planningProvider || options.planningModelId || options.planningThinking) {
-    updateRequest.planningModelConfig = {
-      ...(options.planningProvider && { provider: options.planningProvider }),
-      ...(options.planningModelId && { modelId: options.planningModelId }),
-      ...(options.planningThinking && { thinkingLevel: options.planningThinking }),
-    };
-  }
-
-  // Handle task order (for backlog prioritization)
-  if (options.order !== undefined) {
-    updateRequest.order = parseInt(options.order, 10);
-  }
-
-  // Handle plan updates
-  if (options.planGoal || options.planSteps) {
-    const plan = {};
-    if (options.planGoal) plan.goal = options.planGoal;
-    if (options.planSteps) {
-      plan.steps = options.planSteps.split(',').map(s => s.trim()).filter(s => s);
-    }
-    updateRequest.plan = plan;
+  let updateRequest;
+  try {
+    updateRequest = buildTaskUpdateRequest(options);
+  } catch (err) {
+    console.error(chalk.red(`Error: ${err.message}`));
+    process.exit(1);
   }
 
   if (Object.keys(updateRequest).length === 0) {
@@ -1334,99 +1499,121 @@ async function taskUpdate(taskId, options) {
 // Task Activity Command
 // =============================================================================
 
-async function taskActivity(taskId, options) {
+async function taskActivity(taskId, options = {}) {
   if (!taskId) {
-    console.error(chalk.red('Error: Task ID is required'));
-    process.exit(1);
+    printCliError('Task ID is required', options, { code: 'MISSING_TASK_ID' });
   }
 
   const client = new ApiClient();
+  const limit = options.limit || 50;
 
-  // Find task workspace
-  const workspaces = await client.listWorkspaces();
+  try {
+    const resolved = await resolveTaskReference(client, taskId);
+    const activity = await client.getTaskActivity(resolved.workspace.id, resolved.task.id, limit);
 
-  for (const ws of workspaces) {
-    try {
-      const tasks = await client.listTasks(ws.id, 'all');
-      const task = tasks.find(t => t.id === taskId || t.id.startsWith(taskId));
-      if (task) {
-        const limit = options.limit || 50;
-        const activity = await client.getTaskActivity(ws.id, task.id, limit);
-
-        console.log(chalk.bold(`\n📋 Activity for ${task.frontmatter.title}\n`));
-
-        if (!activity || activity.length === 0) {
-          console.log(chalk.gray('No activity found.'));
-          return;
-        }
-
-        for (const entry of activity) {
-          const timestamp = new Date(entry.timestamp).toLocaleString();
-          const event = entry.event || 'unknown';
-          const message = entry.message || '';
-          console.log(`${chalk.gray(timestamp)} ${chalk.yellow(event)}: ${message}`);
-        }
-        return;
-      }
-    } catch {
-      // continue
+    if (isJsonOutput(options)) {
+      outputJson({
+        ok: true,
+        workspaceId: resolved.workspace.id,
+        taskId: resolved.task.id,
+        limit,
+        count: activity?.length || 0,
+        entries: (activity || []).map((entry) => ({
+          timestamp: entry.timestamp,
+          event: entry.event || 'unknown',
+          message: entry.message || '',
+          metadata: entry.metadata ?? null,
+        })),
+      });
+      return;
     }
-  }
 
-  console.error(chalk.red(`Task not found: ${taskId}`));
-  process.exit(1);
+    console.log(chalk.bold(`\n📋 Activity for ${resolved.task.frontmatter.title}\n`));
+
+    if (!activity || activity.length === 0) {
+      console.log(chalk.gray('No activity found.'));
+      return;
+    }
+
+    for (const entry of activity) {
+      const timestamp = new Date(entry.timestamp).toLocaleString();
+      const event = entry.event || 'unknown';
+      const message = entry.message || '';
+      console.log(`${chalk.gray(timestamp)} ${chalk.yellow(event)}: ${message}`);
+    }
+  } catch (err) {
+    if (handleConnectionError(err)) return;
+    printCliError(err.message, options, { code: 'TASK_ACTIVITY_FAILED' });
+  }
 }
 
 // =============================================================================
 // Task Conversation Command
 // =============================================================================
 
-async function taskConversation(taskId, options) {
+async function taskConversation(taskId, options = {}) {
   if (!taskId) {
-    console.error(chalk.red('Error: Task ID is required'));
-    process.exit(1);
+    printCliError('Task ID is required', options, { code: 'MISSING_TASK_ID' });
   }
 
   const client = new ApiClient();
 
-  // Find task workspace
-  const workspaces = await client.listWorkspaces();
+  try {
+    const resolved = await resolveTaskReference(client, taskId);
 
-  for (const ws of workspaces) {
+    let execution = null;
     try {
-      const tasks = await client.listTasks(ws.id, 'all');
-      const task = tasks.find(t => t.id === taskId || t.id.startsWith(taskId));
-      if (task) {
-        try {
-          const execution = await client.getTaskExecution(ws.id, task.id);
-
-          console.log(chalk.bold(`\n💬 Conversation for ${task.frontmatter.title}\n`));
-
-          if (execution.output && execution.output.length > 0) {
-            console.log(chalk.gray(execution.output));
-          } else {
-            console.log(chalk.gray('No conversation output available.'));
-          }
-
-          if (options.follow) {
-            console.log(chalk.gray('\n--follow not yet implemented in CLI'));
-          }
-        } catch (err) {
-          if (err.status === 404) {
-            console.log(chalk.yellow('No active execution found for this task.'));
-          } else {
-            throw err;
-          }
-        }
-        return;
+      execution = await client.getTaskExecution(resolved.workspace.id, resolved.task.id);
+    } catch (err) {
+      if (err.status !== 404) {
+        throw err;
       }
-    } catch {
-      // continue
     }
-  }
 
-  console.error(chalk.red(`Task not found: ${taskId}`));
-  process.exit(1);
+    const allConversationLines = Array.isArray(execution?.output)
+      ? execution.output
+      : (execution?.output ? [String(execution.output)] : []);
+    const limit = options.limit || 100;
+    const conversationLines = allConversationLines.slice(-limit);
+
+    if (isJsonOutput(options)) {
+      outputJson({
+        ok: true,
+        workspaceId: resolved.workspace.id,
+        taskId: resolved.task.id,
+        sessionId: execution?.sessionId || null,
+        status: execution?.status || null,
+        startTime: execution?.startTime || null,
+        endTime: execution?.endTime || null,
+        limit,
+        count: conversationLines.length,
+        messages: conversationLines.map((message, index) => ({
+          index,
+          role: 'assistant',
+          timestamp: execution?.startTime || null,
+          content: message,
+        })),
+      });
+      return;
+    }
+
+    console.log(chalk.bold(`\n💬 Conversation for ${resolved.task.frontmatter.title}\n`));
+
+    if (conversationLines.length > 0) {
+      for (const line of conversationLines) {
+        console.log(chalk.gray(line));
+      }
+    } else {
+      console.log(chalk.gray('No conversation output available.'));
+    }
+
+    if (options.follow) {
+      console.log(chalk.gray('\n--follow not yet implemented in CLI'));
+    }
+  } catch (err) {
+    if (handleConnectionError(err)) return;
+    printCliError(err.message, options, { code: 'TASK_CONVERSATION_FAILED' });
+  }
 }
 
 async function taskExport(taskId, options) {
@@ -1520,6 +1707,112 @@ async function taskImport(file, options) {
     spinner.stop('Failed to import task');
     console.error(chalk.red(`Error: ${err.message}`));
     process.exit(1);
+  }
+}
+
+// =============================================================================
+// Planning Commands
+// =============================================================================
+
+async function resolvePlanningScope(client, options = {}) {
+  if (options.workspace && options.task) {
+    throw new Error('Use either --workspace or --task, not both');
+  }
+
+  if (options.task) {
+    const resolved = await resolveTaskReference(client, options.task);
+    return { workspaceId: resolved.workspace.id, task: resolved.task, workspace: resolved.workspace, source: 'task' };
+  }
+
+  if (options.workspace) {
+    const workspace = await resolveWorkspaceIdInput(client, options.workspace);
+    return { workspaceId: workspace.id, task: null, workspace, source: 'workspace' };
+  }
+
+  throw new Error('Either --workspace or --task is required');
+}
+
+async function planningStatus(options = {}) {
+  const client = new ApiClient();
+  try {
+    const scope = await resolvePlanningScope(client, options);
+    const planning = await client.getPlanningStatus(scope.workspaceId);
+
+    const response = {
+      workspaceId: scope.workspaceId,
+      scope: scope.source,
+      planningStatus: planning?.status || 'idle',
+      ...(scope.task ? {
+        taskId: scope.task.id,
+        taskTitle: scope.task.frontmatter?.title,
+        taskPlanningStatus: scope.task.frontmatter?.planningStatus || null,
+      } : {}),
+    };
+
+    if (isJsonOutput(options)) {
+      outputJson({ ok: true, ...response });
+      return;
+    }
+
+    console.log(chalk.bold('\nPlanning Status\n'));
+    console.log(`  Workspace: ${scope.workspaceId}`);
+    if (scope.task) console.log(`  Task: ${scope.task.id} (${scope.task.frontmatter?.title || 'Untitled'})`);
+    console.log(`  Agent status: ${planning?.status || 'idle'}`);
+    if (scope.task) console.log(`  Task planning status: ${scope.task.frontmatter?.planningStatus || '-'}`);
+  } catch (err) {
+    if (handleConnectionError(err)) return;
+    printCliError(err.message, options, { code: 'PLANNING_STATUS_FAILED' });
+  }
+}
+
+async function planningStop(options = {}) {
+  const client = new ApiClient();
+  try {
+    const scope = await resolvePlanningScope(client, options);
+    const result = await client.stopPlanning(scope.workspaceId);
+
+    if (isJsonOutput(options)) {
+      outputJson({
+        ok: true,
+        workspaceId: scope.workspaceId,
+        scope: scope.source,
+        taskId: scope.task?.id || null,
+        stopped: result.stopped === true,
+      });
+      return;
+    }
+
+    console.log(chalk.green(`✓ Planning stop requested (${result.stopped ? 'stopped' : 'no active planning turn'})`));
+  } catch (err) {
+    if (handleConnectionError(err)) return;
+    printCliError(err.message, options, { code: 'PLANNING_STOP_FAILED' });
+  }
+}
+
+async function planningReset(options = {}) {
+  const client = new ApiClient();
+  try {
+    const scope = await resolvePlanningScope(client, options);
+    const result = await client.resetPlanning(scope.workspaceId);
+
+    if (isJsonOutput(options)) {
+      outputJson({
+        ok: true,
+        workspaceId: scope.workspaceId,
+        scope: scope.source,
+        taskId: scope.task?.id || null,
+        sessionId: result.sessionId || null,
+      });
+      return;
+    }
+
+    console.log(chalk.green('✓ Planning session reset'));
+    if (result.sessionId) {
+      console.log(`  Session ID: ${result.sessionId}`);
+    }
+  } catch (err) {
+    if (handleConnectionError(err)) return;
+    printCliError(err.message, options, { code: 'PLANNING_RESET_FAILED' });
   }
 }
 
@@ -2422,6 +2715,12 @@ async function piSkillsGet(skillId) {
   }
 }
 
+function capabilitiesCommand(options = {}) {
+  const contract = buildCapabilityContract();
+  const spacing = options.compact ? 0 : 2;
+  console.log(JSON.stringify(contract, null, spacing));
+}
+
 // =============================================================================
 // CLI Setup
 // =============================================================================
@@ -2538,6 +2837,7 @@ taskCmd
   .requiredOption('-w, --workspace <id>', 'Workspace ID')
   .option('-t, --title <title>', 'Task title')
   .option('-c, --content <content>', 'Task content/description')
+  .option('-f, --file <path>', 'Read content from file')
   .action(taskCreate);
 
 taskCmd
@@ -2565,6 +2865,8 @@ taskCmd
   .command('execute <task-id>')
   .alias('exec')
   .description('Start executing a task')
+  .option('--json', 'Output JSON')
+  .option('--output <format>', 'Output format (json)')
   .action(taskExecute);
 
 taskCmd
@@ -2609,6 +2911,8 @@ taskCmd
   .command('activity <task-id>')
   .description('View task activity log')
   .option('-l, --limit <n>', 'Number of entries', parseInt, 50)
+  .option('--json', 'Output JSON')
+  .option('--output <format>', 'Output format (json)')
   .action(taskActivity);
 
 taskCmd
@@ -2616,7 +2920,42 @@ taskCmd
   .alias('chat')
   .description('View task conversation')
   .option('-f, --follow', 'Follow in real-time (not yet implemented)')
+  .option('-l, --limit <n>', 'Number of conversation lines', parseInt, 100)
+  .option('--json', 'Output JSON')
+  .option('--output <format>', 'Output format (json)')
   .action(taskConversation);
+
+// Planning commands
+const planningCmd = program
+  .command('planning')
+  .description('Manage planning lifecycle');
+
+planningCmd
+  .command('status')
+  .description('Show planning status for a workspace or task')
+  .option('-w, --workspace <id>', 'Workspace ID')
+  .option('-t, --task <task-id>', 'Task ID')
+  .option('--json', 'Output JSON')
+  .option('--output <format>', 'Output format (json)')
+  .action(planningStatus);
+
+planningCmd
+  .command('stop')
+  .description('Stop active planning execution for a workspace or task')
+  .option('-w, --workspace <id>', 'Workspace ID')
+  .option('-t, --task <task-id>', 'Task ID')
+  .option('--json', 'Output JSON')
+  .option('--output <format>', 'Output format (json)')
+  .action(planningStop);
+
+planningCmd
+  .command('reset')
+  .description('Reset planning session for a workspace or task')
+  .option('-w, --workspace <id>', 'Workspace ID')
+  .option('-t, --task <task-id>', 'Task ID')
+  .option('--json', 'Output JSON')
+  .option('--output <format>', 'Output format (json)')
+  .action(planningReset);
 
 // Queue commands
 const queueCmd = program
@@ -2768,6 +3107,13 @@ program
   .option('--output <format>', 'Output format (json)')
   .action(statsCommand);
 
+// Capabilities command
+program
+  .command('capabilities')
+  .description('Print machine-readable CLI capability contract')
+  .option('--compact', 'Output compact JSON')
+  .action(capabilitiesCommand);
+
 // Update command
 program
   .command('update')
@@ -2875,7 +3221,7 @@ if (isMainModule) {
   }
 
   // Check for updates on certain commands (but not on update command itself)
-  const skipUpdateCheck = ['update', '--version', '-v', '--help', '-h'];
+  const skipUpdateCheck = ['update', 'capabilities', '--version', '-v', '--help', '-h'];
   const shouldCheckUpdate = !skipUpdateCheck.some(cmd => process.argv.includes(cmd));
 
   if (shouldCheckUpdate) {
@@ -2889,6 +3235,12 @@ if (isMainModule) {
 export {
   isJsonOutput,
   shouldSkipConfirmation,
+  parseCommaSeparatedList,
+  readUtf8FileContent,
+  resolveTaskContentFromOptions,
+  buildTaskUpdateRequest,
   toWorkspaceJson,
   toTaskJson,
+  collectCommandPaths,
+  buildCapabilityContract,
 };
