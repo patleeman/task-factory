@@ -48,7 +48,7 @@ Manage tasks across workspaces.
 List tasks in a workspace.
 
 ```bash
-task-factory task list --workspace <id> [--scope <scope>] [--all]
+task-factory task list [--workspace <id>] [--phase <phase>] [--json | --output json]
 ```
 
 **Options:**
@@ -63,10 +63,10 @@ task-factory task list --workspace <id> [--scope <scope>] [--all]
 task-factory task list --workspace ws-abc123
 
 # List all tasks across all workspaces
-task-factory task list --all
+task-factory task list
 
 # List archived tasks
-task-factory task list --workspace ws-abc123 --scope archived
+task-factory task list --workspace ws-abc123 --phase archived
 ```
 
 ### `task-factory task show <task-id>`
