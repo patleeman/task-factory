@@ -51,6 +51,10 @@ interface WorkspaceEntry {
   artifactRoot?: string;
 }
 
+function isWorkspaceEntryStale(entry: WorkspaceEntry): boolean {
+  return !existsSync(entry.path);
+}
+
 async function loadRegistry(): Promise<WorkspaceEntry[]> {
   try {
     const content = await readFile(REGISTRY_PATH, 'utf-8');
@@ -416,11 +420,22 @@ export async function loadWorkspace(path: string): Promise<Workspace | null> {
 
 export async function getWorkspaceById(id: string): Promise<Workspace | null> {
   const entries = await loadRegistry();
-  const entry = entries.find((e) => e.id === id);
+  const exactEntry = entries.find((e) => e.id === id);
+  const matchedByPrefix = entries.filter((e) => e.id.startsWith(id));
+
+  const entry = exactEntry ?? (matchedByPrefix.length === 1 ? matchedByPrefix[0] : null);
   if (!entry) return null;
 
+  if (isWorkspaceEntryStale(entry)) {
+    await removeFromRegistry(entry.id);
+    return null;
+  }
+
   const config = await readWorkspaceConfig(entry.path, entry.artifactRoot);
-  if (!config) return null;
+  if (!config) {
+    await removeFromRegistry(entry.id);
+    return null;
+  }
 
   // Backfill registry if config has an artifactRoot the registry doesn't know about yet.
   if (config.artifactRoot && entry.artifactRoot !== config.artifactRoot) {
@@ -440,20 +455,34 @@ export async function getWorkspaceById(id: string): Promise<Workspace | null> {
 export async function listWorkspaces(): Promise<Workspace[]> {
   const entries = await loadRegistry();
   const workspaces: Workspace[] = [];
+  const staleIds: string[] = [];
 
   for (const entry of entries) {
-    const config = await readWorkspaceConfig(entry.path, entry.artifactRoot);
-    if (config) {
-      workspaces.push({
-        id: entry.id,
-        path: entry.path,
-        name: entry.name,
-        config,
-        createdAt: '',
-        updatedAt: '',
-      });
+    if (isWorkspaceEntryStale(entry)) {
+      staleIds.push(entry.id);
+      continue;
     }
-    // If config file is gone, the workspace dir was deleted — skip it
+
+    const config = await readWorkspaceConfig(entry.path, entry.artifactRoot);
+    if (!config) {
+      staleIds.push(entry.id);
+      continue;
+    }
+
+    workspaces.push({
+      id: entry.id,
+      path: entry.path,
+      name: entry.name,
+      config,
+      createdAt: '',
+      updatedAt: '',
+    });
+  }
+
+  if (staleIds.length > 0) {
+    for (const staleId of staleIds) {
+      await removeFromRegistry(staleId);
+    }
   }
 
   return workspaces;

@@ -38,6 +38,7 @@ import { logger } from './logger.js';
 import { buildTaskStateSnapshot } from './state-contract.js';
 import { logTaskStateTransition } from './state-transition.js';
 import { registerQueueKickHandler } from './queue-kick-coordinator.js';
+import { emitNotification } from './notification-gateway-service.js';
 
 // =============================================================================
 // Constants
@@ -800,11 +801,37 @@ class QueueManager {
             from: 'executing',
             to: 'complete',
           });
+
+          emitNotification({
+            id: randomUUID(),
+            timestamp: new Date().toISOString(),
+            source: 'queue-manager',
+            taskId: currentTask.id,
+            workspaceId: this.workspaceId,
+            workspacePath: workspace.path,
+            type: 'task-lifecycle',
+            severity: 'info',
+            message: `Task ${currentTask.id} completed`,
+            metadata: { phase: 'complete' },
+          });
         } else {
           const modelKey = this.getTaskExecutionModelKey(currentTask);
           if (modelKey && details?.errorMessage) {
             this.recordExecutionFailure(modelKey, details.errorMessage);
           }
+
+          emitNotification({
+            id: randomUUID(),
+            timestamp: new Date().toISOString(),
+            source: 'queue-manager',
+            taskId: currentTask.id,
+            workspaceId: this.workspaceId,
+            workspacePath: workspace.path,
+            type: 'task-lifecycle',
+            severity: 'error',
+            message: `Task ${currentTask.id} execution failed`,
+            metadata: { errorMessage: details?.errorMessage ?? null },
+          });
         }
         // On failure, leave in executing for manual intervention
       }

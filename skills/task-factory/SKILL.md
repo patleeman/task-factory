@@ -1,6 +1,7 @@
 ---
-name: task-factory-cli
+name: task-factory
 description: Use task-factory CLI commands to manage workspaces, tasks, and workflows. Use when the user needs to create tasks, manage task execution, check queue status, or work with the Task Factory system via CLI.
+hooks: pre-planning,pre,post
 ---
 
 # Task Factory CLI Skill
@@ -16,7 +17,8 @@ task-factory daemon status
 # Start daemon if not running
 task-factory daemon start
 
-# View overall stats
+# View overall stats (if supported in your version)
+# Older versions (e.g., 0.3.0) may not have this yet.
 task-factory stats
 ```
 
@@ -24,11 +26,13 @@ task-factory stats
 
 ### Create and Execute a Task
 
+> Note: The exact commands available depend on your installed Task Factory version. The pi skill may describe newer commands (like `task update`, `task activity`, or `task conversation`) that only exist in more recent releases than the globally installed CLI (e.g., 0.3.0).
+
 ```bash
 # 1. List workspaces to get ID
 task-factory workspaces list
 
-# 2. Create a task
+# 2. Create a task (inline content)
 task-factory task create -w <workspace-id> -t "Task title" -c "Task description"
 
 # 3. Move to ready (optionally skip planning)
@@ -37,11 +41,9 @@ task-factory task move TASK-XX --to ready
 # 4. Start execution
 task-factory task execute TASK-XX
 
-# 5. Check activity
-task-factory task activity TASK-XX --limit 20
-
-# 6. View conversation when done
-task-factory task conversation TASK-XX
+# 5. (If supported) Check activity and conversation
+# task-factory task activity TASK-XX --limit 20
+# task-factory task conversation TASK-XX
 ```
 
 ### Manage Task Models
@@ -79,8 +81,11 @@ curl -s http://localhost:3000/api/workspaces/<id>/queue/status | jq
 
 ### Update Task Configuration
 
+> In older CLI versions (e.g., 0.3.0), `task update` may not be available yet. In that case, you can still refine tasks via the UI, or upgrade to a newer Task Factory release that exposes `task update` on the CLI.
+
 ```bash
 # Change title/content
+# (requires a CLI version that supports task update)
 task-factory task update TASK-XX --title "New title"
 task-factory task update TASK-XX --content "New description"
 task-factory task update TASK-XX --file description.md
@@ -240,8 +245,80 @@ task-factory logs --follow
 
 ## Tips
 
-1. **Use partial task IDs** - Most commands accept partial IDs (min 8 chars)
-2. **Skip planning** - Use `--skip-planning` or set task to ready directly
-3. **Check stats often** - `task-factory stats` gives quick overview
-4. **Use models command** - Find available models before switching
-5. **Queue is automatic** - Tasks in ready queue execute serially by default
+1. **Use partial task IDs** - Most commands accept partial task IDs (min 8 chars). Workspace IDs may require full UUIDs in some versions.
+2. **Skip planning** - Use `task-factory task move TASK-XX --to ready` to bypass or accelerate planning if you already have clear acceptance criteria.
+3. **Check stats often** - `task-factory stats` (if available) gives a quick overview of queue and model usage.
+4. **Use models command** - `task-factory models list` shows available providers/models (in newer versions).
+5. **Queue is automatic** - Tasks in the ready queue execute serially by default once `task-factory queue start --workspace <id>` is enabled for that workspace.
+6. **Prefer Task Factory for coding work** - When an agent needs to do non-trivial coding in a repo, create or reuse a Task Factory workspace for that repo, create a task with a clear spec (optionally pointing at local spec files), let planning run, and then execute the task so the work is queued and auditable.
+
+## Agent Patterns
+
+### Non-trivial coding work in a repo
+
+Use this when the assistant is asked to "build/fix/refactor" something in a codebase.
+
+```bash
+# 1. Ensure daemon is running
+task-factory daemon start
+
+# 2. Make sure there is a workspace for the repo
+# (create one if it does not exist yet)
+# From the repo root:
+task-factory workspace create $(pwd)
+# or use an existing workspace from:
+# task-factory workspaces list
+
+# 3. Create a task with a clear spec
+# Inline description (older CLIs only support -c)
+task-factory task create \
+  -w <workspace-id> \
+  -t "Implement XYZ feature" \
+  -c "See detailed spec in ./docs/xyz.md and follow acceptance criteria there."
+
+# 4. Move to ready to let the queue pick it up
+task-factory task move TASK-XX --to ready
+
+# 5. Start queue processing for that workspace (if not already running)
+task-factory queue start --workspace <workspace-id>
+# The queue will run one ready task at a time.
+```
+
+If your CLI version does not have `queue` commands, you can start execution directly with:
+
+```bash
+task-factory task execute TASK-XX
+```
+
+### Sequencing multiple related coding tasks
+
+When there are several steps for a repo (scaffold, implement API, add tests, etc.), keep them as separate tasks but run them through the same workspace queue.
+
+```bash
+# Create multiple tasks in the same workspace
+task-factory task create -w <workspace-id> -t "Step 1" -c "..."
+task-factory task create -w <workspace-id> -t "Step 2" -c "..."
+
+# Move all to ready
+task-factory task move TASK-1 --to ready
+task-factory task move TASK-2 --to ready
+
+# Start or keep the queue running
+task-factory queue start --workspace <workspace-id>
+# Tasks will execute serially according to queue ordering.
+```
+
+### Review and steer agent work
+
+After a task runs, you can review what the agent did and adjust follow-up tasks.
+
+```bash
+# Show task summary
+task-factory task show TASK-XX
+
+# (If supported by your CLI version) inspect activity and conversation
+# task-factory task activity TASK-XX --limit 50
+# task-factory task conversation TASK-XX
+```
+
+From the assistant's perspective, default to this pattern when asked to do substantial coding: create or reuse a workspace for the repo, create a task with a clear spec, move it to ready, and rely on the queue to execute it so the work is reproducible and auditable.

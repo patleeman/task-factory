@@ -68,6 +68,17 @@ Delete safety: `DELETE /api/workspaces/:workspaceId/tasks/:taskId` stops any act
 | 5 | Move to `executing` and run `executeTask` |
 | 6 | On completion, move to `complete` and kick queue again |
 
+### 5) Daemon→gateway notification flow
+
+| Step | Summary |
+|---|---|
+| 1 | Producer emits a generic `NotificationEvent` (scheduler, queue manager, or daemon module) |
+| 2 | Server validates payload at `POST /api/notifications/intake` |
+| 3 | Event is durably enqueued to `~/.taskfactory/notifications-queue.json` |
+| 4 | Notification worker evaluates global routes + workspace overrides |
+| 5 | Router enforces allowlisted Telegram/Discord targets |
+| 6 | Delivery logs sent/retried/failed outcomes with bounded retry/backoff |
+
 ### Execution reliability telemetry and alerting
 
 Execution emits structured reliability signals as `system-event` activity entries with `metadata.kind = "execution-reliability"`.

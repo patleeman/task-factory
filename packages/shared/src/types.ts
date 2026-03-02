@@ -1104,6 +1104,47 @@ export interface WorkflowDefaultsConfig {
   readyToExecuting?: boolean;
 }
 
+export type NotificationSeverity = 'info' | 'warning' | 'error';
+export type NotificationType = 'scheduled-task' | 'task-lifecycle' | 'job-complete' | 'custom';
+
+export interface NotificationEvent {
+  id: string;
+  timestamp: string;
+  source: string;
+  taskId?: string;
+  workspaceId?: string;
+  workspacePath?: string;
+  profileId?: string;
+  type: NotificationType;
+  severity: NotificationSeverity;
+  message: string;
+  link?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface NotificationRoute {
+  id: string;
+  enabled: boolean;
+  workspaceId?: string;
+  profileId?: string;
+  taskIdPattern?: string;
+  severities?: NotificationSeverity[];
+  types?: NotificationType[];
+  target: {
+    provider: 'telegram' | 'discord';
+    destination: string;
+  };
+}
+
+export interface NotificationSettings {
+  enabled: boolean;
+  sharedSecret?: string;
+  allowlistedTargets: string[];
+  routes: NotificationRoute[];
+  maxRetries?: number;
+  retryBackoffMs?: number;
+}
+
 /** Workspace-level override values (undefined = inherit from global defaults). */
 export interface WorkspaceWorkflowOverrides {
   readyLimit?: number;
@@ -1150,6 +1191,12 @@ export interface WorkspaceConfig {
 
   // Workflow automation settings (per-workspace)
   workflowAutomation?: WorkspaceAutomationConfig;
+
+  // Workspace-level notification gateway overrides
+  notifications?: {
+    enabled?: boolean;
+    routes?: NotificationRoute[];
+  };
 }
 
 const BUILT_IN_READY_LIMIT = typeof DEFAULT_WIP_LIMITS.ready === 'number' && DEFAULT_WIP_LIMITS.ready > 0

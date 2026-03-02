@@ -22,6 +22,7 @@ import type {
   ClientEvent,
   TaskDefaults,
   ModelConfig,
+  NotificationSettings,
 } from '@task-factory/shared';
 import {
   PHASES,
@@ -80,6 +81,15 @@ import {
   skipPiMigration,
   type PiMigrationCategory,
 } from './pi-migration-service.js';
+import {
+  emitNotification,
+  getNotificationQueueStatus,
+  getNotificationSettings,
+  getWorkspaceNotificationOverrides,
+  startNotificationWorker,
+  updateNotificationSettings,
+  updateWorkspaceNotificationOverrides,
+} from './notification-gateway-service.js';
 
 // =============================================================================
 // Configuration
@@ -253,6 +263,58 @@ app.use(express.static(clientDistPath));
 // Health check
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Global notification settings
+app.get('/api/notifications/settings', (_req, res) => {
+  res.json(getNotificationSettings());
+});
+
+app.put('/api/notifications/settings', (req, res) => {
+  const body = req.body as Partial<NotificationSettings>;
+  const current = getNotificationSettings();
+  const updated = updateNotificationSettings({ ...current, ...body });
+  res.json(updated);
+});
+
+// Workspace-level notification overrides
+app.get('/api/workspaces/:workspaceId/notifications', async (req, res) => {
+  const overrides = await getWorkspaceNotificationOverrides(req.params.workspaceId);
+  res.json(overrides ?? {});
+});
+
+app.put('/api/workspaces/:workspaceId/notifications', async (req, res) => {
+  try {
+    const overrides = await updateWorkspaceNotificationOverrides(req.params.workspaceId, req.body);
+    res.json(overrides ?? {});
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to update workspace notification overrides';
+    res.status(404).json({ error: message });
+  }
+});
+
+// Daemon -> gateway intake channel
+app.post('/api/notifications/intake', (req, res) => {
+  try {
+    const settings = getNotificationSettings();
+    if (settings.sharedSecret) {
+      const provided = req.header('x-task-factory-daemon-token');
+      if (!provided || provided !== settings.sharedSecret) {
+        res.status(401).json({ error: 'Invalid daemon token' });
+        return;
+      }
+    }
+
+    const event = emitNotification(req.body);
+    res.status(202).json({ accepted: true, id: event.id });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Invalid notification payload';
+    res.status(400).json({ error: message });
+  }
+});
+
+app.get('/api/notifications/queue', (_req, res) => {
+  res.json(getNotificationQueueStatus());
 });
 
 // Browse directories (for folder picker)
@@ -3471,6 +3533,8 @@ async function main() {
 ║  Listening on http://${HOST}:${PORT}                    ║
 ╚══════════════════════════════════════════════════════════╝
     `);
+
+    startNotificationWorker();
 
     // Recover stale executing sessions before queue/planning startup resumes.
     try {

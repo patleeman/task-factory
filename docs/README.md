@@ -35,6 +35,7 @@ All subject docs live as flat markdown files directly under `docs/`.
 | contribution-commands | [contribution-commands.md](./contribution-commands.md) | Build/dev/test/release command reference |
 | contribution-extensions-skills | [contribution-extensions-skills.md](./contribution-extensions-skills.md) | Extension and execution-skill customization |
 | settings | [settings.md](./settings.md) | Global + workspace settings files, migration state, and precedence |
+| notifications | [notifications.md](./notifications.md) | Daemon→gateway notification design, routing, retries, and examples |
 
 ## Examples
 

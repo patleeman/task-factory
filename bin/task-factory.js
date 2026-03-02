@@ -312,6 +312,40 @@ function formatDuration(seconds) {
   return `${secs}s`;
 }
 
+function isJsonOutput(options = {}) {
+  const output = typeof options.output === 'string' ? options.output.toLowerCase() : undefined;
+  return options.json === true || output === 'json';
+}
+
+function shouldSkipConfirmation(options = {}) {
+  return options.yes === true || options.force === true;
+}
+
+function toWorkspaceJson(workspace) {
+  return {
+    id: workspace.id,
+    name: workspace.name,
+    path: workspace.path,
+    status: workspace.status,
+    createdAt: workspace.createdAt,
+    updatedAt: workspace.updatedAt,
+  };
+}
+
+function toTaskJson(task) {
+  const fm = task.frontmatter || {};
+  return {
+    id: task.id,
+    title: fm.title,
+    phase: fm.phase,
+    workspaceId: fm.workspace,
+    createdAt: fm.created,
+    updatedAt: fm.updated,
+    acceptanceCriteria: fm.acceptanceCriteria || [],
+    content: task.content || '',
+  };
+}
+
 function printWorkspaces(workspaces) {
   if (workspaces.length === 0) {
     console.log(chalk.yellow('No workspaces found.'));
@@ -319,15 +353,18 @@ function printWorkspaces(workspaces) {
   }
 
   const table = new Table({
-    head: [chalk.bold('ID'), chalk.bold('Name'), chalk.bold('Path'), chalk.bold('Created')],
-    colWidths: [12, 25, 45, 20],
+    head: [chalk.bold('ID'), chalk.bold('Status'), chalk.bold('Name'), chalk.bold('Path'), chalk.bold('Created')],
+    colWidths: [38, 10, 22, 42, 20],
+    wordWrap: true,
   });
 
   for (const ws of workspaces) {
+    const status = ws.status === 'stale' ? chalk.yellow('stale') : chalk.green('active');
     table.push([
-      ws.id.slice(0, 10),
+      ws.id,
+      status,
       ws.name || '-',
-      ws.path.length > 40 ? '...' + ws.path.slice(-37) : ws.path,
+      ws.path,
       formatDate(ws.createdAt),
     ]);
   }
@@ -425,6 +462,28 @@ function printQueueStatus(status) {
   console.log(`  ${chalk.bold('Current Task:')} ${status.currentTaskId || chalk.gray('None')}`);
   console.log(`  ${chalk.bold('Ready Tasks:')} ${status.tasksInReady}`);
   console.log(`  ${chalk.bold('Executing Tasks:')} ${status.tasksInExecuting}`);
+}
+
+async function resolveWorkspaceIdInput(client, workspaceIdInput) {
+  const query = workspaceIdInput.trim();
+  const workspaces = await client.listWorkspaces();
+
+  const exact = workspaces.find((workspace) => workspace.id === query);
+  if (exact) {
+    return exact;
+  }
+
+  const matches = workspaces.filter((workspace) => workspace.id.startsWith(query));
+  if (matches.length === 1) {
+    return matches[0];
+  }
+
+  if (matches.length > 1) {
+    const details = matches.map((workspace) => `  - ${workspace.id} (${workspace.name})`).join('\n');
+    throw new Error(`Ambiguous workspace ID "${workspaceIdInput}". Matches:\n${details}`);
+  }
+
+  throw new Error(`Workspace not found: ${workspaceIdInput}`);
 }
 
 // =============================================================================
@@ -588,10 +647,14 @@ async function daemonStatus() {
 // Workspace Commands
 // =============================================================================
 
-async function workspaceList() {
+async function workspaceList(options = {}) {
   const client = new ApiClient();
   try {
     const workspaces = await client.listWorkspaces();
+    if (isJsonOutput(options)) {
+      console.log(JSON.stringify({ workspaces: workspaces.map(toWorkspaceJson), count: workspaces.length }, null, 2));
+      return;
+    }
     printWorkspaces(workspaces);
   } catch (err) {
     if (handleConnectionError(err)) return;
@@ -641,29 +704,39 @@ async function workspaceCreate(path, options) {
   }
 }
 
-async function workspaceDelete(id) {
+async function workspaceDelete(id, options = {}) {
   if (!id) {
     console.error(chalk.red('Error: Workspace ID is required'));
     process.exit(1);
   }
 
-  const confirmed = await clack.confirm({
-    message: `Are you sure you want to delete workspace ${id}?`,
-    initialValue: false,
-  });
+  const client = new ApiClient();
+  let workspace;
 
-  if (!confirmed) {
-    console.log(chalk.yellow('Cancelled.'));
-    return;
+  try {
+    workspace = await resolveWorkspaceIdInput(client, id);
+  } catch (err) {
+    console.error(chalk.red(`Error: ${err.message}`));
+    process.exit(1);
+  }
+
+  if (!shouldSkipConfirmation(options)) {
+    const confirmed = await clack.confirm({
+      message: `Are you sure you want to delete workspace ${workspace.id} (${workspace.name})?`,
+      initialValue: false,
+    });
+
+    if (!confirmed) {
+      console.log(chalk.yellow('Cancelled.'));
+      return;
+    }
   }
 
   const spinner = clack.spinner();
   spinner.start('Deleting workspace...');
 
-  const client = new ApiClient();
-
   try {
-    await client.deleteWorkspace(id);
+    await client.deleteWorkspace(workspace.id);
     spinner.stop('Workspace deleted');
     console.log(chalk.green('✓ Workspace deleted'));
   } catch (err) {
@@ -673,14 +746,28 @@ async function workspaceDelete(id) {
   }
 }
 
-async function workspaceShow(id) {
+async function workspaceShow(id, options = {}) {
   if (!id) {
     console.error(chalk.red('Error: Workspace ID is required'));
     process.exit(1);
   }
 
   const client = new ApiClient();
-  const workspace = await client.getWorkspace(id);
+  let resolved;
+
+  try {
+    resolved = await resolveWorkspaceIdInput(client, id);
+  } catch (err) {
+    console.error(chalk.red(`Error: ${err.message}`));
+    process.exit(1);
+  }
+
+  const workspace = await client.getWorkspace(resolved.id);
+
+  if (isJsonOutput(options)) {
+    console.log(JSON.stringify({ workspace: toWorkspaceJson(workspace) }, null, 2));
+    return;
+  }
 
   console.log(chalk.bold('\nWorkspace Details:'));
   console.log(`  ${chalk.bold('ID:')} ${workspace.id}`);
@@ -700,8 +787,18 @@ async function workspaceExport(id, options) {
   spinner.start('Exporting workspace...');
 
   const client = new ApiClient();
-  const workspace = await client.getWorkspace(id);
-  const tasks = await client.listTasks(id, 'all');
+  let resolved;
+
+  try {
+    resolved = await resolveWorkspaceIdInput(client, id);
+  } catch (err) {
+    spinner.stop('Failed to export workspace');
+    console.error(chalk.red(`Error: ${err.message}`));
+    process.exit(1);
+  }
+
+  const workspace = await client.getWorkspace(resolved.id);
+  const tasks = await client.listTasks(resolved.id, 'all');
 
   const exportData = {
     version: '1.0',
@@ -720,7 +817,7 @@ async function workspaceExport(id, options) {
     })),
   };
 
-  const outputPath = options.output || `workspace-${id.slice(0, 8)}-${Date.now()}.json`;
+  const outputPath = options.output || `workspace-${workspace.id.slice(0, 8)}-${Date.now()}.json`;
   writeFileSync(outputPath, JSON.stringify(exportData, null, 2));
 
   spinner.stop('Workspace exported');
@@ -809,20 +906,39 @@ async function taskList(options) {
   const client = new ApiClient();
 
   let tasks = [];
+  let resolvedWorkspaceId = null;
 
-  if (options.workspace) {
-    tasks = await client.listTasks(options.workspace, options.phase || 'active');
-  } else {
-    // List tasks from all workspaces
-    const workspaces = await client.listWorkspaces();
-    for (const ws of workspaces) {
-      try {
-        const wsTasks = await client.listTasks(ws.id, options.phase || 'active');
-        tasks.push(...wsTasks);
-      } catch {
-        // skip workspaces with errors
+  try {
+    if (options.workspace) {
+      const workspace = await resolveWorkspaceIdInput(client, options.workspace);
+      resolvedWorkspaceId = workspace.id;
+      tasks = await client.listTasks(workspace.id, options.phase || 'active');
+    } else {
+      // List tasks from all workspaces
+      const workspaces = await client.listWorkspaces();
+      for (const ws of workspaces) {
+        try {
+          const wsTasks = await client.listTasks(ws.id, options.phase || 'active');
+          tasks.push(...wsTasks);
+        } catch {
+          // skip workspaces with errors
+        }
       }
     }
+  } catch (err) {
+    if (handleConnectionError(err)) return;
+    console.error(chalk.red(`Error: ${err.message}`));
+    process.exit(1);
+  }
+
+  if (isJsonOutput(options)) {
+    console.log(JSON.stringify({
+      tasks: tasks.map(toTaskJson),
+      count: tasks.length,
+      scope: options.phase || 'active',
+      workspaceId: resolvedWorkspaceId,
+    }, null, 2));
+    return;
   }
 
   printTasks(tasks, { showWorkspace: !options.workspace });
@@ -831,6 +947,16 @@ async function taskList(options) {
 async function taskCreate(options) {
   if (!options.workspace) {
     console.error(chalk.red('Error: --workspace is required'));
+    process.exit(1);
+  }
+
+  const client = new ApiClient();
+  let workspace;
+
+  try {
+    workspace = await resolveWorkspaceIdInput(client, options.workspace);
+  } catch (err) {
+    console.error(chalk.red(`Error: ${err.message}`));
     process.exit(1);
   }
 
@@ -862,10 +988,8 @@ async function taskCreate(options) {
   const spinner = clack.spinner();
   spinner.start('Creating task...');
 
-  const client = new ApiClient();
-
   try {
-    const task = await client.createTask(options.workspace, {
+    const task = await client.createTask(workspace.id, {
       title: options.title,
       content: content || '',
     });
@@ -882,7 +1006,7 @@ async function taskCreate(options) {
   }
 }
 
-async function taskShow(taskId) {
+async function taskShow(taskId, options = {}) {
   if (!taskId) {
     console.error(chalk.red('Error: Task ID is required'));
     process.exit(1);
@@ -910,6 +1034,11 @@ async function taskShow(taskId) {
   if (!foundTask) {
     console.error(chalk.red(`Task not found: ${taskId}`));
     process.exit(1);
+  }
+
+  if (isJsonOutput(options)) {
+    console.log(JSON.stringify({ task: toTaskJson(foundTask) }, null, 2));
+    return;
   }
 
   printTaskDetail(foundTask);
@@ -967,20 +1096,22 @@ async function taskMove(taskId, options) {
   }
 }
 
-async function taskDelete(taskId) {
+async function taskDelete(taskId, options = {}) {
   if (!taskId) {
     console.error(chalk.red('Error: Task ID is required'));
     process.exit(1);
   }
 
-  const confirmed = await clack.confirm({
-    message: `Are you sure you want to delete task ${taskId}?`,
-    initialValue: false,
-  });
+  if (!shouldSkipConfirmation(options)) {
+    const confirmed = await clack.confirm({
+      message: `Are you sure you want to delete task ${taskId}?`,
+      initialValue: false,
+    });
 
-  if (!confirmed) {
-    console.log(chalk.yellow('Cancelled.'));
-    return;
+    if (!confirmed) {
+      console.log(chalk.yellow('Cancelled.'));
+      return;
+    }
   }
 
   const client = new ApiClient();
@@ -1368,9 +1499,11 @@ async function taskImport(file, options) {
   spinner.start('Importing task...');
 
   const client = new ApiClient();
+  let workspace;
 
   try {
-    const task = await client.createTask(options.workspace, {
+    workspace = await resolveWorkspaceIdInput(client, options.workspace);
+    const task = await client.createTask(workspace.id, {
       title: importData.task.frontmatter.title || 'Untitled',
       content: importData.task.content || '',
       acceptanceCriteria: importData.task.frontmatter.acceptanceCriteria,
@@ -1397,20 +1530,27 @@ async function taskImport(file, options) {
 async function queueStatus(options) {
   const client = new ApiClient();
 
-  if (options.workspace) {
-    const status = await client.getQueueStatus(options.workspace);
-    printQueueStatus(status);
-  } else {
-    const workspaces = await client.listWorkspaces();
-    for (const ws of workspaces) {
-      console.log(chalk.bold(`\n${ws.name}:`));
-      try {
-        const status = await client.getQueueStatus(ws.id);
-        printQueueStatus(status);
-      } catch (err) {
-        console.log(chalk.red(`  Error: ${err.message}`));
+  try {
+    if (options.workspace) {
+      const workspace = await resolveWorkspaceIdInput(client, options.workspace);
+      const status = await client.getQueueStatus(workspace.id);
+      printQueueStatus(status);
+    } else {
+      const workspaces = await client.listWorkspaces();
+      for (const ws of workspaces) {
+        console.log(chalk.bold(`\n${ws.name}:`));
+        try {
+          const status = await client.getQueueStatus(ws.id);
+          printQueueStatus(status);
+        } catch (err) {
+          console.log(chalk.red(`  Error: ${err.message}`));
+        }
       }
     }
+  } catch (err) {
+    if (handleConnectionError(err)) return;
+    console.error(chalk.red(`Error: ${err.message}`));
+    process.exit(1);
   }
 }
 
@@ -1421,20 +1561,34 @@ async function queueStart(options) {
     const spinner = clack.spinner();
     spinner.start('Starting queue...');
 
-    const status = await client.startQueue(options.workspace);
+    try {
+      const workspace = await resolveWorkspaceIdInput(client, options.workspace);
+      const status = await client.startQueue(workspace.id);
 
-    spinner.stop('Queue started');
-    console.log(chalk.green('✓ Queue started'));
-    printQueueStatus(status);
+      spinner.stop('Queue started');
+      console.log(chalk.green('✓ Queue started'));
+      printQueueStatus(status);
+    } catch (err) {
+      spinner.stop('Failed to start queue');
+      if (handleConnectionError(err)) return;
+      console.error(chalk.red(`Error: ${err.message}`));
+      process.exit(1);
+    }
   } else {
-    const workspaces = await client.listWorkspaces();
-    for (const ws of workspaces) {
-      try {
-        await client.startQueue(ws.id);
-        console.log(chalk.green(`✓ ${ws.name}: Queue started`));
-      } catch (err) {
-        console.log(chalk.red(`✗ ${ws.name}: ${err.message}`));
+    try {
+      const workspaces = await client.listWorkspaces();
+      for (const ws of workspaces) {
+        try {
+          await client.startQueue(ws.id);
+          console.log(chalk.green(`✓ ${ws.name}: Queue started`));
+        } catch (err) {
+          console.log(chalk.red(`✗ ${ws.name}: ${err.message}`));
+        }
       }
+    } catch (err) {
+      if (handleConnectionError(err)) return;
+      console.error(chalk.red(`Error: ${err.message}`));
+      process.exit(1);
     }
   }
 }
@@ -1446,20 +1600,34 @@ async function queueStop(options) {
     const spinner = clack.spinner();
     spinner.start('Stopping queue...');
 
-    const status = await client.stopQueue(options.workspace);
+    try {
+      const workspace = await resolveWorkspaceIdInput(client, options.workspace);
+      const status = await client.stopQueue(workspace.id);
 
-    spinner.stop('Queue stopped');
-    console.log(chalk.green('✓ Queue stopped'));
-    printQueueStatus(status);
+      spinner.stop('Queue stopped');
+      console.log(chalk.green('✓ Queue stopped'));
+      printQueueStatus(status);
+    } catch (err) {
+      spinner.stop('Failed to stop queue');
+      if (handleConnectionError(err)) return;
+      console.error(chalk.red(`Error: ${err.message}`));
+      process.exit(1);
+    }
   } else {
-    const workspaces = await client.listWorkspaces();
-    for (const ws of workspaces) {
-      try {
-        await client.stopQueue(ws.id);
-        console.log(chalk.green(`✓ ${ws.name}: Queue stopped`));
-      } catch (err) {
-        console.log(chalk.red(`✗ ${ws.name}: ${err.message}`));
+    try {
+      const workspaces = await client.listWorkspaces();
+      for (const ws of workspaces) {
+        try {
+          await client.stopQueue(ws.id);
+          console.log(chalk.green(`✓ ${ws.name}: Queue stopped`));
+        } catch (err) {
+          console.log(chalk.red(`✗ ${ws.name}: ${err.message}`));
+        }
       }
+    } catch (err) {
+      if (handleConnectionError(err)) return;
+      console.error(chalk.red(`Error: ${err.message}`));
+      process.exit(1);
     }
   }
 }
@@ -1678,7 +1846,7 @@ async function isPackageInstalledGlobally() {
 // Stats Command
 // =============================================================================
 
-async function statsCommand() {
+async function statsCommand(options = {}) {
   const client = new ApiClient();
   const spinner = clack.spinner();
   spinner.start('Gathering statistics...');
@@ -1733,6 +1901,18 @@ async function statsCommand() {
     }
     
     spinner.stop('Statistics gathered');
+
+    if (isJsonOutput(options)) {
+      console.log(JSON.stringify({
+        summary: {
+          totalTasks: stats.total,
+          workspaceCount: workspaces.length,
+          byPhase: stats.byPhase,
+        },
+        workspaces: stats.byWorkspace,
+      }, null, 2));
+      return;
+    }
     
     // Output
     console.log(chalk.bold('\n📊 Task Factory Stats\n'));
@@ -2301,6 +2481,8 @@ const workspaceCmd = program
 workspaceCmd
   .command('list')
   .description('List all workspaces')
+  .option('--json', 'Output JSON')
+  .option('--output <format>', 'Output format (json)')
   .action(workspaceList);
 
 workspaceCmd
@@ -2312,11 +2494,15 @@ workspaceCmd
 workspaceCmd
   .command('delete <id>')
   .description('Delete a workspace')
+  .option('-y, --yes', 'Skip confirmation prompt')
+  .option('--force', 'Alias for --yes')
   .action(workspaceDelete);
 
 workspaceCmd
   .command('show <id>')
   .description('Show workspace details')
+  .option('--json', 'Output JSON')
+  .option('--output <format>', 'Output format (json)')
   .action(workspaceShow);
 
 workspaceCmd
@@ -2342,6 +2528,8 @@ taskCmd
   .description('List tasks')
   .option('-w, --workspace <id>', 'Filter by workspace')
   .option('-p, --phase <phase>', 'Filter by phase (all, active, archived)')
+  .option('--json', 'Output JSON')
+  .option('--output <format>', 'Output format (json)')
   .action(taskList);
 
 taskCmd
@@ -2355,6 +2543,8 @@ taskCmd
 taskCmd
   .command('show <task-id>')
   .description('Show task details')
+  .option('--json', 'Output JSON')
+  .option('--output <format>', 'Output format (json)')
   .action(taskShow);
 
 taskCmd
@@ -2367,6 +2557,8 @@ taskCmd
 taskCmd
   .command('delete <task-id>')
   .description('Delete a task')
+  .option('-y, --yes', 'Skip confirmation prompt')
+  .option('--force', 'Alias for --yes')
   .action(taskDelete);
 
 taskCmd
@@ -2572,6 +2764,8 @@ piSkillCmd
 program
   .command('stats')
   .description('Show task statistics across all workspaces')
+  .option('--json', 'Output JSON')
+  .option('--output <format>', 'Output format (json)')
   .action(statsCommand);
 
 // Update command
@@ -2669,21 +2863,32 @@ process.on('unhandledRejection', (reason, promise) => {
   process.exit(1);
 });
 
-// Parse and run
-program.parse();
+const isMainModule = process.argv[1] && resolve(process.argv[1]) === __filename;
 
-// Show help if no arguments provided
-if (process.argv.length <= 2) {
-  program.help();
+if (isMainModule) {
+  // Parse and run
+  program.parse();
+
+  // Show help if no arguments provided
+  if (process.argv.length <= 2) {
+    program.help();
+  }
+
+  // Check for updates on certain commands (but not on update command itself)
+  const skipUpdateCheck = ['update', '--version', '-v', '--help', '-h'];
+  const shouldCheckUpdate = !skipUpdateCheck.some(cmd => process.argv.includes(cmd));
+
+  if (shouldCheckUpdate) {
+    // Fire-and-forget update check (don't block CLI)
+    showUpdateNotice().catch(() => {
+      // Silently ignore errors
+    });
+  }
 }
 
-// Check for updates on certain commands (but not on update command itself)
-const skipUpdateCheck = ['update', '--version', '-v', '--help', '-h'];
-const shouldCheckUpdate = !skipUpdateCheck.some(cmd => process.argv.includes(cmd));
-
-if (shouldCheckUpdate) {
-  // Fire-and-forget update check (don't block CLI)
-  showUpdateNotice().catch(() => {
-    // Silently ignore errors
-  });
-}
+export {
+  isJsonOutput,
+  shouldSkipConfirmation,
+  toWorkspaceJson,
+  toTaskJson,
+};

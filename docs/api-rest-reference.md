@@ -105,6 +105,17 @@ Use `metadata.signal` + `metadata.outcome` + `metadata.sessionId`/`turnId` to bu
 | POST | `/api/workspaces/:workspaceId/queue/start` | Enable queue (also clears open execution breakers as manual resume) |
 | POST | `/api/workspaces/:workspaceId/queue/stop` | Disable queue |
 
+### Notification gateway endpoints
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/notifications/settings` | Read global daemon→gateway notification settings |
+| PUT | `/api/notifications/settings` | Update global notification settings (routes, allowlist, retry policy, shared secret) |
+| GET | `/api/workspaces/:workspaceId/notifications` | Read workspace notification overrides |
+| PUT | `/api/workspaces/:workspaceId/notifications` | Update workspace overrides (`enabled`, `routes`) |
+| POST | `/api/notifications/intake` | Daemon intake endpoint for generic notification events (supports optional `x-task-factory-daemon-token`) |
+| GET | `/api/notifications/queue` | Inspect durable pending/failed notification queue |
+
 ### Pi migration + settings endpoints
 
 | Method | Path | Purpose |

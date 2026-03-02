@@ -4,6 +4,8 @@
 
 Task Factory provides a comprehensive command-line interface for managing workspaces, tasks, and configurations. The CLI is available as the `task-factory` command after installation.
 
+Workspace IDs in CLI commands support either the full UUID or a unique prefix. `task-factory workspace list` prints full workspace IDs, and stale workspace registry entries are auto-pruned from listing/discovery.
+
 ## Installation
 
 ```bash
@@ -18,6 +20,22 @@ npm install -g task-factory
 | `--help` | Show help for command |
 
 ## Command Categories
+
+## Agent-Friendly CLI Flags
+
+For non-interactive and automation usage:
+
+- Destructive commands support `-y, --yes` (or `--force`) to skip confirmation prompts:
+  - `task-factory workspace delete <id> --yes`
+  - `task-factory task delete <task-id> --yes`
+- Core read commands support machine output via `--json` or `--output json`:
+  - `task-factory workspace list --json`
+  - `task-factory workspace show <id> --json`
+  - `task-factory task list --json`
+  - `task-factory task show <task-id> --json`
+  - `task-factory stats --json`
+
+Without these flags, human-readable output and interactive confirmations are preserved.
 
 ---
 
@@ -34,9 +52,10 @@ task-factory task list --workspace <id> [--scope <scope>] [--all]
 ```
 
 **Options:**
-- `-w, --workspace <id>` - Workspace ID (required unless --all)
-- `-s, --scope <scope>` - Scope: `active`, `archived`, `all` (default: `active`)
-- `-a, --all` - List tasks from all workspaces
+- `-w, --workspace <id>` - Workspace ID filter
+- `-p, --phase <phase>` - Scope: `active`, `archived`, `all` (default: `active`)
+- `--json` - Output machine-readable JSON
+- `--output json` - Explicit output format selector
 
 **Examples:**
 ```bash
@@ -55,7 +74,7 @@ task-factory task list --workspace ws-abc123 --scope archived
 Show detailed information about a task.
 
 ```bash
-task-factory task show <task-id>
+task-factory task show <task-id> [--json | --output json]
 ```
 
 **Examples:**
@@ -566,8 +585,12 @@ Show task statistics across all workspaces.
 Display aggregated task statistics.
 
 ```bash
-task-factory stats
+task-factory stats [--json | --output json]
 ```
+
+**Options:**
+- `--json` - Output machine-readable JSON
+- `--output json` - Explicit output format selector (same as `--json`)
 
 **Output includes:**
 - Total task count across all workspaces

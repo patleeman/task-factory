@@ -96,6 +96,12 @@ task-factory settings schema
 | `workflowDefaults.readyToExecuting` | boolean | Auto-promote ready → executing |
 | `planningGuardrails.timeoutMs` | number | Planning session timeout |
 | `planningGuardrails.maxToolCalls` | number | Max tool calls per planning session |
+| `notifications.enabled` | boolean | Enable daemon→gateway notification pipeline |
+| `notifications.sharedSecret` | string | Optional daemon intake token (`x-task-factory-daemon-token`) |
+| `notifications.allowlistedTargets` | string[] | Allowed targets in `provider:destination` format |
+| `notifications.routes[]` | object[] | Global routing rules (workspace/task filters + target) |
+| `notifications.maxRetries` | number | Max delivery retries before terminal failure |
+| `notifications.retryBackoffMs` | number | Base retry backoff in milliseconds |
 
 **View current settings:**
 ```bash
