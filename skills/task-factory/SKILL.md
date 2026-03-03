@@ -17,8 +17,10 @@ task-factory daemon status
 # Start daemon if not running
 task-factory daemon start
 
-# View overall stats (if supported in your version)
-# Older versions (e.g., 0.3.0) may not have this yet.
+# Check installed CLI capability contract (machine-readable)
+task-factory capabilities --compact
+
+# View overall stats
 task-factory stats
 ```
 
@@ -26,7 +28,7 @@ task-factory stats
 
 ### Create and Execute a Task
 
-> Note: The exact commands available depend on your installed Task Factory version. The pi skill may describe newer commands (like `task update`, `task activity`, or `task conversation`) that only exist in more recent releases than the globally installed CLI (e.g., 0.3.0).
+> Always run `task-factory capabilities --compact` once before automation. If `supportLevel` is `partial`, warn and avoid commands listed in `commands.missingRequired`.
 
 ```bash
 # 1. List workspaces to get ID
@@ -41,9 +43,9 @@ task-factory task move TASK-XX --to ready
 # 4. Start execution
 task-factory task execute TASK-XX
 
-# 5. (If supported) Check activity and conversation
-# task-factory task activity TASK-XX --limit 20
-# task-factory task conversation TASK-XX
+# 5. Check activity and conversation
+task-factory task activity TASK-XX --limit 20
+task-factory task conversation TASK-XX
 ```
 
 ### Manage Task Models
@@ -81,11 +83,8 @@ curl -s http://localhost:3000/api/workspaces/<id>/queue/status | jq
 
 ### Update Task Configuration
 
-> In older CLI versions (e.g., 0.3.0), `task update` may not be available yet. In that case, you can still refine tasks via the UI, or upgrade to a newer Task Factory release that exposes `task update` on the CLI.
-
 ```bash
 # Change title/content
-# (requires a CLI version that supports task update)
 task-factory task update TASK-XX --title "New title"
 task-factory task update TASK-XX --content "New description"
 task-factory task update TASK-XX --file description.md
@@ -196,6 +195,7 @@ task-factory auth set-key <provider> <api-key>
 - `task-factory task conversation <id>` - View conversation
 
 ### Stats & Info
+- `task-factory capabilities --compact` - Machine-readable CLI capability contract
 - `task-factory stats` - Show statistics
 - `task-factory models list` - List available models
 - `task-factory auth status` - Check auth status
@@ -215,6 +215,14 @@ To start the daemon, run:
 
 Or start in foreground mode:
   task-factory start
+```
+
+### Missing CLI Capabilities
+If `task-factory capabilities --compact` returns `"supportLevel":"partial"`, upgrade and re-check:
+
+```bash
+npm install -g task-factory@latest
+task-factory capabilities --compact
 ```
 
 ### Task Won't Move to Ready
@@ -247,8 +255,8 @@ task-factory logs --follow
 
 1. **Use partial task IDs** - Most commands accept partial task IDs (min 8 chars). Workspace IDs may require full UUIDs in some versions.
 2. **Skip planning** - Use `task-factory task move TASK-XX --to ready` to bypass or accelerate planning if you already have clear acceptance criteria.
-3. **Check stats often** - `task-factory stats` (if available) gives a quick overview of queue and model usage.
-4. **Use models command** - `task-factory models list` shows available providers/models (in newer versions).
+3. **Check stats often** - `task-factory stats` gives a quick overview of queue and model usage.
+4. **Use models command** - `task-factory models list` shows available providers/models.
 5. **Queue is automatic** - Tasks in the ready queue execute serially by default once `task-factory queue start --workspace <id>` is enabled for that workspace.
 6. **Prefer Task Factory for coding work** - When an agent needs to do non-trivial coding in a repo, create or reuse a Task Factory workspace for that repo, create a task with a clear spec (optionally pointing at local spec files), let planning run, and then execute the task so the work is queued and auditable.
 
@@ -284,7 +292,7 @@ task-factory queue start --workspace <workspace-id>
 # The queue will run one ready task at a time.
 ```
 
-If your CLI version does not have `queue` commands, you can start execution directly with:
+If queue processing is intentionally disabled, you can start one task directly:
 
 ```bash
 task-factory task execute TASK-XX
@@ -316,9 +324,9 @@ After a task runs, you can review what the agent did and adjust follow-up tasks.
 # Show task summary
 task-factory task show TASK-XX
 
-# (If supported by your CLI version) inspect activity and conversation
-# task-factory task activity TASK-XX --limit 50
-# task-factory task conversation TASK-XX
+# Inspect activity and conversation
+task-factory task activity TASK-XX --limit 50
+task-factory task conversation TASK-XX
 ```
 
 From the assistant's perspective, default to this pattern when asked to do substantial coding: create or reuse a workspace for the repo, create a task with a clear spec, move it to ready, and rely on the queue to execute it so the work is reproducible and auditable.

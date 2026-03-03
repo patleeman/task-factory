@@ -92,6 +92,28 @@ PORT=8080 HOST=127.0.0.1 task-factory
 HOST=0.0.0.0 task-factory  # Expose on your network (explicit opt-in)
 ```
 
+### CLI automation flags (agent/non-interactive use)
+
+```bash
+# Read CLI capabilities/version as stable JSON
+task-factory capabilities --compact
+
+# Skip interactive confirmation on destructive commands
+task-factory workspace delete <id> --yes     # or --force
+task-factory task delete <task-id> --yes     # or --force
+
+# Emit machine-readable JSON instead of table/text output
+task-factory workspace list --json           # or --output json
+task-factory workspace show <id> --json
+task-factory task list --json
+task-factory task show <task-id> --json
+task-factory stats --json
+
+# Create/update tasks from spec files and agent-facing fields
+task-factory task create --workspace <id> --title "Implement feature" --file ./spec.md
+task-factory task update <task-id> --file ./spec.md --acceptance-criteria "A,B" --plan-goal "Ship" --plan-steps "Step 1,Step 2"
+```
+
 ## Quality checks
 
 ```bash
@@ -104,6 +126,7 @@ npm run check:release
 - [Documentation index](docs/README.md)
 - [Getting Started](docs/getting-started.md)
 - [CLI Reference](docs/cli-reference.md)
+- [CLI Migration Guide](docs/cli-migration.md)
 - [Workflow and Queue](docs/workflow-and-queue.md)
 - [System Architecture](docs/system-architecture.md)
 - [Runtime Flows](docs/runtime-flows.md)

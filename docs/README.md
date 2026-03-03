@@ -25,6 +25,7 @@ All subject docs live as flat markdown files directly under `docs/`.
 |---|---|---|
 | getting-started | [getting-started.md](./getting-started.md) | Local setup, first run, and repository map |
 | cli-reference | [cli-reference.md](./cli-reference.md) | CLI usage, runtime flags, and environment variables |
+| cli-migration | [cli-migration.md](./cli-migration.md) | Upgrade, verification, capability checks, and rollback between CLI versions |
 | workflow-and-queue | [workflow-and-queue.md](./workflow-and-queue.md) | Pipeline phases, planning/execution behavior, and queue controls |
 | system-architecture | [system-architecture.md](./system-architecture.md) | Runtime boundaries and ownership |
 | runtime-flows | [runtime-flows.md](./runtime-flows.md) | End-to-end planning/execution/queue flow details |

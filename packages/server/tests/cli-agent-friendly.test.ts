@@ -5,6 +5,7 @@ import {
   shouldSkipConfirmation,
   toWorkspaceJson,
   toTaskJson,
+  buildCapabilityContract,
 } from '../../../bin/task-factory.js';
 
 describe('agent-friendly CLI option helpers', () => {
@@ -12,6 +13,7 @@ describe('agent-friendly CLI option helpers', () => {
     expect(isJsonOutput({ json: true })).toBe(true);
     expect(isJsonOutput({ output: 'json' })).toBe(true);
     expect(isJsonOutput({ output: 'JSON' })).toBe(true);
+    expect(isJsonOutput({ output: ' json ' })).toBe(true);
   });
 
   it('keeps default human output mode when no JSON flags are set', () => {
@@ -72,5 +74,44 @@ describe('agent-friendly JSON payload shapes', () => {
       acceptanceCriteria: ['A', 'B'],
       content: 'hello world',
     });
+  });
+});
+
+describe('CLI capability contract', () => {
+  it('returns full support contract when required commands are present', () => {
+    const contract = buildCapabilityContract({
+      version: '0.5.3',
+      availableCommands: [
+        'task update',
+        'task activity',
+        'task conversation',
+        'stats',
+        'models list',
+        'settings',
+      ],
+    });
+
+    expect(contract.schemaVersion).toBe('1.0');
+    expect(contract.cli.version).toBe('0.5.3');
+    expect(contract.supportLevel).toBe('full');
+    expect(contract.commands.missingRequired).toEqual([]);
+    expect(contract.requiredForAgents['task update']).toBe(true);
+  });
+
+  it('returns partial support contract when required commands are missing', () => {
+    const contract = buildCapabilityContract({
+      version: '0.3.0',
+      availableCommands: [
+        'task list',
+        'task show',
+        'workspace list',
+      ],
+    });
+
+    expect(contract.supportLevel).toBe('partial');
+    expect(contract.requiredForAgents['task update']).toBe(false);
+    expect(contract.requiredForAgents.stats).toBe(false);
+    expect(contract.commands.missingRequired).toContain('task update');
+    expect(contract.commands.missingRequired).toContain('stats');
   });
 });

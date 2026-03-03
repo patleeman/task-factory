@@ -4,7 +4,7 @@
 // =============================================================================
 
 import { spawn, exec } from 'child_process';
-import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync, openSync, closeSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync, openSync, closeSync, realpathSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join, resolve } from 'path';
 import { homedir, platform } from 'os';
@@ -347,6 +347,9 @@ function printCliError(message, options = {}, details = {}, exitCode = EXIT_CODE
     });
   } else {
     console.error(chalk.red(`Error: ${message}`));
+    if (typeof details.guidance === 'string' && details.guidance.trim().length > 0) {
+      console.error(chalk.yellow(`Guidance: ${details.guidance}`));
+    }
   }
   process.exit(exitCode);
 }
@@ -3209,7 +3212,16 @@ process.on('unhandledRejection', (reason, promise) => {
   process.exit(1);
 });
 
-const isMainModule = process.argv[1] && resolve(process.argv[1]) === __filename;
+function resolveEntryPath(entryPath) {
+  if (!entryPath) return null;
+  try {
+    return resolve(realpathSync(entryPath));
+  } catch {
+    return resolve(entryPath);
+  }
+}
+
+const isMainModule = resolveEntryPath(process.argv[1]) === resolve(__filename);
 
 if (isMainModule) {
   // Parse and run

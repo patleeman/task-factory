@@ -22,7 +22,9 @@
     "start": "npm run start -w @task-factory/server",
     "lint": "npm run lint --workspaces",
     "typecheck": "npm run typecheck --workspaces",
-    "test": "npm run test --workspaces --if-present"
+    "test": "npm run test --workspaces --if-present",
+    "check:cli-drift": "node scripts/check-cli-surface-drift.mjs",
+    "check:release": "npm run lint && npm run typecheck && npm run test && npm run check:cli-drift"
   },
   "dependencies": {
     "@clack/prompts": "^0.10.0",

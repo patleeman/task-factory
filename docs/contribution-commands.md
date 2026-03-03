@@ -46,6 +46,7 @@ npm run build
 | Workflow | Command |
 |---|---|
 | Dead-code checks | `npm run check:deadcode` |
+| CLI/doc/skill drift gate | `npm run check:cli-drift` |
 | Full release gate | `npm run check:release` |
 
 ## Examples
