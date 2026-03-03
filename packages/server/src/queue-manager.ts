@@ -110,6 +110,7 @@ class QueueManager {
   private lifecycleGeneration = 0;
   private executionBreakers = new Map<BreakerKey, ExecutionBreakerTracker>();
   private lastBlockedNoticeRetryAtByKey = new Map<BreakerKey, number>();
+  private lastPlanningBlockedNoticeAtByTask = new Map<string, number>();
 
   constructor(workspaceId: string, broadcastFn: (event: ServerEvent) => void) {
     this.workspaceId = workspaceId;
@@ -481,6 +482,25 @@ class QueueManager {
     );
   }
 
+  private maybeEmitPlanningBlockedNotice(task: Task): void {
+    const now = Date.now();
+    const lastNotice = this.lastPlanningBlockedNoticeAtByTask.get(task.id) ?? 0;
+    if (now - lastNotice < 60_000) {
+      return;
+    }
+
+    this.lastPlanningBlockedNoticeAtByTask.set(task.id, now);
+    void this.emitSystemEvent(
+      task.id,
+      'Execution blocked: planning is still running for this task. Wait for planning completion or stop/reset planning before queue dispatch.',
+      {
+        taskId: task.id,
+        action: 'planning_blocked',
+        planningStatus: task.frontmatter.planningStatus,
+      },
+    );
+  }
+
   clearExecutionBreakersForManualResume(): number {
     this.clearExpiredExecutionBreakers({ emitEvents: false });
 
@@ -641,7 +661,6 @@ class QueueManager {
       // at the right edge (highest order).
       const readyTasks = tasks
         .filter(t => t.frontmatter.phase === 'ready')
-        .filter(t => !(t.frontmatter.planningStatus === 'running' && !t.frontmatter.plan))
         .sort((a, b) => {
           const orderDiff = (a.frontmatter.order ?? 0) - (b.frontmatter.order ?? 0);
           if (orderDiff !== 0) return orderDiff;
@@ -662,6 +681,12 @@ class QueueManager {
       let nextTask: Task | null = null;
       for (let index = readyTasks.length - 1; index >= 0; index -= 1) {
         const candidate = readyTasks[index];
+
+        if (candidate.frontmatter.planningStatus === 'running' && !candidate.frontmatter.plan) {
+          this.maybeEmitPlanningBlockedNotice(candidate);
+          continue;
+        }
+
         const blocked = this.isExecutionBlocked(candidate);
         if (blocked) {
           this.maybeEmitBlockedExecutionNotice(candidate, blocked);

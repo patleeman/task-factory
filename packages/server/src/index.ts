@@ -1980,6 +1980,14 @@ app.post('/api/workspaces/:workspaceId/tasks/:taskId/execute', async (req, res) 
   if (isPlanningRunning) {
     res.status(409).json({
       error: 'Task planning is still running. Wait for planning to finish before executing this task.',
+      code: 'PLANNING_BLOCKED',
+      details: {
+        taskId: task.id,
+        workspaceId: workspace.id,
+        planningStatus: task.frontmatter.planningStatus,
+        hasPlan: !!task.frontmatter.plan,
+      },
+      guidance: 'Use planning status/stop/reset to inspect or unblock planning before retrying execution.',
     });
     return;
   }
